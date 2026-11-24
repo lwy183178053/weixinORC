@@ -3,15 +3,14 @@
     x:Class="Client.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:Client"
-    RequestedTheme="Light">
+    xmlns:local="using:Client">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
 
-            <!-- Brand & Surface Palette -->
+            <!-- Brand & Semantic Dynamic Palette (Mutated live by AppSettingsService for instant Light/Dark switch) -->
             <Color x:Key="BrandPrimaryColor">#7C5CFC</Color>
             <Color x:Key="BrandPrimaryHoverColor">#6946F5</Color>
             <Color x:Key="BrandPrimaryPressedColor">#5835E0</Color>
@@ -23,18 +22,50 @@
             <SolidColorBrush x:Key="BrandPrimaryDisabledBrush" Color="#C4B5FD" />
             <SolidColorBrush x:Key="BrandSoftBgBrush" Color="#F1EEFF" />
             <SolidColorBrush x:Key="BrandSoftBorderBrush" Color="#DDD5FF" />
+            <SolidColorBrush x:Key="BrandCardTintBrush" Color="#F8F7FF" />
+            <SolidColorBrush x:Key="BrandHighlightTextBrush" Color="#5B3CE6" />
 
             <SolidColorBrush x:Key="AppChromeBgBrush" Color="#F4F5F9" />
             <SolidColorBrush x:Key="AppRailBgBrush" Color="#F2F3F8" />
             <SolidColorBrush x:Key="AppSurfaceBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="AppSurfaceAltBrush" Color="#FAFAFC" />
             <SolidColorBrush x:Key="AppCanvasBgBrush" Color="#F8F9FC" />
+            <SolidColorBrush x:Key="AppChatCanvasBgBrush" Color="#F5F6F9" />
+            <SolidColorBrush x:Key="AppFooterBgBrush" Color="#F7F8FC" />
             <SolidColorBrush x:Key="AppInputBgBrush" Color="#F5F6FA" />
             <SolidColorBrush x:Key="AppBorderBrush" Color="#E6E8F0" />
             <SolidColorBrush x:Key="AppBorderSubtleBrush" Color="#EEF0F6" />
+            <SolidColorBrush x:Key="AppSplitterGripBrush" Color="#CBD0DC" />
+            <SolidColorBrush x:Key="LoginBgBrush" Color="#F2F3FB" />
+
+            <SolidColorBrush x:Key="ButtonBgBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#D8DCE6" />
+            <SolidColorBrush x:Key="ButtonHoverBgBrush" Color="#F2F4F8" />
+            <SolidColorBrush x:Key="ButtonHoverBorderBrush" Color="#BFC5D4" />
+            <SolidColorBrush x:Key="ButtonPressedBgBrush" Color="#E7EAF2" />
+            <SolidColorBrush x:Key="ButtonPressedBorderBrush" Color="#A9B1C4" />
+            <SolidColorBrush x:Key="ButtonDisabledBgBrush" Color="#F7F8FA" />
+            <SolidColorBrush x:Key="ButtonDisabledBorderBrush" Color="#E8EBF2" />
+
+            <SolidColorBrush x:Key="CloseHoverBgBrush" Color="#F0F2F7" />
+            <SolidColorBrush x:Key="ClosePressedBgBrush" Color="#E4E7F0" />
+            <SolidColorBrush x:Key="RailHoverBgBrush" Color="#E7E5F8" />
+            <SolidColorBrush x:Key="RailPressedBgBrush" Color="#DDD8FA" />
+
+            <SolidColorBrush x:Key="RadioBorderBrush" Color="#DFE3EE" />
+            <SolidColorBrush x:Key="RadioHoverBorderBrush" Color="#C4CADB" />
+            <SolidColorBrush x:Key="RadioPressedBorderBrush" Color="#A9B2C8" />
+            <SolidColorBrush x:Key="RadioRingStrokeBrush" Color="#B8C0D0" />
+            <SolidColorBrush x:Key="RadioHoverOverlayBrush" Color="#1F2329" />
 
             <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1F2329" />
             <SolidColorBrush x:Key="TextSecondaryBrush" Color="#646A73" />
             <SolidColorBrush x:Key="TextMutedBrush" Color="#8F959E" />
+
+            <SolidColorBrush x:Key="ChatIncomingBgBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="ChatIncomingBorderBrush" Color="#E5E7EB" />
+            <SolidColorBrush x:Key="ChatOutgoingBgBrush" Color="#95EC69" />
+            <SolidColorBrush x:Key="ChatOutgoingTextBrush" Color="#1F2329" />
 
             <SolidColorBrush x:Key="SuccessBgBrush" Color="#E9F9F0" />
             <SolidColorBrush x:Key="SuccessTextBrush" Color="#17A34A" />
@@ -46,6 +77,7 @@
             <SolidColorBrush x:Key="DangerBorderBrush" Color="#FECACA" />
             <SolidColorBrush x:Key="DangerTextBrush" Color="#DC2626" />
             <SolidColorBrush x:Key="InfoBgBrush" Color="#EAF3FF" />
+            <SolidColorBrush x:Key="InfoBorderBrush" Color="#BFDBFE" />
             <SolidColorBrush x:Key="InfoTextBrush" Color="#2563EB" />
 
             <!-- Override default accent so standard controls harmonize -->
@@ -64,8 +96,8 @@
                 <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="CornerRadius" Value="8" />
-                <Setter Property="Width" Value="32" />
-                <Setter Property="Height" Value="32" />
+                <Setter Property="Width" Value="30" />
+                <Setter Property="Height" Value="30" />
                 <Setter Property="Padding" Value="0" />
                 <Setter Property="HorizontalContentAlignment" Value="Center" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -81,13 +113,13 @@
                                         <VisualState x:Name="Normal" />
                                         <VisualState x:Name="PointerOver">
                                             <VisualState.Setters>
-                                                <Setter Target="RootBorder.Background" Value="#F0F2F7" />
+                                                <Setter Target="RootBorder.Background" Value="{StaticResource CloseHoverBgBrush}" />
                                                 <Setter Target="ContentPresenter.Foreground" Value="{StaticResource TextPrimaryBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Pressed">
                                             <VisualState.Setters>
-                                                <Setter Target="RootBorder.Background" Value="#E4E7F0" />
+                                                <Setter Target="RootBorder.Background" Value="{StaticResource ClosePressedBgBrush}" />
                                                 <Setter Target="ContentPresenter.Foreground" Value="{StaticResource TextPrimaryBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
@@ -105,7 +137,7 @@
                 </Setter>
             </Style>
 
-            <!-- Primary Violet CTA Button (Explicit VisualStates to prevent white-on-grey hover washout) -->
+            <!-- Primary Violet CTA Button -->
             <Style x:Key="PrimaryVioletButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="{StaticResource BrandPrimaryBrush}" />
                 <Setter Property="Foreground" Value="#FFFFFF" />
@@ -160,11 +192,11 @@
                 </Setter>
             </Style>
 
-            <!-- Secondary Outline Button (Crisp subtle hover tint, never vanishes) -->
+            <!-- Secondary Outline Button (Adapts cleanly to Light & Dark) -->
             <Style x:Key="SecondaryOutlineButtonStyle" TargetType="Button">
-                <Setter Property="Background" Value="#FFFFFF" />
+                <Setter Property="Background" Value="{StaticResource ButtonBgBrush}" />
                 <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
-                <Setter Property="BorderBrush" Value="#D8DCE6" />
+                <Setter Property="BorderBrush" Value="{StaticResource ButtonBorderBrush}" />
                 <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="CornerRadius" Value="7" />
                 <Setter Property="Padding" Value="12,6" />
@@ -185,20 +217,20 @@
                                         <VisualState x:Name="Normal" />
                                         <VisualState x:Name="PointerOver">
                                             <VisualState.Setters>
-                                                <Setter Target="RootBorder.Background" Value="#F2F4F8" />
-                                                <Setter Target="RootBorder.BorderBrush" Value="#BFC5D4" />
+                                                <Setter Target="RootBorder.Background" Value="{StaticResource ButtonHoverBgBrush}" />
+                                                <Setter Target="RootBorder.BorderBrush" Value="{StaticResource ButtonHoverBorderBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Pressed">
                                             <VisualState.Setters>
-                                                <Setter Target="RootBorder.Background" Value="#E7EAF2" />
-                                                <Setter Target="RootBorder.BorderBrush" Value="#A9B1C4" />
+                                                <Setter Target="RootBorder.Background" Value="{StaticResource ButtonPressedBgBrush}" />
+                                                <Setter Target="RootBorder.BorderBrush" Value="{StaticResource ButtonPressedBorderBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Disabled">
                                             <VisualState.Setters>
-                                                <Setter Target="RootBorder.Background" Value="#F7F8FA" />
-                                                <Setter Target="RootBorder.BorderBrush" Value="#E8EBF2" />
+                                                <Setter Target="RootBorder.Background" Value="{StaticResource ButtonDisabledBgBrush}" />
+                                                <Setter Target="RootBorder.BorderBrush" Value="{StaticResource ButtonDisabledBorderBrush}" />
                                                 <Setter Target="ContentPresenter.Opacity" Value="0.45" />
                                             </VisualState.Setters>
                                         </VisualState>
@@ -243,13 +275,13 @@
                                         <VisualState x:Name="PointerOver">
                                             <VisualState.Setters>
                                                 <Setter Target="RootBorder.Background" Value="{StaticResource DangerHoverBgBrush}" />
-                                                <Setter Target="RootBorder.BorderBrush" Value="#FCA5A5" />
+                                                <Setter Target="RootBorder.BorderBrush" Value="{StaticResource DangerTextBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Pressed">
                                             <VisualState.Setters>
                                                 <Setter Target="RootBorder.Background" Value="{StaticResource DangerPressedBgBrush}" />
-                                                <Setter Target="RootBorder.BorderBrush" Value="#F87171" />
+                                                <Setter Target="RootBorder.BorderBrush" Value="{StaticResource DangerTextBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Disabled">
@@ -272,13 +304,13 @@
                 </Setter>
             </Style>
 
-            <!-- Rail Icon Button (Subtle lavender hover, never hides active highlight) -->
+            <!-- Compact Rail Icon Button (Slim 46x46 for Refined Narrow Sidebar) -->
             <Style x:Key="RailButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="CornerRadius" Value="8" />
-                <Setter Property="Width" Value="54" />
-                <Setter Property="Height" Value="54" />
+                <Setter Property="Width" Value="46" />
+                <Setter Property="Height" Value="46" />
                 <Setter Property="Padding" Value="2" />
                 <Setter Property="HorizontalContentAlignment" Value="Center" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -295,12 +327,12 @@
                                         <VisualState x:Name="Normal" />
                                         <VisualState x:Name="PointerOver">
                                             <VisualState.Setters>
-                                                <Setter Target="RootBorder.Background" Value="#E7E5F8" />
+                                                <Setter Target="RootBorder.Background" Value="{StaticResource RailHoverBgBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Pressed">
                                             <VisualState.Setters>
-                                                <Setter Target="RootBorder.Background" Value="#DDD8FA" />
+                                                <Setter Target="RootBorder.Background" Value="{StaticResource RailPressedBgBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                     </VisualStateGroup>
@@ -333,6 +365,131 @@
                 <Setter Property="CornerRadius" Value="7" />
                 <Setter Property="Padding" Value="10,7" />
                 <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+            </Style>
+
+            <!-- Modern Pill RadioButton (Global Default: Crisp Centered Ring + Light/Dark Adaptive) -->
+            <Style TargetType="RadioButton">
+                <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}" />
+                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource RadioBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="7" />
+                <Setter Property="Padding" Value="9,4" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="28" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="RadioButton">
+                            <Grid x:Name="RootGrid" MinHeight="{TemplateBinding MinHeight}" Background="Transparent">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="HoverOverlay.Opacity" Value="0.06" />
+                                                <Setter Target="UncheckedBorder.BorderBrush" Value="{StaticResource RadioHoverBorderBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="HoverOverlay.Opacity" Value="0.11" />
+                                                <Setter Target="UncheckedBorder.BorderBrush" Value="{StaticResource RadioPressedBorderBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <VisualState.Setters>
+                                                <Setter Target="RootGrid.Opacity" Value="0.45" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                    <VisualStateGroup x:Name="CheckStates">
+                                        <VisualState x:Name="Unchecked" />
+                                        <VisualState x:Name="Checked">
+                                            <VisualState.Setters>
+                                                <Setter Target="CheckedBorder.Opacity" Value="1" />
+                                                <Setter Target="CheckedCircle.Opacity" Value="1" />
+                                                <Setter Target="InnerDot.Opacity" Value="1" />
+                                                <Setter Target="ContentPresenter.Foreground" Value="{StaticResource BrandHighlightTextBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Indeterminate" />
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+
+                                <!-- Unchecked Base Pill -->
+                                <Border
+                                    x:Name="UncheckedBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}" />
+
+                                <!-- Checked Brand Soft Pill -->
+                                <Border
+                                    x:Name="CheckedBorder"
+                                    Background="{StaticResource BrandSoftBgBrush}"
+                                    BorderBrush="{StaticResource BrandPrimaryBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0" />
+
+                                <!-- PointerOver / Pressed Subtle Overlay -->
+                                <Border
+                                    x:Name="HoverOverlay"
+                                    Background="{StaticResource RadioHoverOverlayBrush}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    IsHitTestVisible="False"
+                                    Opacity="0" />
+
+                                <!-- Perfectly Vertically Centered Indicator + Text -->
+                                <Grid Padding="{TemplateBinding Padding}" ColumnSpacing="7">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Grid Grid.Column="0" Width="15" Height="15" VerticalAlignment="Center">
+                                        <Ellipse
+                                            x:Name="OuterCircle"
+                                            Width="15"
+                                            Height="15"
+                                            Fill="{StaticResource AppSurfaceBrush}"
+                                            Stroke="{StaticResource RadioRingStrokeBrush}"
+                                            StrokeThickness="1.5" />
+                                        <Ellipse
+                                            x:Name="CheckedCircle"
+                                            Width="15"
+                                            Height="15"
+                                            Fill="{StaticResource BrandPrimaryBrush}"
+                                            Opacity="0" />
+                                        <Ellipse
+                                            x:Name="InnerDot"
+                                            Width="5.5"
+                                            Height="5.5"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Fill="#FFFFFF"
+                                            Opacity="0" />
+                                    </Grid>
+
+                                    <ContentPresenter
+                                        x:Name="ContentPresenter"
+                                        Grid.Column="1"
+                                        HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                        VerticalAlignment="Center"
+                                        Content="{TemplateBinding Content}"
+                                        ContentTemplate="{TemplateBinding ContentTemplate}"
+                                        Foreground="{TemplateBinding Foreground}" />
+                                </Grid>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
         </ResourceDictionary>
     </Application.Resources>

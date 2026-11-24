@@ -25,11 +25,33 @@ namespace Client.Services
             "添加备注名", "点击添加备注", "设置备注和标签", "添加备注", "设置备注"
         };
 
+        private static readonly HashSet<string> PlaceholderDescriptions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "添加更多备注信息", "添加描述", "点击添加描述"
+        };
+
         private static readonly HashSet<string> KnownSectionLabels = new(StringComparer.OrdinalIgnoreCase)
         {
             "朋友资料", "更多信息", "朋友圈", "朋友权限", "发消息", "语音聊天", "视频聊天",
-            "备注", "备注名", "标签", "电话", "手机号", "个性签名", "来源", "添加时间", "地区", "微信号", "昵称", "共同群聊"
+            "备注", "备注名", "标签", "电话", "手机号", "描述", "个性签名", "来源", "添加时间",
+            "地区", "微信号", "昵称", "共同群聊", "企业", "公司", "部门", "职位", "邮箱", "地址",
+            "实名", "视频号", "设置备注和标签"
         };
+
+        private enum ActiveField
+        {
+            None,
+            HeaderNickname,
+            HeaderAccount,
+            HeaderRegion,
+            TableRemark,
+            TableTags,
+            TablePhone,
+            TableDescription,
+            TableSignature,
+            TableSource,
+            TableAddedDate
+        }
 
         public static WeChatOcrAnalysis Analyze(WeChatWindowInfo? window, OcrRecognitionResult ocr)
         {
@@ -47,6 +69,7 @@ namespace Client.Services
                 CandidateTags = profile.Tags,
                 CandidateRegion = profile.Region,
                 CandidatePhone = profile.Phone,
+                CandidateDescription = profile.Description,
                 CandidateSignature = profile.Signature,
                 CandidateSource = profile.Source,
                 CandidateAddedDate = profile.AddedDate
@@ -119,11 +142,34 @@ namespace Client.Services
             foreach (var line in lines.OrderBy(l => l.Bounds.Y))
             {
                 double cy = line.Bounds.Y + line.Bounds.Height / 2.0;
+                double lineL = line.Bounds.X;
+                double lineR = line.Bounds.X + line.Bounds.Width;
+
                 var row = rows.FirstOrDefault(r =>
                 {
                     double rcy = r.Average(x => x.Bounds.Y + x.Bounds.Height / 2.0);
                     double rh = r.Average(x => x.Bounds.Height);
-                    return Math.Abs(cy - rcy) <= Math.Max(14.0, rh * 0.7);
+                    // Strict vertical alignment: same-row columns align within ~45% of text height (<= 12px);
+                    // wrapped lines in the same column sit ~85-100% of text height apart and overlap horizontally!
+                    if (Math.Abs(cy - rcy) > Math.Min(12.0, Math.Max(6.0, rh * 0.45)))
+                    {
+                        return false;
+                    }
+
+                    // Never merge two boxes that overlap horizontally (those are vertically stacked wrapped lines!)
+                    foreach (var existing in r)
+                    {
+                        double exL = existing.Bounds.X;
+                        double exR = existing.Bounds.X + existing.Bounds.Width;
+                        double overlap = Math.Min(lineR, exR) - Math.Max(lineL, exL);
+                        double minW = Math.Min(line.Bounds.Width, existing.Bounds.Width);
+                        if (minW > 0 && overlap > minW * 0.25)
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
                 });
 
                 if (row is not null)
@@ -142,7 +188,7 @@ namespace Client.Services
                 .ToList();
         }
 
-        private static (string Remark, string Name, string Account, string Tags, string Region, string Phone, string Signature, string Source, string AddedDate)
+        private static (string Remark, string Name, string Account, string Tags, string Region, string Phone, string Description, string Signature, string Source, string AddedDate)
             ExtractProfileFromRows(List<List<OcrLineResult>> rows)
         {
             string remarkFromTable = string.Empty;
@@ -151,16 +197,32 @@ namespace Client.Services
             string tags = string.Empty;
             string region = string.Empty;
             string phone = string.Empty;
+            string description = string.Empty;
             string signature = string.Empty;
             string source = string.Empty;
             string addedDate = string.Empty;
 
-            int nicknameRowIndex = -1;
             int accountRowIndex = -1;
-            double remarkValueX = -1;
-            int remarkRowIndex = -1;
-            double signatureValueX = -1;
-            int signatureRowIndex = -1;
+            int regionRowIndex = -1;
+
+            // Unified multi-line continuation state machine: supports wrapping on EVERY field
+            // (昵称 / 微信号 / 地区 / 备注 / 标签 / 电话 / 描述 / 个性签名 / 来源 / 添加时间)
+            ActiveField activeField = ActiveField.None;
+            bool activeIsHeaderInline = false;
+            double activeAnchorX = -1;
+            double activeValueX = -1;
+            double activePrevBottom = -1;
+            double activePrevHeight = 20;
+
+            void SetActive(ActiveField field, bool isHeaderInline, double anchorX, double valueX, double prevBottom, double prevHeight)
+            {
+                activeField = field;
+                activeIsHeaderInline = isHeaderInline;
+                activeAnchorX = anchorX;
+                activeValueX = valueX;
+                activePrevBottom = prevBottom;
+                activePrevHeight = prevHeight;
+            }
 
             for (int i = 0; i < rows.Count; i++)
             {
@@ -171,7 +233,12 @@ namespace Client.Services
                     continue;
                 }
 
-                // Inline key:value matching (e.g. "微信号: x15288732909", "昵称: 果奶", "地区: 山东 聊城")
+                double rowTop = row.Min(x => x.Bounds.Y);
+                double rowBottom = row.Max(x => x.Bounds.Y + x.Bounds.Height);
+                double rowHeight = Math.Max(12.0, row.Average(x => x.Bounds.Height));
+                double rowFirstX = row[0].Bounds.X;
+
+                // 1. Inline header key:value fields (e.g. "微信号: xxx", "昵称: xxx", "地区: xxx")
                 if (string.IsNullOrEmpty(account))
                 {
                     var m = WechatIdRegex().Match(fullRow);
@@ -179,6 +246,7 @@ namespace Client.Services
                     {
                         account = m.Groups[1].Value.Trim();
                         accountRowIndex = i;
+                        SetActive(ActiveField.HeaderAccount, true, rowFirstX, row.Count > 1 ? row[1].Bounds.X : -1, rowBottom, rowHeight);
                         continue;
                     }
                 }
@@ -189,6 +257,8 @@ namespace Client.Services
                     if (m.Success)
                     {
                         region = m.Groups[1].Value.Trim();
+                        regionRowIndex = i;
+                        SetActive(ActiveField.HeaderRegion, true, rowFirstX, row.Count > 1 ? row[1].Bounds.X : -1, rowBottom, rowHeight);
                         continue;
                     }
                 }
@@ -199,25 +269,25 @@ namespace Client.Services
                     if (m.Success)
                     {
                         explicitNickname = m.Groups[1].Value.Trim();
-                        nicknameRowIndex = i;
+                        SetActive(ActiveField.HeaderNickname, true, rowFirstX, row.Count > 1 ? row[1].Bounds.X : -1, rowBottom, rowHeight);
                         continue;
                     }
                 }
 
-                // Two-column WeChat 4.x profile table matching (Left label | Right value)
+                // 2. Two-column WeChat 4.x profile table fields (Left label | Right value)
                 string label = row[0].Text.Trim().TrimEnd(':', '：');
                 string rightValue = row.Count > 1
                     ? string.Join(" ", row.Skip(1).Select(x => x.Text.Trim())).Trim()
                     : string.Empty;
+                double rightValueX = row.Count > 1 ? row[1].Bounds.X : -1;
 
                 if (label is "备注" or "备注名" or "备")
                 {
                     if (!string.IsNullOrEmpty(rightValue) && !PlaceholderRemarks.Contains(rightValue))
                     {
                         remarkFromTable = rightValue;
-                        remarkRowIndex = i;
-                        remarkValueX = row.Count > 1 ? row[1].Bounds.X : -1;
                     }
+                    SetActive(ActiveField.TableRemark, false, rowFirstX, rightValueX, rowBottom, rowHeight);
                     continue;
                 }
 
@@ -227,6 +297,7 @@ namespace Client.Services
                     {
                         tags = rightValue;
                     }
+                    SetActive(ActiveField.TableTags, false, rowFirstX, rightValueX, rowBottom, rowHeight);
                     continue;
                 }
 
@@ -236,6 +307,17 @@ namespace Client.Services
                     {
                         phone = rightValue;
                     }
+                    SetActive(ActiveField.TablePhone, false, rowFirstX, rightValueX, rowBottom, rowHeight);
+                    continue;
+                }
+
+                if (label == "描述")
+                {
+                    if (!string.IsNullOrEmpty(rightValue) && !PlaceholderDescriptions.Contains(rightValue))
+                    {
+                        description = rightValue;
+                    }
+                    SetActive(ActiveField.TableDescription, false, rowFirstX, rightValueX, rowBottom, rowHeight);
                     continue;
                 }
 
@@ -244,9 +326,8 @@ namespace Client.Services
                     if (!string.IsNullOrEmpty(rightValue))
                     {
                         signature = rightValue;
-                        signatureRowIndex = i;
-                        signatureValueX = row[1].Bounds.X;
                     }
+                    SetActive(ActiveField.TableSignature, false, rowFirstX, rightValueX, rowBottom, rowHeight);
                     continue;
                 }
 
@@ -256,6 +337,7 @@ namespace Client.Services
                     {
                         source = rightValue;
                     }
+                    SetActive(ActiveField.TableSource, false, rowFirstX, rightValueX, rowBottom, rowHeight);
                     continue;
                 }
 
@@ -265,30 +347,114 @@ namespace Client.Services
                     {
                         addedDate = rightValue;
                     }
+                    SetActive(ActiveField.TableAddedDate, false, rowFirstX, rightValueX, rowBottom, rowHeight);
                     continue;
                 }
 
-                // Handle multi-line wrapped remark right below the "备注" row in 朋友资料
-                if (remarkRowIndex >= 0 && i == remarkRowIndex + 1 &&
-                    row.Count == 1 &&
-                    !KnownSectionLabels.Contains(label) &&
-                    remarkValueX >= 0 &&
-                    Math.Abs(row[0].Bounds.X - remarkValueX) < 60)
+                // Any other known section header or left-column label immediately terminates continuation
+                if (KnownSectionLabels.Contains(label) || KnownSectionLabels.Contains(fullRow))
                 {
-                    remarkFromTable = $"{remarkFromTable}\n{row[0].Text.Trim()}".Trim();
-                    remarkRowIndex = i;
+                    activeField = ActiveField.None;
                     continue;
                 }
 
-                // Handle multi-line wrapped signature right below the "个性签名" row
-                if (signatureRowIndex >= 0 && i == signatureRowIndex + 1 &&
-                    row.Count == 1 &&
-                    !KnownSectionLabels.Contains(label) &&
-                    signatureValueX >= 0 &&
-                    Math.Abs(row[0].Bounds.X - signatureValueX) < 60)
+                // 3. Generic multi-line continuation for ANY currently active field (2, 3, ... N wrapped lines)
+                if (activeField != ActiveField.None)
                 {
-                    signature = $"{signature} {row[0].Text.Trim()}".Trim();
-                    signatureRowIndex = i;
+                    double verticalGap = rowTop - activePrevBottom;
+                    bool verticallyClose = verticalGap <= Math.Max(18.0, activePrevHeight * 1.35);
+
+                    bool horizontallyAligned;
+                    if (activeIsHeaderInline)
+                    {
+                        // Wrapped header value sits indented under the value start (e.g. X=124 after "昵称:" at X=88) or flush with keyX
+                        double minX = activeAnchorX - 10;
+                        double maxX = activeValueX >= 0
+                            ? activeValueX + 45
+                            : activeAnchorX + Math.Max(80.0, activePrevHeight * 4.5);
+                        horizontallyAligned = rowFirstX >= minX && rowFirstX <= maxX;
+                    }
+                    else
+                    {
+                        // Wrapped table value sits strictly inside the right column (never in the left label column!)
+                        bool rightOfLabel = activeAnchorX < 0 || rowFirstX > activeAnchorX + 25;
+                        bool alignedWithValue = activeValueX < 0 || Math.Abs(rowFirstX - activeValueX) <= Math.Max(48.0, activePrevHeight * 2.2);
+                        horizontallyAligned = rightOfLabel && alignedWithValue;
+                    }
+
+                    if (!verticallyClose || !horizontallyAligned)
+                    {
+                        activeField = ActiveField.None;
+                        continue;
+                    }
+
+                    bool consumed = true;
+                    switch (activeField)
+                    {
+                        case ActiveField.HeaderNickname:
+                            explicitNickname = JoinWrappedText(explicitNickname, fullRow);
+                            break;
+                        case ActiveField.HeaderAccount:
+                            if (WechatIdContinuationRegex().IsMatch(fullRow))
+                            {
+                                account = $"{account}{fullRow}";
+                            }
+                            else
+                            {
+                                consumed = false;
+                            }
+                            break;
+                        case ActiveField.HeaderRegion:
+                            region = JoinWrappedText(region, fullRow);
+                            break;
+                        case ActiveField.TableRemark:
+                            if (!PlaceholderRemarks.Contains(fullRow))
+                            {
+                                remarkFromTable = JoinWrappedText(remarkFromTable, fullRow);
+                            }
+                            break;
+                        case ActiveField.TableTags:
+                            if (!fullRow.Contains("添加标签", StringComparison.Ordinal))
+                            {
+                                tags = JoinWrappedText(tags, fullRow);
+                            }
+                            break;
+                        case ActiveField.TablePhone:
+                            phone = JoinWrappedPhone(phone, fullRow);
+                            break;
+                        case ActiveField.TableDescription:
+                            if (!PlaceholderDescriptions.Contains(fullRow))
+                            {
+                                description = JoinWrappedText(description, fullRow);
+                            }
+                            break;
+                        case ActiveField.TableSignature:
+                            signature = JoinWrappedText(signature, fullRow);
+                            break;
+                        case ActiveField.TableSource:
+                            source = JoinWrappedText(source, fullRow);
+                            break;
+                        case ActiveField.TableAddedDate:
+                            addedDate = JoinWrappedText(addedDate, fullRow);
+                            break;
+                        default:
+                            consumed = false;
+                            break;
+                    }
+
+                    if (consumed)
+                    {
+                        activePrevBottom = rowBottom;
+                        activePrevHeight = rowHeight;
+                        if (activeValueX < 0)
+                        {
+                            activeValueX = rowFirstX;
+                        }
+                    }
+                    else
+                    {
+                        activeField = ActiveField.None;
+                    }
                 }
             }
 
@@ -312,29 +478,74 @@ namespace Client.Services
             }
             else
             {
-                // No WeChat remark set: the bold headline directly above "微信号:" IS the friend's WeChat nickname.
+                // No WeChat remark set: collect ALL contiguous wrapped headline rows directly above "微信号:" / "地区:"
                 string topHeadline = string.Empty;
-                if (accountRowIndex > 0)
+                int anchorIdx = accountRowIndex >= 0 ? accountRowIndex : regionRowIndex;
+                if (anchorIdx > 0)
                 {
-                    double anchorX = rows[accountRowIndex].Count > 0 ? rows[accountRowIndex][0].Bounds.X : -1;
-                    for (int j = accountRowIndex - 1; j >= 0; j--)
+                    double anchorX = rows[anchorIdx].Count > 0 ? rows[anchorIdx][0].Bounds.X : -1;
+                    double nextTop = rows[anchorIdx].Min(x => x.Bounds.Y);
+                    var headlineParts = new List<string>();
+
+                    for (int j = anchorIdx - 1; j >= 0; j--)
                     {
+                        double curBottom = rows[j].Max(x => x.Bounds.Y + x.Bounds.Height);
+                        double curH = Math.Max(14.0, rows[j].Average(x => x.Bounds.Height));
+                        if (nextTop - curBottom > Math.Max(24.0, curH * 1.4))
+                        {
+                            break;
+                        }
+
                         var alignedTokens = anchorX >= 0
                             ? rows[j].Where(t => Math.Abs(t.Bounds.X - anchorX) < 90).ToList()
                             : rows[j];
                         string candidate = CleanHeadlineRow(alignedTokens);
-                        if (!string.IsNullOrEmpty(candidate) && candidate.Length <= 40 && !KnownSectionLabels.Contains(candidate))
+                        if (string.IsNullOrEmpty(candidate) || candidate.Length > 48 || KnownSectionLabels.Contains(candidate))
                         {
-                            topHeadline = candidate;
-                            break;
+                            if (headlineParts.Count > 0) break;
+                            continue;
                         }
+
+                        headlineParts.Add(candidate);
+                        nextTop = rows[j].Min(x => x.Bounds.Y);
+                        if (headlineParts.Count >= 3) break;
+                    }
+
+                    headlineParts.Reverse();
+                    foreach (var part in headlineParts)
+                    {
+                        topHeadline = JoinWrappedText(topHeadline, part);
                     }
                 }
                 wechatRemark = string.Empty;
                 wechatName = topHeadline;
             }
 
-            return (wechatRemark, wechatName, account, tags, region, phone, signature, source, addedDate);
+            return (wechatRemark, wechatName, account, tags, region, phone, description, signature, source, addedDate);
+        }
+
+        private static string JoinWrappedText(string first, string next)
+        {
+            first = first.Trim();
+            next = next.Trim();
+            if (string.IsNullOrEmpty(first)) return next;
+            if (string.IsNullOrEmpty(next)) return first;
+            // WeChat 4.x uses character-level WrapAnywhere (e.g. "Alex D'Ada" + "mo)", "诺沃" + "克"),
+            // so direct concatenation reconstructs split Chinese & English tokens without injecting false spaces.
+            return $"{first}{next}";
+        }
+
+        private static string JoinWrappedPhone(string first, string next)
+        {
+            first = first.Trim();
+            next = next.Trim();
+            if (string.IsNullOrEmpty(first)) return next;
+            if (string.IsNullOrEmpty(next)) return first;
+            if (first.Length >= 7 && (char.IsAsciiDigit(next[0]) || next[0] == '+'))
+            {
+                return $"{first} / {next}";
+            }
+            return $"{first}{next}";
         }
 
         private static string CleanHeadlineRow(List<OcrLineResult> row)
@@ -388,6 +599,9 @@ namespace Client.Services
 
         [GeneratedRegex(@"微信号\s*(?:[:：]\s*|\s+)([A-Za-z0-9_\-]+)")]
         private static partial Regex WechatIdRegex();
+
+        [GeneratedRegex(@"^[A-Za-z0-9_\-]+$")]
+        private static partial Regex WechatIdContinuationRegex();
 
         [GeneratedRegex(@"昵称\s*(?:[:：]\s*|\s+)(.+)")]
         private static partial Regex NicknameRegex();

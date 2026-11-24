@@ -13,7 +13,7 @@
         <KeyboardAccelerator Key="V" Modifiers="Control" Invoked="PasteAccelerator_Invoked" />
     </Page.KeyboardAccelerators>
 
-    <Grid x:Name="RootThreePaneGrid" Background="#FFFFFF">
+    <Grid x:Name="RootThreePaneGrid" Background="{StaticResource AppSurfaceBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="LeftPaneColumn" Width="268" MinWidth="220" />
             <ColumnDefinition Width="6" />
@@ -25,7 +25,7 @@
         <!-- Column 0: WeChat-style Group List Sidebar -->
         <Border
             Grid.Column="0"
-            Background="#FAFAFC">
+            Background="{StaticResource AppSurfaceAltBrush}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="56" />
@@ -36,7 +36,7 @@
                 <Border
                     Grid.Row="0"
                     Padding="12,0"
-                    Background="#FFFFFF"
+                    Background="{StaticResource AppSurfaceBrush}"
                     BorderBrush="{StaticResource AppBorderBrush}"
                     BorderThickness="0,0,0,1">
                     <Grid ColumnSpacing="8" VerticalAlignment="Center">
@@ -104,7 +104,7 @@
                                         Width="40"
                                         Height="40"
                                         Background="{StaticResource InfoBgBrush}"
-                                        BorderBrush="#BFDBFE"
+                                        BorderBrush="{StaticResource InfoBorderBrush}"
                                         BorderThickness="1"
                                         CornerRadius="8">
                                         <TextBlock
@@ -145,7 +145,7 @@
         <controls:VerticalResizeSplitter x:Name="LeftPaneSplitter" Grid.Column="1" />
 
         <!-- Column 2: WeChat-style Group IM Chat Stage -->
-        <Grid x:Name="ChatStageGrid" Grid.Column="2" Background="#F5F6F9" SizeChanged="ChatStageGrid_SizeChanged">
+        <Grid x:Name="ChatStageGrid" Grid.Column="2" Background="{StaticResource AppChatCanvasBgBrush}" SizeChanged="ChatStageGrid_SizeChanged">
             <Grid.RowDefinitions>
                 <RowDefinition Height="56" />
                 <RowDefinition Height="*" MinHeight="160" />
@@ -153,7 +153,7 @@
                 <RowDefinition x:Name="ComposerRow" Height="172" MinHeight="128" MaxHeight="440" />
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" Padding="18,0" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,0,1">
+            <Border Grid.Row="0" Padding="18,0" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,0,1">
                 <Grid>
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <TextBlock x:Name="ActiveGroupTitle" FontSize="15.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="请选择左侧群组" />
@@ -169,7 +169,7 @@
             <!-- Group Chat Bubbles -->
             <Grid Grid.Row="1">
                 <StackPanel x:Name="EmptyChatHint" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
-                    <Border Width="52" Height="52" HorizontalAlignment="Center" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="14">
+                    <Border Width="52" Height="52" HorizontalAlignment="Center" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="14">
                         <FontIcon FontSize="22" Foreground="{StaticResource InfoTextBrush}" Glyph="&#xE716;" />
                     </Border>
                     <TextBlock x:Name="EmptyChatTitle" HorizontalAlignment="Center" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="暂无群聊记录" />
@@ -192,13 +192,13 @@
                                         <ColumnDefinition Width="34" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
-                                    <Border Grid.Column="0" Width="34" Height="34" VerticalAlignment="Top" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="6">
+                                    <Border Grid.Column="0" Width="34" Height="34" VerticalAlignment="Top" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="6">
                                         <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="{StaticResource InfoTextBrush}" Text="{x:Bind SenderInitial}" />
                                     </Border>
                                     <StackPanel Grid.Column="1" HorizontalAlignment="Left" MaxWidth="460" Spacing="3">
                                         <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind SenderName}" Visibility="{x:Bind SenderNameVisibility}" />
-                                        <Border Padding="12,9" Background="#FFFFFF" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="4,10,10,10">
-                                            <TextBlock FontSize="13.5" Foreground="#1F2329" IsTextSelectionEnabled="True" Text="{x:Bind Content}" TextWrapping="Wrap" />
+                                        <Border Padding="12,9" Background="{StaticResource ChatIncomingBgBrush}" BorderBrush="{StaticResource ChatIncomingBorderBrush}" BorderThickness="1" CornerRadius="4,10,10,10">
+                                            <TextBlock FontSize="13.5" Foreground="{StaticResource TextPrimaryBrush}" IsTextSelectionEnabled="True" Text="{x:Bind Content}" TextWrapping="Wrap" />
                                         </Border>
                                         <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel}" />
                                     </StackPanel>
@@ -210,8 +210,8 @@
                                         <ColumnDefinition Width="34" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Grid.Column="0" HorizontalAlignment="Right" MaxWidth="460" Spacing="3">
-                                        <Border Padding="12,9" Background="#95EC69" CornerRadius="10,4,10,10">
-                                            <TextBlock FontSize="13.5" Foreground="#1F2329" IsTextSelectionEnabled="True" Text="{x:Bind Content}" TextWrapping="Wrap" />
+                                        <Border Padding="12,9" Background="{StaticResource ChatOutgoingBgBrush}" CornerRadius="10,4,10,10">
+                                            <TextBlock FontSize="13.5" Foreground="{StaticResource ChatOutgoingTextBrush}" IsTextSelectionEnabled="True" Text="{x:Bind Content}" TextWrapping="Wrap" />
                                         </Border>
                                         <TextBlock HorizontalAlignment="Right" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel}" />
                                     </StackPanel>
@@ -229,7 +229,7 @@
             <controls:HorizontalResizeSplitter
                 x:Name="ComposerSplitter"
                 Grid.Row="2"
-                Background="#F5F6F9"
+                Background="{StaticResource AppChatCanvasBgBrush}"
                 BorderBrush="{StaticResource AppBorderBrush}"
                 BorderThickness="0,1,0,0"
                 PointerCaptureLost="ComposerSplitter_PointerCaptureLost"
@@ -237,11 +237,11 @@
                 PointerPressed="ComposerSplitter_PointerPressed"
                 PointerReleased="ComposerSplitter_PointerReleased"
                 ToolTipService.ToolTip="上下拖动可调整输入框高度">
-                <Border Width="40" Height="3" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#CBD0DC" CornerRadius="2" />
+                <Border Width="40" Height="3" HorizontalAlignment="Center" VerticalAlignment="Center" Background="{StaticResource AppSplitterGripBrush}" CornerRadius="2" />
             </controls:HorizontalResizeSplitter>
 
             <!-- Bottom Group Composer -->
-            <Border Grid.Row="3" Padding="14,10,14,12" Background="#FFFFFF">
+            <Border Grid.Row="3" Padding="14,10,14,12" Background="{StaticResource AppSurfaceBrush}">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -255,8 +255,8 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                            <RadioButton x:Name="DirOutgoingRadio" Content="我方发出" FontSize="12" GroupName="GroupMsgDir" IsChecked="True" MinWidth="0" Padding="4,0,0,0" />
-                            <RadioButton x:Name="DirIncomingRadio" Content="群成员" FontSize="12" GroupName="GroupMsgDir" MinWidth="0" Padding="4,0,0,0" />
+                            <RadioButton x:Name="DirOutgoingRadio" Content="我方发出" GroupName="GroupMsgDir" IsChecked="True" />
+                            <RadioButton x:Name="DirIncomingRadio" Content="群成员" GroupName="GroupMsgDir" />
                             <TextBox x:Name="SenderNameBox" Width="88" Height="28" Padding="8,4" FontSize="12" PlaceholderText="发言人" Style="{StaticResource SoftTextBoxStyle}" />
                         </StackPanel>
 
@@ -270,7 +270,8 @@
                         x:Name="MessageInputBox"
                         Grid.Row="1"
                         AcceptsReturn="True"
-                        Background="#F8F9FC"
+                        Background="{StaticResource AppInputBgBrush}"
+                        Foreground="{StaticResource TextPrimaryBrush}"
                         BorderThickness="0"
                         CornerRadius="6"
                         Padding="10,7"
@@ -298,14 +299,14 @@
         <controls:VerticalResizeSplitter x:Name="RightPaneSplitter" Grid.Column="3" />
 
         <!-- Column 4: Dedicated Right Group Profile Panel (View / Edit / Save / Employee Notes / Delete) -->
-        <Border Grid.Column="4" Background="#FFFFFF">
+        <Border Grid.Column="4" Background="{StaticResource AppSurfaceBrush}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="56" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <Border Grid.Row="0" Padding="16,0" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,0,1">
+                <Border Grid.Row="0" Padding="16,0" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,0,1">
                     <Grid>
                         <TextBlock VerticalAlignment="Center" FontSize="14.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="群组信息" />
 
@@ -343,7 +344,7 @@
                                 <ColumnDefinition Width="52" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Width="52" Height="52" Background="{StaticResource InfoBgBrush}" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="10">
+                            <Border Grid.Column="0" Width="52" Height="52" Background="{StaticResource InfoBgBrush}" BorderBrush="{StaticResource InfoBorderBrush}" BorderThickness="1" CornerRadius="10">
                                 <TextBlock x:Name="DetailAvatarText" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="Bold" Foreground="{StaticResource InfoTextBrush}" Text="群" />
                             </Border>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
@@ -365,11 +366,11 @@
                             </StackPanel>
 
                             <!-- Dedicated Bottom Employee Notes Card -->
-                            <Border Padding="14" Background="#F8F7FF" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
+                            <Border Padding="14" Background="{StaticResource BrandCardTintBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
                                 <StackPanel Spacing="8">
                                     <Grid>
                                         <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="员工群跟进备注" />
-                                        <Border HorizontalAlignment="Right" Padding="7,2" Background="#FFFFFF" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="8">
+                                        <Border HorizontalAlignment="Right" Padding="7,2" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="8">
                                             <TextBlock FontSize="10.5" Foreground="{StaticResource BrandPrimaryBrush}" Text="员工专属" />
                                         </Border>
                                     </Grid>
@@ -399,14 +400,15 @@
                             </Grid>
                             <TextBox x:Name="EditMembersTextBox" Header="群成员列表" Height="100" AcceptsReturn="True" Style="{StaticResource SoftTextBoxStyle}" TextWrapping="Wrap" />
 
-                            <Border Margin="0,4,0,0" Padding="12" Background="#F8F7FF" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
+                            <Border Margin="0,4,0,0" Padding="12" Background="{StaticResource BrandCardTintBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
                                 <StackPanel Spacing="6">
                                     <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="员工群跟进备注" />
                                     <TextBox
                                         x:Name="EditGroupNoteBox"
                                         MinHeight="92"
                                         AcceptsReturn="True"
-                                        Background="#FFFFFF"
+                                        Background="{StaticResource AppSurfaceBrush}"
+                                        Foreground="{StaticResource TextPrimaryBrush}"
                                         BorderBrush="{StaticResource BrandSoftBorderBrush}"
                                         CornerRadius="7"
                                         Padding="10,8"

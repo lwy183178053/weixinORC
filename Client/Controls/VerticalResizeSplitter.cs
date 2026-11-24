@@ -13,9 +13,9 @@ namespace Client.Controls
     /// </summary>
     public sealed class VerticalResizeSplitter : Grid
     {
-        private readonly SolidColorBrush _restLineBrush = new(Color.FromArgb(255, 230, 232, 240));
-        private readonly SolidColorBrush _activeLineBrush = new(Color.FromArgb(255, 124, 92, 252));
-        private readonly SolidColorBrush _hoverBgBrush = new(Color.FromArgb(20, 124, 92, 252));
+        private readonly Brush _restLineBrush;
+        private readonly Brush _activeLineBrush;
+        private readonly SolidColorBrush _hoverBgBrush = new(Color.FromArgb(24, 124, 92, 252));
         private readonly SolidColorBrush _transparentBrush = new(Colors.Transparent);
 
         private readonly Border _indicatorLine;
@@ -24,6 +24,11 @@ namespace Client.Controls
 
         public VerticalResizeSplitter()
         {
+            _restLineBrush = Application.Current?.Resources["AppBorderBrush"] as Brush
+                ?? new SolidColorBrush(Color.FromArgb(255, 230, 232, 240));
+            _activeLineBrush = Application.Current?.Resources["BrandPrimaryBrush"] as Brush
+                ?? new SolidColorBrush(Color.FromArgb(255, 124, 92, 252));
+
             Width = 6;
             Background = _transparentBrush;
             ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeWestEast);

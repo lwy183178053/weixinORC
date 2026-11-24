@@ -25,7 +25,7 @@
             <!-- Quick Start 3-Step Strip -->
             <Border
                 Padding="20"
-                Background="#FFFFFF"
+                Background="{StaticResource AppSurfaceBrush}"
                 BorderBrush="{StaticResource AppBorderBrush}"
                 BorderThickness="1"
                 CornerRadius="10">
@@ -94,7 +94,7 @@
                 </Grid.RowDefinitions>
 
                 <!-- Card 1: Customers -->
-                <Border Grid.Row="0" Grid.Column="0" Padding="18" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
+                <Border Grid.Row="0" Grid.Column="0" Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                     <StackPanel Spacing="8">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <Border Width="30" Height="30" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="7">
@@ -108,7 +108,7 @@
                 </Border>
 
                 <!-- Card 2: Groups -->
-                <Border Grid.Row="0" Grid.Column="1" Padding="18" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
+                <Border Grid.Row="0" Grid.Column="1" Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                     <StackPanel Spacing="8">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <Border Width="30" Height="30" Background="{StaticResource InfoBgBrush}" CornerRadius="7">
@@ -122,7 +122,7 @@
                 </Border>
 
                 <!-- Card 3: Window Monitor -->
-                <Border Grid.Row="1" Grid.Column="0" Padding="18" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
+                <Border Grid.Row="1" Grid.Column="0" Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                     <StackPanel Spacing="8">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <Border Width="30" Height="30" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="7">
@@ -136,7 +136,7 @@
                 </Border>
 
                 <!-- Card 4: Shortcuts & Logs -->
-                <Border Grid.Row="1" Grid.Column="1" Padding="18" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
+                <Border Grid.Row="1" Grid.Column="1" Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                     <StackPanel Spacing="8">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <Border Width="30" Height="30" Background="{StaticResource SuccessBgBrush}" CornerRadius="7">

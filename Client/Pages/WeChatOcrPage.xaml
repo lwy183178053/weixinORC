@@ -9,7 +9,7 @@
     xmlns:models="using:Client.Models"
     mc:Ignorable="d">
 
-    <Grid x:Name="RootThreePaneGrid" Background="#FFFFFF">
+    <Grid x:Name="RootThreePaneGrid" Background="{StaticResource AppSurfaceBrush}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="LeftPaneColumn" Width="268" MinWidth="220" />
             <ColumnDefinition Width="6" />
@@ -21,7 +21,7 @@
         <!-- Column 0: WeChat Window Monitor Sidebar -->
         <Border
             Grid.Column="0"
-            Background="#FFFFFF">
+            Background="{StaticResource AppSurfaceBrush}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -159,7 +159,7 @@
         <controls:VerticalResizeSplitter x:Name="LeftPaneSplitter" Grid.Column="1" />
 
         <!-- Column 2: Action Bar & RapidOCR Preview Stage -->
-        <Grid Grid.Column="2" Background="#FFFFFF">
+        <Grid Grid.Column="2" Background="{StaticResource AppSurfaceBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -169,7 +169,7 @@
             <Border
                 Grid.Row="0"
                 Padding="16,12"
-                Background="#FFFFFF"
+                Background="{StaticResource AppSurfaceBrush}"
                 BorderBrush="{StaticResource AppBorderSubtleBrush}"
                 BorderThickness="0,0,0,1">
                 <Grid ColumnSpacing="10">
@@ -246,7 +246,7 @@
                         <Border
                             Grid.Row="0"
                             Padding="14,8"
-                            Background="#FFFFFF"
+                            Background="{StaticResource AppSurfaceBrush}"
                             BorderBrush="{StaticResource AppBorderSubtleBrush}"
                             BorderThickness="0,0,0,1"
                             CornerRadius="10,10,0,0">
@@ -289,7 +289,7 @@
         <controls:VerticalResizeSplitter x:Name="RightPaneSplitter" Grid.Column="3" />
 
         <!-- Column 4: Inspector Panel -->
-        <Border Grid.Column="4" Background="#FFFFFF">
+        <Border Grid.Column="4" Background="{StaticResource AppSurfaceBrush}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -328,7 +328,7 @@
                             </StackPanel>
                         </Border>
 
-                        <Border Padding="14" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
+                        <Border Padding="14" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
                             <StackPanel Spacing="9">
                                 <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="客户资料人工核验与入库" />
                                 <Grid ColumnSpacing="8">

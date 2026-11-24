@@ -21,6 +21,7 @@ namespace Client.Dialogs
         public ImportGroupDialog()
         {
             InitializeComponent();
+            RequestedTheme = AppServices.Settings.CurrentElementTheme;
             Closed += (_, _) =>
             {
                 _bitmap?.Dispose();

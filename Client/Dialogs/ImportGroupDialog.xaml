@@ -5,11 +5,10 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    Background="#FFFFFF"
-    BorderBrush="#E2E5F0"
+    Background="{StaticResource ContentDialogBackground}"
+    BorderBrush="{StaticResource ContentDialogBorderBrush}"
     BorderThickness="1"
     CornerRadius="12"
-    RequestedTheme="Light"
     mc:Ignorable="d">
 
     <ContentDialog.KeyboardAccelerators>
@@ -76,7 +75,7 @@
                 Grid.Column="0"
                 Padding="14"
                 VerticalAlignment="Stretch"
-                Background="#F9FAFC"
+                Background="{StaticResource AppSurfaceAltBrush}"
                 BorderBrush="{StaticResource AppBorderBrush}"
                 BorderThickness="1"
                 CornerRadius="10">
@@ -114,7 +113,7 @@
                         Grid.Row="1"
                         MinHeight="230"
                         MaxHeight="265"
-                        Background="#FFFFFF"
+                        Background="{StaticResource AppSurfaceBrush}"
                         BorderBrush="{StaticResource AppBorderSubtleBrush}"
                         BorderThickness="1"
                         CornerRadius="8">

@@ -11,7 +11,8 @@
     PrimaryButtonClick="Dialog_PrimaryButtonClick"
     PrimaryButtonStyle="{StaticResource PrimaryVioletButtonStyle}"
     PrimaryButtonText="确认导入消息"
-    RequestedTheme="Light"
+    Background="{StaticResource ContentDialogBackground}"
+    BorderBrush="{StaticResource ContentDialogBorderBrush}"
     mc:Ignorable="d">
 
     <ContentDialog.KeyboardAccelerators>
@@ -40,8 +41,8 @@
         <Border
             Grid.Row="1"
             Padding="12,10"
-            Background="#F8F7FF"
-            BorderBrush="#C8BAFF"
+            Background="{StaticResource BrandCardTintBrush}"
+            BorderBrush="{StaticResource BrandSoftBorderBrush}"
             BorderThickness="1.5"
             CornerRadius="9">
             <Grid ColumnSpacing="10">
@@ -84,7 +85,7 @@
             </Border>
 
             <!-- Parsed Messages Preview & Quick Edit List -->
-            <Border Grid.Column="1" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
+            <Border Grid.Column="1" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="34" />

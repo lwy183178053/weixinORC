@@ -26,6 +26,7 @@ namespace Client.Dialogs
         public ImportCustomerDialog()
         {
             InitializeComponent();
+            RequestedTheme = AppServices.Settings.CurrentElementTheme;
             Closed += (_, _) =>
             {
                 _bitmap?.Dispose();

@@ -106,6 +106,7 @@ namespace Client.Models
         public string CandidateTags { get; init; } = string.Empty;
         public string CandidateRegion { get; init; } = string.Empty;
         public string CandidatePhone { get; init; } = string.Empty;
+        public string CandidateDescription { get; init; } = string.Empty;
         public string CandidateSignature { get; init; } = string.Empty;
         public string CandidateSource { get; init; } = string.Empty;
         public string CandidateAddedDate { get; init; } = string.Empty;

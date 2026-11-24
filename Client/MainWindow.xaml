@@ -8,7 +8,7 @@
     Title="智美微信智能工作台"
     mc:Ignorable="d">
 
-    <Grid Background="{StaticResource AppCanvasBgBrush}" RequestedTheme="Light">
+    <Grid x:Name="RootGrid" Background="{StaticResource AppCanvasBgBrush}">
         <Frame x:Name="RootFrame" />
     </Grid>
 </Window>

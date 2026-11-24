@@ -29,6 +29,7 @@ namespace Client.Dialogs
         public ImportChatScreenshotDialog()
         {
             InitializeComponent();
+            RequestedTheme = AppServices.Settings.CurrentElementTheme;
             Closed += (_, _) =>
             {
                 _bitmap?.Dispose();

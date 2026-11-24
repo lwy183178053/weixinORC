@@ -366,8 +366,87 @@ namespace Client.Services
                             {
                                 if (!overwriteExisting)
                                 {
-                                    skipped++;
-                                    Report(tag.Name, $"已存在跳过「{existing.DisplayName}」", $"  ⊘ 已存在跳过：{existing.DisplayName} ({existing.WechatAccount})");
+                                    // Smart backfill: even in skip-duplicate mode, automatically fill missing avatar or empty fields
+                                    // without ever overwriting any existing non-empty data or employee notes!
+                                    var filledItems = new List<string>();
+                                    bool needAvatarBackfill = string.IsNullOrWhiteSpace(existing.AvatarUrl) && avatarPng is not null;
+                                    string nextTags = MergeTagName(existing.Tags, mergedTags);
+
+                                    string nextRemark = FillIfEmpty(existing.WechatRemark, parsed.CandidateWechatRemark, "备注", filledItems);
+                                    string nextName = FillIfEmpty(existing.WechatName, resolvedName, "昵称", filledItems);
+                                    string nextAccount = FillIfEmpty(existing.WechatAccount, parsed.CandidateWechatAccount, "微信号", filledItems);
+                                    string nextGender = FillIfEmpty(existing.Gender, detectedGender, "性别", filledItems);
+                                    string nextRegion = FillIfEmpty(existing.Region, parsed.CandidateRegion, "地区", filledItems);
+                                    string nextPhone = FillIfEmpty(existing.Phone, parsed.CandidatePhone, "电话", filledItems);
+                                    string nextSig = FillIfEmpty(existing.Signature, parsed.CandidateSignature, "签名", filledItems);
+                                    string nextDesc = FillIfEmpty(existing.Description, parsed.CandidateDescription, "描述", filledItems);
+                                    string nextSource = FillIfEmpty(existing.Source, parsed.CandidateSource, "来源", filledItems);
+                                    string nextAdded = FillIfEmpty(existing.AddedDate, parsed.CandidateAddedDate, "添加时间", filledItems);
+                                    bool tagsChanged = !string.Equals(nextTags, existing.Tags, StringComparison.Ordinal);
+                                    if (tagsChanged) filledItems.Add("标签");
+                                    if (needAvatarBackfill) filledItems.Add("头像");
+
+                                    if (filledItems.Count == 0)
+                                    {
+                                        skipped++;
+                                        Report(tag.Name, $"资料完整跳过「{existing.DisplayName}」", $"  ⊘ 资料完整跳过：{existing.DisplayName} ({existing.WechatAccount})");
+                                        continue;
+                                    }
+
+                                    var latestCustomer = existing;
+                                    bool anySuccess = false;
+                                    bool needTextPatch = filledItems.Any(item => item != "头像");
+
+                                    if (needTextPatch)
+                                    {
+                                        var backfillPatch = new CreateCustomerRequest
+                                        {
+                                            WechatRemark = nextRemark,
+                                            WechatName = nextName,
+                                            WechatAccount = nextAccount,
+                                            Gender = nextGender,
+                                            Tags = nextTags,
+                                            Region = nextRegion,
+                                            Phone = nextPhone,
+                                            Signature = nextSig,
+                                            Source = nextSource,
+                                            AddedDate = nextAdded,
+                                            Description = nextDesc,
+                                            FollowStatus = existing.FollowStatus,
+                                            LocalKey = existing.LocalKey,
+                                            NativeId = existing.NativeId,
+                                            Note = existing.Note
+                                        };
+                                        var bfRes = await AppServices.Backend.UpdateCustomerAsync(existing.Id, backfillPatch, ct);
+                                        if (bfRes.IsSuccess && bfRes.Data is not null)
+                                        {
+                                            latestCustomer = bfRes.Data;
+                                            anySuccess = true;
+                                        }
+                                    }
+
+                                    if (needAvatarBackfill && avatarPng is not null)
+                                    {
+                                        var avRes = await AppServices.Backend.UploadCustomerAvatarAsync(existing.Id, avatarPng, ct);
+                                        if (avRes.IsSuccess && avRes.Data is not null)
+                                        {
+                                            latestCustomer = avRes.Data;
+                                            anySuccess = true;
+                                        }
+                                    }
+
+                                    if (anySuccess)
+                                    {
+                                        ReplaceInList(existingCustomers, latestCustomer);
+                                        updated++;
+                                        string what = string.Join("、", filledItems);
+                                        Report(tag.Name, $"已补全「{latestCustomer.DisplayName}」缺失项（{what}）", $"  ✦ 补全缺失（{what}）：{latestCustomer.DisplayName} ({latestCustomer.WechatAccount})");
+                                    }
+                                    else
+                                    {
+                                        failed++;
+                                        Report(tag.Name, $"补全失败「{existing.DisplayName}」", $"  ✕ 补全失败：{existing.DisplayName}");
+                                    }
                                     continue;
                                 }
 
@@ -383,7 +462,7 @@ namespace Client.Services
                                     Signature = FirstNonEmpty(parsed.CandidateSignature, existing.Signature),
                                     Source = FirstNonEmpty(parsed.CandidateSource, existing.Source),
                                     AddedDate = FirstNonEmpty(parsed.CandidateAddedDate, existing.AddedDate),
-                                    Description = existing.Description,
+                                    Description = FirstNonEmpty(parsed.CandidateDescription, existing.Description),
                                     FollowStatus = existing.FollowStatus,
                                     LocalKey = existing.LocalKey,
                                     NativeId = existing.NativeId,
@@ -419,6 +498,7 @@ namespace Client.Services
                                 Region = parsed.CandidateRegion,
                                 Phone = parsed.CandidatePhone,
                                 Signature = parsed.CandidateSignature,
+                                Description = parsed.CandidateDescription,
                                 Source = parsed.CandidateSource,
                                 AddedDate = parsed.CandidateAddedDate,
                                 Note = string.Empty
@@ -1119,6 +1199,16 @@ namespace Client.Services
 
         private static string FirstNonEmpty(string preferred, string fallback) =>
             string.IsNullOrWhiteSpace(preferred) ? fallback : preferred;
+
+        private static string FillIfEmpty(string existingValue, string candidateValue, string fieldLabel, List<string> filledItems)
+        {
+            if (string.IsNullOrWhiteSpace(existingValue) && !string.IsNullOrWhiteSpace(candidateValue))
+            {
+                filledItems.Add(fieldLabel);
+                return candidateValue;
+            }
+            return existingValue;
+        }
 
         private static string DisplayCandidateName(string nickname, string account, string remark)
         {

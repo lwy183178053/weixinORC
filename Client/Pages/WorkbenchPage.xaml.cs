@@ -1,3 +1,4 @@
+using Client.Dialogs;
 using Client.Services;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
@@ -14,14 +15,36 @@ namespace Client.Pages
         {
             InitializeComponent();
             Loaded += WorkbenchPage_Loaded;
+            Unloaded += WorkbenchPage_Unloaded;
         }
 
         private void WorkbenchPage_Loaded(object sender, RoutedEventArgs e)
         {
             Loaded -= WorkbenchPage_Loaded;
+            AppServices.Settings.ThemeChanged += OnThemeChanged;
             MainWindow.Instance?.SetDragRegion(WorkbenchDragRegion);
             RefreshHeaderAndFooter();
+            UpdateThemeToggleVisual(AppServices.Settings.IsDarkMode);
             SwitchSection("customers");
+        }
+
+        private void WorkbenchPage_Unloaded(object sender, RoutedEventArgs e)
+        {
+            AppServices.Settings.ThemeChanged -= OnThemeChanged;
+        }
+
+        private void OnThemeChanged(bool isDark)
+        {
+            UpdateThemeToggleVisual(isDark);
+            UpdateRailVisuals();
+        }
+
+        private void UpdateThemeToggleVisual(bool isDark)
+        {
+            // When in Dark mode, show Sun icon ("明亮") to switch to Light; in Light mode, show Moon icon ("黑夜") to switch to Dark
+            ThemeToggleIcon.Glyph = isDark ? "\uE706" : "\uE708";
+            ThemeToggleLabel.Text = isDark ? "明亮" : "黑夜";
+            ToolTipService.SetToolTip(ThemeToggleButton, isDark ? "切换到明亮模式" : "切换到黑夜模式");
         }
 
         private void RefreshHeaderAndFooter()
@@ -99,6 +122,27 @@ namespace Client.Pages
             icon.Foreground = isActive ? activeFg : inactiveFg;
             label.Foreground = isActive ? activeFg : inactiveFg;
             label.FontWeight = isActive ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+        }
+
+        private void ThemeToggleButton_Click(object sender, RoutedEventArgs e)
+        {
+            AppServices.Settings.ToggleTheme();
+        }
+
+        private async void SettingsButton_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new SettingsDialog
+            {
+                XamlRoot = XamlRoot,
+                RequestedTheme = AppServices.Settings.CurrentElementTheme
+            };
+            await dialog.ShowAsync();
+            RefreshHeaderAndFooter();
+
+            if (dialog.RequestedNavigateLogs)
+            {
+                SwitchSection("logs");
+            }
         }
 
         private async void LogoutButton_Click(object sender, RoutedEventArgs e)

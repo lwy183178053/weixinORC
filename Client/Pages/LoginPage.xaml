@@ -7,15 +7,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid>
-        <Grid.Background>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                <GradientStop Offset="0" Color="#F2F3FB" />
-                <GradientStop Offset="0.55" Color="#ECE9FC" />
-                <GradientStop Offset="1" Color="#F7F8FC" />
-            </LinearGradientBrush>
-        </Grid.Background>
-
+    <Grid Background="{StaticResource LoginBgBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="38" />
             <RowDefinition Height="*" />
@@ -32,8 +24,8 @@
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
             Margin="0,-18,0,0"
-            Background="#FFFFFF"
-            BorderBrush="#E2E5F2"
+            Background="{StaticResource AppSurfaceBrush}"
+            BorderBrush="{StaticResource AppBorderBrush}"
             BorderThickness="1"
             CornerRadius="16">
             <Grid>
@@ -190,7 +182,7 @@
                             x:Name="ErrorBanner"
                             Padding="12,9"
                             Background="{StaticResource DangerBgBrush}"
-                            BorderBrush="#FECACA"
+                            BorderBrush="{StaticResource DangerBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="8"
                             Visibility="Collapsed">

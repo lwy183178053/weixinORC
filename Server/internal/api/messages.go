@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"weixinorc/server/internal/auth"
 	"weixinorc/server/internal/store"
 )
 
@@ -19,16 +19,18 @@ type createMessageRequest struct {
 func (s *Server) listMessages(c *gin.Context) {
 	customerID, ok := parseID(c.Param("id"))
 	if !ok {
-		writeError(c, http.StatusBadRequest, "invalid_customer_id")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_customer_id"})
 		return
 	}
-	cursor, limit, ok := pagination(c)
+	cursor, limit, ok := parsePagination(c)
 	if !ok {
 		return
 	}
-	items, next, err := s.store.ListMessages(c.Request.Context(), currentIdentity(c).EmployeeID, customerID, cursor, limit)
+
+	ownerID := auth.IdentityFromContext(c).EmployeeID
+	items, next, err := s.store.ListMessages(c.Request.Context(), ownerID, customerID, cursor, limit)
 	if err != nil {
-		writeStoreError(c, err)
+		writeStoreErr(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "next_cursor": next})
@@ -37,34 +39,42 @@ func (s *Server) listMessages(c *gin.Context) {
 func (s *Server) createMessage(c *gin.Context) {
 	customerID, ok := parseID(c.Param("id"))
 	if !ok {
-		writeError(c, http.StatusBadRequest, "invalid_customer_id")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_customer_id"})
 		return
 	}
-	var request createMessageRequest
-	if !decodeJSON(c, &request) {
+
+	var req createMessageRequest
+	if !bindJSON(c, &req) {
 		return
 	}
-	if request.Direction != "incoming" && request.Direction != "outgoing" {
-		writeError(c, http.StatusBadRequest, "invalid_direction")
+	if req.Direction != "incoming" && req.Direction != "outgoing" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_direction"})
 		return
 	}
-	if strings.TrimSpace(request.Content) == "" || !utf8.ValidString(request.Content) || utf8.RuneCountInString(request.Content) > 10000 {
-		writeError(c, http.StatusBadRequest, "invalid_content")
+	if strings.TrimSpace(req.Content) == "" || !validText(req.Content, 10000) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_content"})
 		return
 	}
+
 	sentAt := time.Now().UTC()
-	if request.SentAt != "" {
-		parsed, err := time.Parse(time.RFC3339, request.SentAt)
+	if req.SentAt != "" {
+		parsed, err := time.Parse(time.RFC3339, req.SentAt)
 		if err != nil {
-			writeError(c, http.StatusBadRequest, "invalid_sent_at")
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_sent_at"})
 			return
 		}
 		sentAt = parsed
 	}
-	message, err := s.store.CreateMessage(c.Request.Context(), currentIdentity(c).EmployeeID, customerID, store.MessageInput{Direction: request.Direction, Content: request.Content, SentAt: sentAt})
+
+	ownerID := auth.IdentityFromContext(c).EmployeeID
+	msg, err := s.store.CreateMessage(c.Request.Context(), ownerID, customerID, store.MessageInput{
+		Direction: req.Direction,
+		Content:   req.Content,
+		SentAt:    sentAt,
+	})
 	if err != nil {
-		writeStoreError(c, err)
+		writeStoreErr(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, message)
+	c.JSON(http.StatusCreated, msg)
 }

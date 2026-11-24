@@ -82,7 +82,7 @@ func (a testApp) login(t *testing.T, account string) string {
 }
 
 func TestLoginUnavailableByDefault(t *testing.T) {
-	app := newTestApp(t, auth.UnavailableVerifier{})
+	app := newTestApp(t, nil)
 	defer app.db.Close()
 	response := app.request(t, http.MethodPost, "/api/v1/login", "", map[string]string{"account": "a", "password": "b"})
 	if response.Code != http.StatusServiceUnavailable {

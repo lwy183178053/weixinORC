@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -14,27 +15,21 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var (
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrUnavailable        = errors.New("authentication provider unavailable")
-)
+var ErrInvalidCredentials = errors.New("invalid credentials")
 
+// Identity represents an authenticated employee.
 type Identity struct {
 	EmployeeID  string `json:"employee_id"`
 	Account     string `json:"account"`
 	DisplayName string `json:"display_name"`
 }
 
+// Verifier validates employee credentials against an external auth provider.
 type Verifier interface {
 	Verify(ctx context.Context, account, password string) (Identity, error)
 }
 
-type UnavailableVerifier struct{}
-
-func (UnavailableVerifier) Verify(context.Context, string, string) (Identity, error) {
-	return Identity{}, ErrUnavailable
-}
-
+// MockVerifier is a single-account verifier for local development only.
 type MockVerifier struct {
 	account  string
 	password string
@@ -45,33 +40,42 @@ func NewMockVerifier(account, password string) *MockVerifier {
 	return &MockVerifier{
 		account:  account,
 		password: password,
-		identity: Identity{EmployeeID: "mock-employee", Account: account, DisplayName: "Mock Employee"},
+		identity: Identity{
+			EmployeeID:  "mock-employee",
+			Account:     account,
+			DisplayName: "Mock Employee",
+		},
 	}
 }
 
 func (v *MockVerifier) Verify(_ context.Context, account, password string) (Identity, error) {
-	accountOK := subtle.ConstantTimeCompare([]byte(account), []byte(v.account))
-	passwordOK := subtle.ConstantTimeCompare([]byte(password), []byte(v.password))
-	if accountOK != 1 || passwordOK != 1 {
+	okAccount := subtle.ConstantTimeCompare([]byte(account), []byte(v.account)) == 1
+	okPassword := subtle.ConstantTimeCompare([]byte(password), []byte(v.password)) == 1
+	if !okAccount || !okPassword {
 		return Identity{}, ErrInvalidCredentials
 	}
 	return v.identity, nil
 }
 
-type session struct {
+type sessionEntry struct {
 	identity Identity
 	expires  time.Time
 }
 
+// Sessions manages in-memory Bearer tokens keyed by SHA-256 hash.
 type Sessions struct {
-	mu       sync.Mutex
-	ttl      time.Duration
-	sessions map[[32]byte]session
-	now      func() time.Time
+	mu      sync.Mutex
+	ttl     time.Duration
+	entries map[[32]byte]sessionEntry
+	now     func() time.Time
 }
 
 func NewSessions(ttl time.Duration) *Sessions {
-	return &Sessions{ttl: ttl, sessions: make(map[[32]byte]session), now: time.Now}
+	return &Sessions{
+		ttl:     ttl,
+		entries: make(map[[32]byte]sessionEntry),
+		now:     time.Now,
+	}
 }
 
 func (s *Sessions) Create(identity Identity) (string, time.Time, error) {
@@ -79,76 +83,86 @@ func (s *Sessions) Create(identity Identity) (string, time.Time, error) {
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", time.Time{}, err
 	}
+
 	token := hex.EncodeToString(raw[:])
 	expires := s.now().Add(s.ttl)
-	s.mu.Lock()
-	s.removeExpiredLocked()
-	s.sessions[sha256.Sum256([]byte(token))] = session{identity: identity, expires: expires}
-	s.mu.Unlock()
-	return token, expires, nil
-}
 
-func (s *Sessions) Revoke(token string) {
-	digest := sha256.Sum256([]byte(token))
 	s.mu.Lock()
-	delete(s.sessions, digest)
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+
+	now := s.now()
+	for key, entry := range s.entries {
+		if !now.Before(entry.expires) {
+			delete(s.entries, key)
+		}
+	}
+	s.entries[sha256.Sum256([]byte(token))] = sessionEntry{
+		identity: identity,
+		expires:  expires,
+	}
+	return token, expires, nil
 }
 
 func (s *Sessions) Lookup(token string) (Identity, bool) {
 	if token == "" {
 		return Identity{}, false
 	}
-	digest := sha256.Sum256([]byte(token))
+
+	key := sha256.Sum256([]byte(token))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entry, ok := s.sessions[digest]
+
+	entry, ok := s.entries[key]
 	if !ok {
 		return Identity{}, false
 	}
 	if !s.now().Before(entry.expires) {
-		delete(s.sessions, digest)
+		delete(s.entries, key)
 		return Identity{}, false
 	}
 	return entry.identity, true
 }
 
-func (s *Sessions) removeExpiredLocked() {
-	now := s.now()
-	for digest, entry := range s.sessions {
-		if !now.Before(entry.expires) {
-			delete(s.sessions, digest)
-		}
-	}
+func (s *Sessions) Revoke(token string) {
+	s.mu.Lock()
+	delete(s.entries, sha256.Sum256([]byte(token)))
+	s.mu.Unlock()
 }
 
-const identityKey = "authenticated_identity"
+const (
+	ctxIdentityKey = "auth_identity"
+	ctxTokenKey    = "auth_token"
+)
 
 func (s *Sessions) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		header := c.GetHeader("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
-			c.AbortWithStatusJSON(401, gin.H{"error": "unauthorized"})
+		token, ok := strings.CutPrefix(c.GetHeader("Authorization"), "Bearer ")
+		token = strings.TrimSpace(token)
+		if !ok || token == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
-		token := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
-		identity, ok := s.Lookup(token)
-		if !ok {
-			c.AbortWithStatusJSON(401, gin.H{"error": "unauthorized"})
+
+		identity, valid := s.Lookup(token)
+		if !valid {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
-		c.Set(identityKey, identity)
-		c.Set("session_token", token)
+
+		c.Set(ctxIdentityKey, identity)
+		c.Set(ctxTokenKey, token)
 		c.Next()
 	}
 }
 
 func IdentityFromContext(c *gin.Context) Identity {
-	identity, _ := c.Get(identityKey)
-	return identity.(Identity)
+	v, _ := c.Get(ctxIdentityKey)
+	id, _ := v.(Identity)
+	return id
 }
 
 func TokenFromContext(c *gin.Context) string {
-	token, _ := c.Get("session_token")
-	return token.(string)
+	v, _ := c.Get(ctxTokenKey)
+	token, _ := v.(string)
+	return token
 }

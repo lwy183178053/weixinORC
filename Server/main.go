@@ -2,44 +2,106 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"weixinorc/server/internal/api"
 	"weixinorc/server/internal/auth"
-	"weixinorc/server/internal/config"
 	"weixinorc/server/internal/store"
 )
 
-func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
-	database, err := store.Open(cfg.DatabasePath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer database.Close()
+type appConfig struct {
+	addr         string
+	dbPath       string
+	sessionTTL   time.Duration
+	mockAuth     bool
+	mockAccount  string
+	mockPassword string
+}
 
-	var verifier auth.Verifier = auth.UnavailableVerifier{}
-	if cfg.MockAuth {
-		verifier = auth.NewMockVerifier(cfg.MockAccount, cfg.MockPassword)
+func loadConfig() (appConfig, error) {
+	cfg := appConfig{
+		addr:         envOr("SERVER_ADDR", "127.0.0.1:8080"),
+		dbPath:       envOr("DATABASE_PATH", "data/weixinorc.db"),
+		sessionTTL:   7 * 24 * time.Hour,
+		mockAuth:     strings.EqualFold(os.Getenv("MOCK_AUTH"), "1") || strings.EqualFold(os.Getenv("MOCK_AUTH"), "true"),
+		mockAccount:  os.Getenv("MOCK_ACCOUNT"),
+		mockPassword: os.Getenv("MOCK_PASSWORD"),
 	}
-	sessions := auth.NewSessions(cfg.SessionTTL)
-	server := &http.Server{
-		Addr:              cfg.Address,
-		Handler:           api.New(database, verifier, sessions),
+
+	if raw := os.Getenv("SESSION_TTL_HOURS"); raw != "" {
+		hours, err := strconv.Atoi(raw)
+		if err != nil || hours < 1 || hours > 24*30 {
+			return appConfig{}, fmt.Errorf("SESSION_TTL_HOURS must be between 1 and 720")
+		}
+		cfg.sessionTTL = time.Duration(hours) * time.Hour
+	}
+
+	if cfg.mockAuth {
+		if cfg.mockAccount == "" || cfg.mockPassword == "" {
+			return appConfig{}, fmt.Errorf("MOCK_ACCOUNT and MOCK_PASSWORD are required when MOCK_AUTH is enabled")
+		}
+		if !isLoopbackAddr(cfg.addr) {
+			return appConfig{}, fmt.Errorf("MOCK_AUTH may only bind to localhost/loopback")
+		}
+	}
+
+	return cfg, nil
+}
+
+func envOr(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func main() {
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	db, err := store.Open(cfg.dbPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	var verifier auth.Verifier
+	if cfg.mockAuth {
+		verifier = auth.NewMockVerifier(cfg.mockAccount, cfg.mockPassword)
+	}
+
+	srv := &http.Server{
+		Addr:              cfg.addr,
+		Handler:           api.New(db, verifier, auth.NewSessions(cfg.sessionTTL)),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	log.Printf("server listening on %s", cfg.Address)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Printf("server stopped: %v", err)
-		os.Exit(1)
+
+	log.Printf("server listening on %s", cfg.addr)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("server stopped: %v", err)
 	}
 }

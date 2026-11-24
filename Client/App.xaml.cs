@@ -18,6 +18,20 @@ namespace Client
         public App()
         {
             InitializeComponent();
+            UnhandledException += OnUnhandledException;
+        }
+
+        private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+        {
+            try
+            {
+                string logPath = Path.Combine(Path.GetTempPath(), "weixinorc-client.log");
+                File.AppendAllText(logPath, $"[{DateTime.Now:O}] {e.Message}\n{e.Exception}\n\n");
+            }
+            catch
+            {
+                // Ignore logging errors.
+            }
         }
 
         /// <summary>

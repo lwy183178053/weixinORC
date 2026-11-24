@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"time"
 )
 
@@ -23,36 +21,54 @@ type MessageInput struct {
 }
 
 func (s *Store) CreateMessage(ctx context.Context, ownerID string, customerID int64, input MessageInput) (Message, error) {
-	var exists int
-	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM customers WHERE owner_id = ? AND id = ?`, ownerID, customerID).Scan(&exists)
-	if errors.Is(err, sql.ErrNoRows) {
+	ok, err := s.customerExists(ctx, ownerID, customerID)
+	if err != nil {
+		return Message{}, err
+	}
+	if !ok {
 		return Message{}, ErrNotFound
 	}
+
+	sentAt := input.SentAt.UTC().Format(time.RFC3339Nano)
+	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO messages (owner_id, customer_id, direction, content, sent_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		ownerID, customerID, input.Direction, input.Content, sentAt, createdAt,
+	)
 	if err != nil {
 		return Message{}, err
 	}
-	now := time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, `INSERT INTO messages(owner_id, customer_id, direction, content, sent_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`, ownerID, customerID, input.Direction, input.Content, input.SentAt.UTC().Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+
+	id, err := res.LastInsertId()
 	if err != nil {
 		return Message{}, err
 	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return Message{}, err
-	}
-	return Message{ID: id, CustomerID: customerID, Direction: input.Direction, Content: input.Content, SentAt: input.SentAt.UTC().Format(time.RFC3339Nano), CreatedAt: now.Format(time.RFC3339Nano)}, nil
+
+	return Message{
+		ID:         id,
+		CustomerID: customerID,
+		Direction:  input.Direction,
+		Content:    input.Content,
+		SentAt:     sentAt,
+		CreatedAt:  createdAt,
+	}, nil
 }
 
 func (s *Store) ListMessages(ctx context.Context, ownerID string, customerID, cursor int64, limit int) ([]Message, int64, error) {
-	var exists int
-	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM customers WHERE owner_id = ? AND id = ?`, ownerID, customerID).Scan(&exists)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, 0, ErrNotFound
-	}
+	ok, err := s.customerExists(ctx, ownerID, customerID)
 	if err != nil {
 		return nil, 0, err
 	}
-	query := `SELECT id, customer_id, direction, content, sent_at, created_at FROM messages WHERE owner_id = ? AND customer_id = ?`
+	if !ok {
+		return nil, 0, ErrNotFound
+	}
+
+	query := `
+		SELECT id, customer_id, direction, content, sent_at, created_at
+		FROM messages
+		WHERE owner_id = ? AND customer_id = ?`
 	args := []any{ownerID, customerID}
 	if cursor > 0 {
 		query += ` AND id < ?`
@@ -60,6 +76,7 @@ func (s *Store) ListMessages(ctx context.Context, ownerID string, customerID, cu
 	}
 	query += ` ORDER BY id DESC LIMIT ?`
 	args = append(args, limit+1)
+
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, err
@@ -68,19 +85,20 @@ func (s *Store) ListMessages(ctx context.Context, ownerID string, customerID, cu
 
 	items := make([]Message, 0, limit)
 	for rows.Next() {
-		var message Message
-		if err := rows.Scan(&message.ID, &message.CustomerID, &message.Direction, &message.Content, &message.SentAt, &message.CreatedAt); err != nil {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.CustomerID, &m.Direction, &m.Content, &m.SentAt, &m.CreatedAt); err != nil {
 			return nil, 0, err
 		}
-		items = append(items, message)
+		items = append(items, m)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
-	var next int64
+
+	var nextCursor int64
 	if len(items) > limit {
 		items = items[:limit]
-		next = items[len(items)-1].ID
+		nextCursor = items[len(items)-1].ID
 	}
-	return items, next, nil
+	return items, nextCursor, nil
 }

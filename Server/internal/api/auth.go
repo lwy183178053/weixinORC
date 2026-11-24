@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
@@ -15,33 +14,40 @@ type loginRequest struct {
 }
 
 func (s *Server) login(c *gin.Context) {
-	var request loginRequest
-	if !decodeJSON(c, &request) {
+	var req loginRequest
+	if !bindJSON(c, &req) {
 		return
 	}
-	if strings.TrimSpace(request.Account) == "" || request.Password == "" || len(request.Account) > 256 || len(request.Password) > 1024 {
-		writeError(c, http.StatusBadRequest, "invalid_credentials_format")
+	if strings.TrimSpace(req.Account) == "" || req.Password == "" || len(req.Account) > 256 || len(req.Password) > 1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_credentials_format"})
 		return
 	}
-	identity, err := s.verifier.Verify(c.Request.Context(), request.Account, request.Password)
+	if s.verifier == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "authentication_unavailable"})
+		return
+	}
+
+	identity, err := s.verifier.Verify(c.Request.Context(), req.Account, req.Password)
 	if err != nil {
-		if errors.Is(err, auth.ErrUnavailable) {
-			writeError(c, http.StatusServiceUnavailable, "authentication_unavailable")
-			return
-		}
-		writeError(c, http.StatusUnauthorized, "invalid_credentials")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_credentials"})
 		return
 	}
 	if identity.EmployeeID == "" {
-		writeError(c, http.StatusServiceUnavailable, "authentication_unavailable")
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "authentication_unavailable"})
 		return
 	}
+
 	token, expiresAt, err := s.sessions.Create(identity)
 	if err != nil {
-		writeError(c, http.StatusInternalServerError, "internal_error")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal_error"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"token": token, "expires_at": expiresAt.UTC(), "employee": identity})
+
+	c.JSON(http.StatusOK, gin.H{
+		"token":      token,
+		"expires_at": expiresAt.UTC(),
+		"employee":   identity,
+	})
 }
 
 func (s *Server) logout(c *gin.Context) {
@@ -50,5 +56,5 @@ func (s *Server) logout(c *gin.Context) {
 }
 
 func (s *Server) me(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"employee": currentIdentity(c)})
+	c.JSON(http.StatusOK, gin.H{"employee": auth.IdentityFromContext(c)})
 }

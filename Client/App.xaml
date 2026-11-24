@@ -3,14 +3,99 @@
     x:Class="Client.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:Client">
+    xmlns:local="using:Client"
+    RequestedTheme="Light">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
-                <!-- Other merged dictionaries here -->
             </ResourceDictionary.MergedDictionaries>
-            <!-- Other app resources here -->
+
+            <!-- Apifox-inspired Brand & Surface Palette -->
+            <Color x:Key="BrandPrimaryColor">#7C5CFC</Color>
+            <Color x:Key="BrandPrimaryHoverColor">#6946F5</Color>
+            <Color x:Key="BrandPrimaryPressedColor">#5835E0</Color>
+            <Color x:Key="BrandSoftBgColor">#F1EEFF</Color>
+
+            <SolidColorBrush x:Key="BrandPrimaryBrush" Color="#7C5CFC" />
+            <SolidColorBrush x:Key="BrandPrimaryHoverBrush" Color="#6946F5" />
+            <SolidColorBrush x:Key="BrandSoftBgBrush" Color="#F1EEFF" />
+            <SolidColorBrush x:Key="BrandSoftBorderBrush" Color="#DDD5FF" />
+
+            <SolidColorBrush x:Key="AppChromeBgBrush" Color="#F4F5F9" />
+            <SolidColorBrush x:Key="AppRailBgBrush" Color="#F2F3F8" />
+            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="AppCanvasBgBrush" Color="#F8F9FC" />
+            <SolidColorBrush x:Key="AppInputBgBrush" Color="#F5F6FA" />
+            <SolidColorBrush x:Key="AppBorderBrush" Color="#E6E8F0" />
+            <SolidColorBrush x:Key="AppBorderSubtleBrush" Color="#EEF0F6" />
+
+            <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1F2329" />
+            <SolidColorBrush x:Key="TextSecondaryBrush" Color="#646A73" />
+            <SolidColorBrush x:Key="TextMutedBrush" Color="#8F959E" />
+
+            <SolidColorBrush x:Key="SuccessBgBrush" Color="#E9F9F0" />
+            <SolidColorBrush x:Key="SuccessTextBrush" Color="#17A34A" />
+            <SolidColorBrush x:Key="WarningBgBrush" Color="#FFF4E5" />
+            <SolidColorBrush x:Key="WarningTextBrush" Color="#D97706" />
+            <SolidColorBrush x:Key="DangerBgBrush" Color="#FEECEB" />
+            <SolidColorBrush x:Key="DangerTextBrush" Color="#DC2626" />
+            <SolidColorBrush x:Key="InfoBgBrush" Color="#EAF3FF" />
+            <SolidColorBrush x:Key="InfoTextBrush" Color="#2563EB" />
+
+            <!-- Override default accent so controls harmonize with Brand Violet -->
+            <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#7C5CFC" />
+            <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#6946F5" />
+            <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#5835E0" />
+
+            <!-- Primary Violet CTA Button Style -->
+            <Style x:Key="PrimaryVioletButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="{StaticResource BrandPrimaryBrush}" />
+                <Setter Property="Foreground" Value="#FFFFFF" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="7" />
+                <Setter Property="Padding" Value="16,8" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+            </Style>
+
+            <!-- Clean Bordered Secondary Button Style -->
+            <Style x:Key="SecondaryOutlineButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="#FFFFFF" />
+                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="7" />
+                <Setter Property="Padding" Value="14,7" />
+            </Style>
+
+            <!-- Subtle Ghost Rail Button Style -->
+            <Style x:Key="RailButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Width" Value="54" />
+                <Setter Property="Height" Value="54" />
+                <Setter Property="Padding" Value="2" />
+            </Style>
+
+            <!-- Modern Soft Input Style -->
+            <Style x:Key="SoftTextBoxStyle" TargetType="TextBox">
+                <Setter Property="Background" Value="{StaticResource AppInputBgBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="7" />
+                <Setter Property="Padding" Value="12,8" />
+                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+            </Style>
+
+            <Style x:Key="SoftPasswordBoxStyle" TargetType="PasswordBox">
+                <Setter Property="Background" Value="{StaticResource AppInputBgBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="7" />
+                <Setter Property="Padding" Value="12,8" />
+                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

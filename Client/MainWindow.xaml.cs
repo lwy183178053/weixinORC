@@ -1,99 +1,77 @@
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
-
 using Client.Pages;
+using Client.Services;
+using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media.Animation;
+using Windows.Graphics;
+using Windows.UI;
 
 namespace Client
 {
     public sealed partial class MainWindow : Window
     {
-        private int _tabCounter;
+        public static MainWindow? Instance { get; private set; }
 
         public MainWindow()
         {
             InitializeComponent();
+            Instance = this;
 
-            // Extend content into the title bar and use the TabView's
-            // drag region so the tab strip acts as the title bar area.
+            AppServices.MainWindowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
+
+            ConfigureTitleBar();
+            ResizeAndCenter(1320, 840);
+            ShowLoginView();
+        }
+
+        private void ConfigureTitleBar()
+        {
             ExtendsContentIntoTitleBar = true;
-            SetTitleBar(CustomDragRegion);
-            AppWindow.SetIcon("Assets/AppIcon.ico");
 
-            // Reserve space at the right edge of the tab strip for the system
-            // caption buttons, scaled to the current DPI so they don't overlap
-            // tabs on high-DPI displays.
-            AppWindow.Changed += OnAppWindowChanged;
-            UpdateCaptionButtonInset();
-
-            // Add a few default tabs on startup.
-            AddTab("Home", typeof(HomePage));
-            AddTab("About", typeof(AboutPage));
-            TabControl.SelectedIndex = 0;
-        }
-
-        private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
-        {
-            if (args.DidSizeChange || args.DidPositionChange)
+            string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+            if (File.Exists(iconPath))
             {
-                UpdateCaptionButtonInset();
+                AppWindow.SetIcon(iconPath);
+            }
+
+            if (AppWindowTitleBar.IsCustomizationSupported())
+            {
+                var titleBar = AppWindow.TitleBar;
+                titleBar.ButtonBackgroundColor = Colors.Transparent;
+                titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
+                titleBar.ButtonForegroundColor = Color.FromArgb(255, 31, 35, 41);
+                titleBar.ButtonHoverForegroundColor = Color.FromArgb(255, 31, 35, 41);
+                titleBar.ButtonHoverBackgroundColor = Color.FromArgb(255, 232, 234, 242);
+                titleBar.ButtonPressedBackgroundColor = Color.FromArgb(255, 220, 223, 235);
             }
         }
 
-        private void UpdateCaptionButtonInset()
+        public void SetDragRegion(UIElement element)
         {
-            // RightInset is in physical pixels; convert to DIPs.
-            double scale = (Content as FrameworkElement)?.XamlRoot?.RasterizationScale ?? 1.0;
-            if (scale <= 0)
-            {
-                scale = 1.0;
-            }
-
-            CustomDragRegion.MinWidth = AppWindow.TitleBar.RightInset / scale;
+            SetTitleBar(element);
         }
 
-        /// <summary>
-        /// Creates a new tab with the given header and navigates it to the specified page type.
-        /// </summary>
-        private TabViewItem AddTab(string header, System.Type pageType)
+        public void ShowLoginView()
         {
-            var tab = new TabViewItem
-            {
-                Header = header,
-                IconSource = new SymbolIconSource { Symbol = Symbol.Document }
-            };
-
-            var frame = new Frame();
-            frame.Navigate(pageType);
-            tab.Content = frame;
-
-            TabControl.TabItems.Add(tab);
-            return tab;
+            RootFrame.Navigate(typeof(LoginPage), null, new EntranceNavigationTransitionInfo());
         }
 
-        /// <summary>
-        /// Called when the user clicks the "+" button to add a new tab.
-        /// </summary>
-        private void TabControl_AddTabButtonClick(TabView sender, object args)
+        public void EnterWorkbench()
         {
-            _tabCounter++;
-            var tab = AddTab($"New Tab {_tabCounter}", typeof(HomePage));
-            sender.SelectedItem = tab;
+            RootFrame.Navigate(typeof(WorkbenchPage), null, new DrillInNavigationTransitionInfo());
         }
 
-        /// <summary>
-        /// Called when a tab's close button is clicked.
-        /// Closes the window if the last tab is removed.
-        /// </summary>
-        private void TabControl_TabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
+        private void ResizeAndCenter(int width, int height)
         {
-            sender.TabItems.Remove(args.Tab);
-
-            if (sender.TabItems.Count == 0)
+            AppWindow.Resize(new SizeInt32(width, height));
+            var displayArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary);
+            if (displayArea is not null)
             {
-                Close();
+                var work = displayArea.WorkArea;
+                int x = work.X + Math.Max(0, (work.Width - width) / 2);
+                int y = work.Y + Math.Max(0, (work.Height - height) / 2);
+                AppWindow.Move(new PointInt32(x, y));
             }
         }
     }

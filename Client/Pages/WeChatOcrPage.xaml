@@ -1,0 +1,618 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Client.Pages.WeChatOcrPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:Client.Models"
+    xmlns:services="using:Client.Services"
+    mc:Ignorable="d">
+
+    <Grid Background="#FFFFFF">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="268" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="368" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Column 0: Apifox-style Secondary Sidebar (Window Tree / List) -->
+        <Border
+            Grid.Column="0"
+            Background="#FFFFFF"
+            BorderBrush="{StaticResource AppBorderBrush}"
+            BorderThickness="0,0,1,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Sidebar Title & Count -->
+                <Grid Grid.Row="0" Padding="14,14,14,8">
+                    <TextBlock
+                        FontSize="14.5"
+                        FontWeight="SemiBold"
+                        Foreground="{StaticResource TextPrimaryBrush}"
+                        Text="微信窗口监控" />
+                    <Border
+                        HorizontalAlignment="Right"
+                        Padding="7,2"
+                        Background="{StaticResource BrandSoftBgBrush}"
+                        CornerRadius="10">
+                        <TextBlock
+                            x:Name="WindowCountPill"
+                            FontSize="11"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource BrandPrimaryBrush}"
+                            Text="0" />
+                    </Border>
+                </Grid>
+
+                <!-- Search + Square Purple Refresh Button (Apifox signature pattern) -->
+                <StackPanel Grid.Row="1" Padding="14,4,14,10" Spacing="8">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox
+                            x:Name="WindowSearchBox"
+                            Height="34"
+                            Padding="10,6"
+                            FontSize="12.5"
+                            PlaceholderText="筛选窗口标题或进程..."
+                            Style="{StaticResource SoftTextBoxStyle}"
+                            TextChanged="WindowSearchBox_TextChanged" />
+                        <Button
+                            Grid.Column="1"
+                            Width="34"
+                            Height="34"
+                            Padding="0"
+                            Click="RefreshWindowsButton_Click"
+                            CornerRadius="7"
+                            Style="{StaticResource PrimaryVioletButtonStyle}"
+                            ToolTipService.ToolTip="刷新窗口列表">
+                            <FontIcon FontSize="14" Foreground="#FFFFFF" Glyph="&#xE72C;" />
+                        </Button>
+                    </Grid>
+
+                    <CheckBox
+                        x:Name="ShowAllWindowsCheck"
+                        MinHeight="24"
+                        Checked="ShowAllWindowsCheck_Changed"
+                        FontSize="12"
+                        Foreground="{StaticResource TextSecondaryBrush}"
+                        Unchecked="ShowAllWindowsCheck_Changed">
+                        <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Text="包含全部桌面窗口（无微信时调试）" />
+                    </CheckBox>
+                </StackPanel>
+
+                <!-- Detected Windows List -->
+                <Grid Grid.Row="2">
+                    <TextBlock
+                        x:Name="EmptyWindowListHint"
+                        Margin="20,28"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        FontSize="12"
+                        Foreground="{StaticResource TextMutedBrush}"
+                        Text="未检测到运行中的微信/企业微信，可勾选上方“包含全部桌面窗口”或直接导入本地图片测试 OCR。"
+                        TextAlignment="Center"
+                        TextWrapping="Wrap"
+                        Visibility="Collapsed" />
+
+                    <ListView
+                        x:Name="WindowsListView"
+                        Padding="8,0,8,8"
+                        SelectionChanged="WindowsListView_SelectionChanged"
+                        SelectionMode="Single">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="models:WeChatWindowInfo">
+                                <Border Padding="6,8" CornerRadius="6">
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <Border
+                                            Grid.Column="0"
+                                            VerticalAlignment="Top"
+                                            Margin="0,2,0,0"
+                                            Padding="5,2"
+                                            Background="{StaticResource BrandSoftBgBrush}"
+                                            CornerRadius="4">
+                                            <TextBlock
+                                                FontSize="10.5"
+                                                FontWeight="SemiBold"
+                                                Foreground="{StaticResource BrandPrimaryBrush}"
+                                                Text="{x:Bind ShortTag}" />
+                                        </Border>
+
+                                        <StackPanel Grid.Column="1" Spacing="2">
+                                            <TextBlock
+                                                FontSize="12.5"
+                                                FontWeight="SemiBold"
+                                                Foreground="{StaticResource TextPrimaryBrush}"
+                                                Text="{x:Bind DisplayTitle}"
+                                                TextTrimming="CharacterEllipsis" />
+                                            <TextBlock
+                                                FontSize="11"
+                                                Foreground="{StaticResource TextMutedBrush}"
+                                                Text="{x:Bind SummaryLine}"
+                                                TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+
+                <!-- Bottom Window Show / Hide Actions -->
+                <Border
+                    Grid.Row="3"
+                    Padding="12"
+                    Background="{StaticResource AppCanvasBgBrush}"
+                    BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                    BorderThickness="0,1,0,0">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            x:Name="ShowWindowButton"
+                            Grid.Column="0"
+                            Height="34"
+                            HorizontalAlignment="Stretch"
+                            Click="ShowWindowButton_Click"
+                            Content="显示窗口"
+                            FontSize="12.5"
+                            IsEnabled="False"
+                            Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                        <Button
+                            x:Name="HideWindowButton"
+                            Grid.Column="1"
+                            Height="34"
+                            HorizontalAlignment="Stretch"
+                            Click="HideWindowButton_Click"
+                            Content="隐藏暂停"
+                            FontSize="12.5"
+                            IsEnabled="False"
+                            Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- Column 1: Center Apifox-style Action Bar & OCR Preview Stage -->
+        <Grid Grid.Column="1" Background="#FFFFFF">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- Apifox-style Request/Action Bar -->
+            <Border
+                Grid.Row="0"
+                Padding="16,12"
+                Background="#FFFFFF"
+                BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                BorderThickness="0,0,0,1">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Engine Selector Pill -->
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Border
+                            Padding="8,5"
+                            Background="{StaticResource WarningBgBrush}"
+                            CornerRadius="6">
+                            <TextBlock
+                                FontSize="11.5"
+                                FontWeight="Bold"
+                                Foreground="{StaticResource WarningTextBrush}"
+                                Text="OCR" />
+                        </Border>
+                        <ComboBox
+                            x:Name="OcrEngineCombo"
+                            MinWidth="230"
+                            Height="34"
+                            SelectionChanged="OcrEngineCombo_SelectionChanged">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="services:IOcrEngine">
+                                    <TextBlock FontSize="12.5" Text="{x:Bind DisplayName}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <!-- Target Preview Meta -->
+                    <TextBlock
+                        x:Name="PreviewMetaText"
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        Foreground="{StaticResource TextMutedBrush}"
+                        Text="请选择左侧窗口或导入图片开始识别"
+                        TextTrimming="CharacterEllipsis" />
+
+                    <!-- Primary Action Buttons -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Button
+                            x:Name="CaptureAndOcrButton"
+                            Height="34"
+                            Click="CaptureAndOcrButton_Click"
+                            Content="截取并识别"
+                            FontSize="12.5"
+                            IsEnabled="False"
+                            Style="{StaticResource PrimaryVioletButtonStyle}" />
+                        <Button
+                            Height="34"
+                            Click="LoadImageButton_Click"
+                            Content="导入本地图片"
+                            FontSize="12.5"
+                            Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Compact Notification Strip -->
+            <Border
+                x:Name="StatusBanner"
+                Grid.Row="1"
+                Margin="16,12,16,0"
+                Padding="12,8"
+                Background="{StaticResource BrandSoftBgBrush}"
+                BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Visibility="Collapsed">
+                <Grid>
+                    <TextBlock
+                        x:Name="StatusBannerText"
+                        VerticalAlignment="Center"
+                        FontSize="12.5"
+                        Foreground="{StaticResource TextPrimaryBrush}"
+                        TextWrapping="Wrap" />
+                    <Button
+                        HorizontalAlignment="Right"
+                        Padding="6,2"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Click="CloseBannerButton_Click"
+                        Content="✕"
+                        FontSize="11"
+                        Foreground="{StaticResource TextMutedBrush}" />
+                </Grid>
+            </Border>
+
+            <!-- Preview Canvas Area -->
+            <Grid Grid.Row="2" Padding="16">
+                <Border
+                    Background="{StaticResource AppCanvasBgBrush}"
+                    BorderBrush="{StaticResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Canvas Sub-toolbar -->
+                        <Border
+                            Grid.Row="0"
+                            Padding="14,8"
+                            Background="#FFFFFF"
+                            BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                            BorderThickness="0,0,0,1"
+                            CornerRadius="10,10,0,0">
+                            <Grid>
+                                <TextBlock
+                                    x:Name="EngineNoteText"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Foreground="{StaticResource TextSecondaryBrush}"
+                                    TextTrimming="CharacterEllipsis" />
+                                <CheckBox
+                                    x:Name="ShowOverlayCheck"
+                                    HorizontalAlignment="Right"
+                                    MinHeight="24"
+                                    IsChecked="True"
+                                    Checked="ShowOverlayCheck_Changed"
+                                    Unchecked="ShowOverlayCheck_Changed">
+                                    <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Text="显示 OCR 紫色定位框" />
+                                </CheckBox>
+                            </Grid>
+                        </Border>
+
+                        <!-- Image + Canvas Stage -->
+                        <Grid Grid.Row="1" Padding="14">
+                            <StackPanel
+                                x:Name="EmptyPreviewHint"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Spacing="10">
+                                <Border
+                                    Width="56"
+                                    Height="56"
+                                    HorizontalAlignment="Center"
+                                    Background="{StaticResource BrandSoftBgBrush}"
+                                    CornerRadius="14">
+                                    <FontIcon
+                                        FontSize="24"
+                                        Foreground="{StaticResource BrandPrimaryBrush}"
+                                        Glyph="&#xE8FE;" />
+                                </Border>
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    FontSize="14"
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource TextPrimaryBrush}"
+                                    Text="等待截取微信画面或加载截图" />
+                                <TextBlock
+                                    MaxWidth="360"
+                                    HorizontalAlignment="Center"
+                                    FontSize="12"
+                                    Foreground="{StaticResource TextMutedBrush}"
+                                    Text="选中左侧窗口后点击右上角“截取并识别”，或点击“导入本地图片”快速验证中文 OCR 框选与字段提取。"
+                                    TextAlignment="Center"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <Viewbox x:Name="PreviewViewbox" Stretch="Uniform" Visibility="Collapsed">
+                                <Grid x:Name="PreviewSurface">
+                                    <Image x:Name="PreviewImage" Stretch="Fill" />
+                                    <Canvas x:Name="OverlayCanvas" IsHitTestVisible="False" />
+                                </Grid>
+                            </Viewbox>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- Column 2: Right Inspector Panel (Underline Tabs: Verification & OCR Table) -->
+        <Border
+            Grid.Column="2"
+            Background="#FFFFFF"
+            BorderBrush="{StaticResource AppBorderBrush}"
+            BorderThickness="1,0,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Apifox-style Underline Tab Header -->
+                <Border
+                    Grid.Row="0"
+                    Padding="16,10,16,0"
+                    BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                    BorderThickness="0,0,0,1">
+                    <StackPanel Orientation="Horizontal" Spacing="20">
+                        <Button
+                            Padding="0,0,0,10"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Click="InspectorTab_Click"
+                            Tag="verify">
+                            <StackPanel Spacing="6">
+                                <TextBlock
+                                    x:Name="TabVerifyText"
+                                    FontSize="13"
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource BrandPrimaryBrush}"
+                                    Text="状态与人工核验" />
+                                <Border
+                                    x:Name="TabVerifyUnderline"
+                                    Height="2"
+                                    Background="{StaticResource BrandPrimaryBrush}"
+                                    CornerRadius="1" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button
+                            Padding="0,0,0,10"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Click="InspectorTab_Click"
+                            Tag="lines">
+                            <StackPanel Spacing="6">
+                                <TextBlock
+                                    x:Name="TabLinesText"
+                                    FontSize="13"
+                                    Foreground="{StaticResource TextSecondaryBrush}"
+                                    Text="OCR 文本行 (0)" />
+                                <Border
+                                    x:Name="TabLinesUnderline"
+                                    Height="2"
+                                    Background="Transparent"
+                                    CornerRadius="1" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Border>
+
+                <!-- Tab 1: State Analysis & Human Verification Form -->
+                <ScrollViewer x:Name="VerifyPanel" Grid.Row="1" Padding="16">
+                    <StackPanel Spacing="14">
+                        <!-- WeChat State Card -->
+                        <Border
+                            Padding="14"
+                            Background="{StaticResource AppCanvasBgBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                            <StackPanel Spacing="8">
+                                <Grid>
+                                    <TextBlock
+                                        FontSize="13"
+                                        FontWeight="SemiBold"
+                                        Foreground="{StaticResource TextPrimaryBrush}"
+                                        Text="界面状态判定" />
+                                    <Border
+                                        x:Name="StatePillBorder"
+                                        HorizontalAlignment="Right"
+                                        Padding="8,2"
+                                        Background="{StaticResource BrandSoftBgBrush}"
+                                        CornerRadius="10">
+                                        <TextBlock
+                                            x:Name="InferredStateText"
+                                            FontSize="11.5"
+                                            FontWeight="SemiBold"
+                                            Foreground="{StaticResource BrandPrimaryBrush}"
+                                            Text="待识别" />
+                                    </Border>
+                                </Grid>
+                                <TextBlock
+                                    x:Name="InferredReasonText"
+                                    FontSize="12"
+                                    Foreground="{StaticResource TextSecondaryBrush}"
+                                    Text="执行一次截图或图片识别后，将自动判定微信登录页 / 主界面 / 掉线状态。"
+                                    TextWrapping="Wrap" />
+                                <TextBlock
+                                    x:Name="OcrTimingText"
+                                    FontFamily="Consolas"
+                                    FontSize="11"
+                                    Foreground="{StaticResource TextMutedBrush}"
+                                    Text="耗时: - · 文本行: 0" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Human Verification & Bind Card -->
+                        <Border
+                            Padding="14"
+                            Background="#FFFFFF"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                            <StackPanel Spacing="12">
+                                <StackPanel Spacing="2">
+                                    <TextBlock
+                                        FontSize="13.5"
+                                        FontWeight="SemiBold"
+                                        Foreground="{StaticResource TextPrimaryBrush}"
+                                        Text="客户资料人工核验与绑定" />
+                                    <TextBlock
+                                        FontSize="11.5"
+                                        Foreground="{StaticResource TextMutedBrush}"
+                                        Text="OCR 提取的微信号与昵称仅供参考，请员工核对准确后再写入 Go 后端。"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="5">
+                                    <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="微信昵称 / 备注名" />
+                                    <TextBox
+                                        x:Name="CandidateNameBox"
+                                        PlaceholderText="自动预填或手工输入"
+                                        Style="{StaticResource SoftTextBoxStyle}" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="5">
+                                    <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="微信号（确认后绑定）" />
+                                    <TextBox
+                                        x:Name="CandidateAccountBox"
+                                        PlaceholderText="例如 wxid_xxx 或自定义微信号"
+                                        Style="{StaticResource SoftTextBoxStyle}" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="5">
+                                    <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="员工备注 / 地区信息" />
+                                    <TextBox
+                                        x:Name="CandidateNoteBox"
+                                        Height="74"
+                                        AcceptsReturn="True"
+                                        PlaceholderText="补充客户意向、地区或跟进备注..."
+                                        Style="{StaticResource SoftTextBoxStyle}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <Button
+                                    x:Name="SaveCustomerButton"
+                                    Height="38"
+                                    HorizontalAlignment="Stretch"
+                                    Click="SaveCustomerButton_Click"
+                                    Content="人工核验确认并保存到客户库"
+                                    Style="{StaticResource PrimaryVioletButtonStyle}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Tab 2: OCR Lines Schema-style Table -->
+                <Grid x:Name="LinesPanel" Grid.Row="1" Padding="14" RowSpacing="10" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0">
+                        <TextBlock
+                            x:Name="OcrStatsText"
+                            VerticalAlignment="Center"
+                            FontSize="12.5"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource TextSecondaryBrush}"
+                            Text="共 0 行识别结果" />
+                        <Button
+                            HorizontalAlignment="Right"
+                            Height="30"
+                            Padding="10,0"
+                            Click="CopyAllTextButton_Click"
+                            Content="复制全文"
+                            FontSize="12"
+                            Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                    </Grid>
+
+                    <Border
+                        Grid.Row="1"
+                        BorderBrush="{StaticResource AppBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8">
+                        <ListView x:Name="OcrLinesListView" SelectionMode="None">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="models:OcrLineResult">
+                                    <Border
+                                        Padding="4,8"
+                                        BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                        BorderThickness="0,0,0,1">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock
+                                                FontSize="12.5"
+                                                Foreground="{StaticResource TextPrimaryBrush}"
+                                                IsTextSelectionEnabled="True"
+                                                Text="{x:Bind Text}"
+                                                TextWrapping="Wrap" />
+                                            <Border
+                                                HorizontalAlignment="Left"
+                                                Padding="6,1"
+                                                Background="{StaticResource AppInputBgBrush}"
+                                                CornerRadius="4">
+                                                <TextBlock
+                                                    FontFamily="Consolas"
+                                                    FontSize="10.5"
+                                                    Foreground="{StaticResource TextMutedBrush}"
+                                                    Text="{x:Bind BoundsLabel}" />
+                                            </Border>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Page>

@@ -27,6 +27,13 @@ CREATE TABLE IF NOT EXISTS customers (
 	wechat_remark  TEXT NOT NULL DEFAULT '',
 	wechat_name    TEXT NOT NULL DEFAULT '',
 	wechat_account TEXT NOT NULL DEFAULT '',
+	gender         TEXT NOT NULL DEFAULT '',
+	avatar_url     TEXT NOT NULL DEFAULT '',
+	description    TEXT NOT NULL DEFAULT '',
+	tags           TEXT NOT NULL DEFAULT '',
+	follow_status  TEXT NOT NULL DEFAULT '',
+	local_key      TEXT NOT NULL DEFAULT '',
+	native_id      TEXT NOT NULL DEFAULT '',
 	note           TEXT NOT NULL DEFAULT '',
 	region         TEXT NOT NULL DEFAULT '',
 	phone          TEXT NOT NULL DEFAULT '',
@@ -38,7 +45,7 @@ CREATE TABLE IF NOT EXISTS customers (
 	UNIQUE (id, owner_id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS customers_owner_wechat_account
+CREATE INDEX IF NOT EXISTS customers_owner_wechat_account_idx
 	ON customers(owner_id, wechat_account)
 	WHERE wechat_account <> '';
 
@@ -75,6 +82,25 @@ CREATE TABLE IF NOT EXISTS groups (
 CREATE INDEX IF NOT EXISTS groups_owner_id_id
 	ON groups(owner_id, id DESC);
 
+CREATE TABLE IF NOT EXISTS group_members (
+	id             INTEGER PRIMARY KEY AUTOINCREMENT,
+	owner_id       TEXT NOT NULL,
+	group_id       INTEGER NOT NULL,
+	local_key      TEXT NOT NULL DEFAULT '',
+	native_id      TEXT NOT NULL DEFAULT '',
+	group_nickname TEXT NOT NULL DEFAULT '',
+	wechat_name    TEXT NOT NULL DEFAULT '',
+	wechat_account TEXT NOT NULL DEFAULT '',
+	role           TEXT NOT NULL DEFAULT '',
+	note           TEXT NOT NULL DEFAULT '',
+	created_at     TEXT NOT NULL,
+	updated_at     TEXT NOT NULL,
+	FOREIGN KEY (group_id, owner_id) REFERENCES groups(id, owner_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS group_members_owner_group_id
+	ON group_members(owner_id, group_id, id DESC);
+
 CREATE TABLE IF NOT EXISTS group_messages (
 	id          INTEGER PRIMARY KEY AUTOINCREMENT,
 	owner_id    TEXT NOT NULL,
@@ -89,10 +115,40 @@ CREATE TABLE IF NOT EXISTS group_messages (
 
 CREATE INDEX IF NOT EXISTS group_messages_owner_group_id
 	ON group_messages(owner_id, group_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS wechat_accounts (
+	id                INTEGER PRIMARY KEY AUTOINCREMENT,
+	owner_id          TEXT NOT NULL,
+	account_type      TEXT NOT NULL CHECK (account_type IN ('personal', 'enterprise')),
+	wechat_id         TEXT NOT NULL DEFAULT '',
+	nickname          TEXT NOT NULL DEFAULT '',
+	status            TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline', 'disconnected', 'paused')),
+	last_heartbeat_at TEXT NOT NULL DEFAULT '',
+	created_at        TEXT NOT NULL,
+	updated_at        TEXT NOT NULL,
+	UNIQUE (owner_id, account_type)
+);
+
+CREATE INDEX IF NOT EXISTS wechat_accounts_owner
+	ON wechat_accounts(owner_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	owner_id    TEXT NOT NULL,
+	action      TEXT NOT NULL,
+	target_type TEXT NOT NULL DEFAULT '',
+	target_id   TEXT NOT NULL DEFAULT '',
+	detail      TEXT NOT NULL DEFAULT '',
+	created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS audit_logs_owner_id
+	ON audit_logs(owner_id, id DESC);
 `
 
 type Store struct {
-	db *sql.DB
+	db      *sql.DB
+	dataDir string
 }
 
 func Open(path string) (*Store, error) {
@@ -104,8 +160,12 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve database path: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o750); err != nil {
+	dataDir := filepath.Dir(absPath)
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dataDir, "avatars"), 0o750); err != nil {
+		return nil, fmt.Errorf("create avatars directory: %w", err)
 	}
 
 	db, err := sql.Open("sqlite", absPath)
@@ -124,18 +184,29 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("migrate customers table: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	return &Store{db: db, dataDir: dataDir}, nil
+}
+
+// AvatarDir returns the local directory where uploaded customer avatar files are stored.
+func (s *Store) AvatarDir() string {
+	return filepath.Join(s.dataDir, "avatars")
 }
 
 // migrateCustomerColumns safely adds new profile columns to pre-existing SQLite databases.
 func migrateCustomerColumns(db *sql.DB) error {
-	extraCols := []string{"wechat_remark", "region", "phone", "signature", "source", "added_date"}
+	extraCols := []string{
+		"wechat_remark", "region", "phone", "signature", "source", "added_date",
+		"gender", "avatar_url", "description", "tags", "follow_status", "local_key", "native_id",
+	}
 	for _, col := range extraCols {
 		_, err := db.Exec(fmt.Sprintf(`ALTER TABLE customers ADD COLUMN %s TEXT NOT NULL DEFAULT ''`, col))
 		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return err
 		}
 	}
+	// Replace legacy unique index with non-unique index so explicit user-confirmed duplicates are allowed.
+	_, _ = db.Exec(`DROP INDEX IF EXISTS customers_owner_wechat_account`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS customers_owner_wechat_account_idx ON customers(owner_id, wechat_account) WHERE wechat_account <> ''`)
 	return nil
 }
 

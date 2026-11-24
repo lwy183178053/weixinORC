@@ -1,3 +1,4 @@
+using Client.Controls;
 using Client.Dialogs;
 using Client.Models;
 using Client.Services;
@@ -16,10 +17,23 @@ namespace Client.Pages
         private GroupDto? _selectedGroup;
         private bool _isEditing;
         private bool _dialogOpen;
+        private bool _isDraggingSplitter;
+        private double _dragStartY;
+        private double _dragStartHeight;
+
+        private readonly ThreePaneResizeController _paneResizeController;
 
         public GroupsPage()
         {
             InitializeComponent();
+            _paneResizeController = ThreePaneResizeController.Attach(
+                RootThreePaneGrid,
+                LeftPaneColumn, LeftPaneSplitter,
+                CenterPaneColumn, RightPaneSplitter,
+                RightPaneColumn,
+                leftDefault: 268, leftMin: 220, leftMax: 420,
+                centerMin: 450,
+                rightDefault: 356, rightMin: 290, rightMax: 520);
         }
 
         protected override async void OnNavigatedTo(NavigationEventArgs e)
@@ -106,6 +120,7 @@ namespace Client.Pages
             bool hasGroup = g is not null;
 
             SendMessageButton.IsEnabled = hasGroup;
+            ImportChatScreenshotButton.IsEnabled = hasGroup;
             EditGroupButton.IsEnabled = hasGroup;
             DeleteGroupButton.IsEnabled = hasGroup;
             EmptyDetailHint.Visibility = hasGroup ? Visibility.Collapsed : Visibility.Visible;
@@ -389,6 +404,77 @@ namespace Client.Pages
             finally
             {
                 SendMessageButton.IsEnabled = _selectedGroup is not null;
+            }
+        }
+
+        private void ComposerSplitter_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            _isDraggingSplitter = true;
+            _dragStartY = e.GetCurrentPoint(ChatStageGrid).Position.Y;
+            _dragStartHeight = ComposerRow.ActualHeight;
+            ComposerSplitter.CapturePointer(e.Pointer);
+            e.Handled = true;
+        }
+
+        private void ComposerSplitter_PointerMoved(object sender, PointerRoutedEventArgs e)
+        {
+            if (!_isDraggingSplitter) return;
+            double currentY = e.GetCurrentPoint(ChatStageGrid).Position.Y;
+            double delta = _dragStartY - currentY;
+            double maxAllowed = Math.Min(440, Math.Max(160, ChatStageGrid.ActualHeight - 240));
+            double nextHeight = Math.Clamp(_dragStartHeight + delta, 128, maxAllowed);
+            ComposerRow.Height = new GridLength(nextHeight);
+        }
+
+        private void ComposerSplitter_PointerReleased(object sender, PointerRoutedEventArgs e)
+        {
+            if (!_isDraggingSplitter) return;
+            _isDraggingSplitter = false;
+            ComposerSplitter.ReleasePointerCapture(e.Pointer);
+        }
+
+        private void ComposerSplitter_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+        {
+            _isDraggingSplitter = false;
+        }
+
+        private void ChatStageGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            double maxAllowed = Math.Min(440, Math.Max(128, ChatStageGrid.ActualHeight - 240));
+            if (ComposerRow.Height.IsAbsolute && ComposerRow.Height.Value > maxAllowed)
+            {
+                ComposerRow.Height = new GridLength(Math.Max(128, maxAllowed));
+            }
+        }
+
+        private async void ImportChatScreenshotButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedGroup is null || _dialogOpen) return;
+            var target = _selectedGroup;
+            _dialogOpen = true;
+            try
+            {
+                var dialog = new ImportChatScreenshotDialog { XamlRoot = XamlRoot };
+                var choice = await dialog.ShowAsync();
+                if (choice != ContentDialogResult.Primary || dialog.ConfirmedMessages.Count == 0) return;
+
+                string fallbackSender = string.IsNullOrWhiteSpace(SenderNameBox.Text) ? "群成员" : SenderNameBox.Text.Trim();
+                string myName = AppServices.Backend.CurrentEmployee?.DisplayName ?? "我";
+
+                int saved = 0;
+                foreach (var msg in dialog.ConfirmedMessages)
+                {
+                    string senderName = msg.IsOutgoing ? myName : fallbackSender;
+                    var res = await AppServices.Backend.CreateGroupMessageAsync(target.Id, senderName, msg.Direction, msg.Content);
+                    if (res.IsSuccess) saved++;
+                }
+
+                await LoadGroupMessagesAsync(target);
+                ComposerHintText.Text = $"已从群聊截图批量导入 {saved} 条消息。";
+            }
+            finally
+            {
+                _dialogOpen = false;
             }
         }
 

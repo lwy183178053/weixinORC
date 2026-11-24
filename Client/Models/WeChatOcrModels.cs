@@ -102,6 +102,8 @@ namespace Client.Models
         public string CandidateWechatRemark { get; init; } = string.Empty;
         public string CandidateWechatName { get; init; } = string.Empty;
         public string CandidateWechatAccount { get; init; } = string.Empty;
+        public string CandidateGender { get; init; } = string.Empty;
+        public string CandidateTags { get; init; } = string.Empty;
         public string CandidateRegion { get; init; } = string.Empty;
         public string CandidatePhone { get; init; } = string.Empty;
         public string CandidateSignature { get; init; } = string.Empty;

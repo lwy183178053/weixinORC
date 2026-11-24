@@ -11,6 +11,13 @@ namespace Client
 {
     public sealed partial class MainWindow : Window
     {
+        private const int DefaultLogicalWidth = 1280;
+        private const int DefaultLogicalHeight = 720;
+        private const int MinLogicalWidth = 1040;
+        private const int MinLogicalHeight = 640;
+
+        private uint _lastAppliedDpi;
+
         public static MainWindow? Instance { get; private set; }
 
         public MainWindow()
@@ -21,9 +28,50 @@ namespace Client
             AppServices.MainWindowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
 
             ConfigureTitleBar();
-            ResizeAndCenter(1280, 720);
-            AppServices.Logs.Info("SYS", "客户端启动完成，默认窗口尺寸 1280x720。");
+            ApplyMinimumWindowSize();
+            ResizeAndCenter(DefaultLogicalWidth, DefaultLogicalHeight);
+            AppWindow.Changed += AppWindow_Changed;
+
+            AppServices.Logs.Info("SYS", $"客户端启动完成，默认窗口尺寸 {DefaultLogicalWidth}x{DefaultLogicalHeight}，最小尺寸 {MinLogicalWidth}x{MinLogicalHeight}。");
             ShowLoginView();
+        }
+
+        private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
+        {
+            if (args.DidPositionChange || args.DidSizeChange)
+            {
+                uint dpi = Win32WindowHelper.GetDpiForWindow(AppServices.MainWindowHandle);
+                if (dpi > 0 && dpi != _lastAppliedDpi)
+                {
+                    ApplyMinimumWindowSize();
+                }
+            }
+        }
+
+        private void ApplyMinimumWindowSize()
+        {
+            if (AppWindow.Presenter is not OverlappedPresenter presenter)
+            {
+                return;
+            }
+
+            uint dpi = Win32WindowHelper.GetDpiForWindow(AppServices.MainWindowHandle);
+            _lastAppliedDpi = dpi;
+            double scale = dpi > 0 ? dpi / 96.0 : 1.0;
+
+            int minW = (int)Math.Round(MinLogicalWidth * scale);
+            int minH = (int)Math.Round(MinLogicalHeight * scale);
+
+            var displayArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary);
+            if (displayArea is not null)
+            {
+                var work = displayArea.WorkArea;
+                minW = Math.Min(minW, Math.Max(800, work.Width - 40));
+                minH = Math.Min(minH, Math.Max(560, work.Height - 40));
+            }
+
+            presenter.PreferredMinimumWidth = minW;
+            presenter.PreferredMinimumHeight = minH;
         }
 
         private void ConfigureTitleBar()

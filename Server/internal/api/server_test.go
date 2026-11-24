@@ -233,3 +233,107 @@ func TestSessionRevocationAndRestart(t *testing.T) {
 		t.Fatalf("pre-restart token expected 401, got %d", response.Code)
 	}
 }
+
+func TestExtendedProfileAvatarAccountsMembersAndAuditLogs(t *testing.T) {
+	verifier := testVerifier{
+		password: "secret",
+		identities: map[string]auth.Identity{
+			"alice": {EmployeeID: "employee-a", Account: "alice", DisplayName: "Alice"},
+			"bob":   {EmployeeID: "employee-b", Account: "bob", DisplayName: "Bob"},
+		},
+	}
+	app := newTestApp(t, verifier)
+	defer app.db.Close()
+	alice := app.login(t, "alice")
+	bob := app.login(t, "bob")
+
+	// 1. Extended customer profile fields
+	created := app.request(t, http.MethodPost, "/api/v1/customers", alice, map[string]string{
+		"wechat_remark":  "张总",
+		"wechat_name":    "阿良",
+		"wechat_account": "wx_aliang",
+		"gender":         "男",
+		"description":    "华东区采购负责人",
+		"tags":           "VIP,高意向",
+		"follow_status":  "跟进中",
+		"local_key":      "local_001",
+		"native_id":      "",
+	})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create extended customer: got %d %s", created.Code, created.Body.String())
+	}
+	var cust store.Customer
+	if err := json.Unmarshal(created.Body.Bytes(), &cust); err != nil {
+		t.Fatal(err)
+	}
+	if cust.Gender != "男" || cust.FollowStatus != "跟进中" || cust.Tags != "VIP,高意向" || cust.Description != "华东区采购负责人" {
+		t.Fatalf("unexpected extended fields: %+v", cust)
+	}
+
+	// 2. Upload avatar (valid 1x1 PNG) and verify strict owner isolation
+	tinyPngBase64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	avatarResp := app.request(t, http.MethodPost, fmt.Sprintf("/api/v1/customers/%d/avatar", cust.ID), alice, map[string]string{
+		"image_base64": tinyPngBase64,
+	})
+	if avatarResp.Code != http.StatusOK {
+		t.Fatalf("upload avatar: got %d %s", avatarResp.Code, avatarResp.Body.String())
+	}
+	if err := json.Unmarshal(avatarResp.Body.Bytes(), &cust); err != nil {
+		t.Fatal(err)
+	}
+	if cust.AvatarURL == "" {
+		t.Fatal("expected non-empty avatar_url after upload")
+	}
+	if getOwn := app.request(t, http.MethodGet, cust.AvatarURL, alice, nil); getOwn.Code != http.StatusOK {
+		t.Fatalf("alice get own avatar expected 200, got %d", getOwn.Code)
+	}
+	if getCross := app.request(t, http.MethodGet, cust.AvatarURL, bob, nil); getCross.Code != http.StatusNotFound {
+		t.Fatalf("bob cross-owner get avatar expected 404, got %d", getCross.Code)
+	}
+
+	// 3. WeChat account binding
+	bindResp := app.request(t, http.MethodPost, "/api/v1/wechat-accounts", alice, map[string]string{
+		"account_type": "personal",
+		"wechat_id":    "wx_emp_alice",
+		"nickname":     "Alice工作号",
+		"status":       "online",
+	})
+	if bindResp.Code != http.StatusOK {
+		t.Fatalf("bind wechat account: got %d %s", bindResp.Code, bindResp.Body.String())
+	}
+	if listAcc := app.request(t, http.MethodGet, "/api/v1/wechat-accounts", alice, nil); listAcc.Code != http.StatusOK || !bytes.Contains(listAcc.Body.Bytes(), []byte("wx_emp_alice")) {
+		t.Fatalf("list wechat accounts: got %d %s", listAcc.Code, listAcc.Body.String())
+	}
+
+	// 4. Group & Group Members
+	grpResp := app.request(t, http.MethodPost, "/api/v1/groups", alice, map[string]any{"group_name": "VIP客户群", "member_count": 12})
+	if grpResp.Code != http.StatusCreated {
+		t.Fatalf("create group: got %d %s", grpResp.Code, grpResp.Body.String())
+	}
+	var grp store.Group
+	if err := json.Unmarshal(grpResp.Body.Bytes(), &grp); err != nil {
+		t.Fatal(err)
+	}
+	memResp := app.request(t, http.MethodPost, fmt.Sprintf("/api/v1/groups/%d/members", grp.ID), alice, map[string]string{
+		"group_nickname": "张总-采购",
+		"wechat_name":    "阿良",
+		"local_key":      "gm_01",
+	})
+	if memResp.Code != http.StatusCreated {
+		t.Fatalf("create group member: got %d %s", memResp.Code, memResp.Body.String())
+	}
+	if crossMem := app.request(t, http.MethodGet, fmt.Sprintf("/api/v1/groups/%d/members", grp.ID), bob, nil); crossMem.Code != http.StatusNotFound {
+		t.Fatalf("cross-owner list group members expected 404, got %d", crossMem.Code)
+	}
+
+	// 5. Audit logs (auto-recorded + client-posted)
+	if postAudit := app.request(t, http.MethodPost, "/api/v1/audit-logs", alice, map[string]string{
+		"action": "qr_cleanup", "target_type": "login_qr", "detail": "deleted temp qr file",
+	}); postAudit.Code != http.StatusCreated {
+		t.Fatalf("create audit log: got %d %s", postAudit.Code, postAudit.Body.String())
+	}
+	logsResp := app.request(t, http.MethodGet, "/api/v1/audit-logs", alice, nil)
+	if logsResp.Code != http.StatusOK || !bytes.Contains(logsResp.Body.Bytes(), []byte("qr_cleanup")) || !bytes.Contains(logsResp.Body.Bytes(), []byte("upload_avatar")) {
+		t.Fatalf("list audit logs: got %d %s", logsResp.Code, logsResp.Body.String())
+	}
+}

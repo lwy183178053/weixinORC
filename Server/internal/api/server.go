@@ -12,7 +12,7 @@ import (
 	"weixinorc/server/internal/store"
 )
 
-const maxBodyBytes = 1 << 20 // 1 MB
+const maxBodyBytes = 4 << 20 // 4 MB (supports base64 avatar upload up to 2 MB)
 
 type Server struct {
 	store    *store.Store
@@ -42,21 +42,40 @@ func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.
 	authed.POST("/logout", s.logout)
 	authed.GET("/me", s.me)
 
+	// Customers & Avatars & Messages
 	authed.GET("/customers", s.listCustomers)
 	authed.POST("/customers", s.createCustomer)
 	authed.GET("/customers/:id", s.getCustomer)
 	authed.PATCH("/customers/:id", s.updateCustomer)
 	authed.DELETE("/customers/:id", s.deleteCustomer)
+	authed.POST("/customers/:id/avatar", s.uploadCustomerAvatar)
+	authed.DELETE("/customers/:id/avatar", s.deleteCustomerAvatar)
+	authed.GET("/avatars/:filename", s.getAvatar)
 	authed.GET("/customers/:id/messages", s.listMessages)
 	authed.POST("/customers/:id/messages", s.createMessage)
 
+	// Groups & Members & Group Messages
 	authed.GET("/groups", s.listGroups)
 	authed.POST("/groups", s.createGroup)
 	authed.GET("/groups/:id", s.getGroup)
 	authed.PATCH("/groups/:id", s.updateGroup)
 	authed.DELETE("/groups/:id", s.deleteGroup)
+	authed.GET("/groups/:id/members", s.listGroupMembers)
+	authed.POST("/groups/:id/members", s.createGroupMember)
+	authed.PATCH("/groups/:id/members/:memberId", s.updateGroupMember)
+	authed.DELETE("/groups/:id/members/:memberId", s.deleteGroupMember)
 	authed.GET("/groups/:id/messages", s.listGroupMessages)
 	authed.POST("/groups/:id/messages", s.createGroupMessage)
+
+	// WeChat Accounts (1 employee <-> personal/enterprise WeChat binding)
+	authed.GET("/wechat-accounts", s.listWeChatAccounts)
+	authed.POST("/wechat-accounts", s.upsertWeChatAccount)
+	authed.PATCH("/wechat-accounts/:id", s.updateWeChatAccount)
+	authed.DELETE("/wechat-accounts/:id", s.deleteWeChatAccount)
+
+	// Audit Logs
+	authed.GET("/audit-logs", s.listAuditLogs)
+	authed.POST("/audit-logs", s.createAuditLog)
 
 	return r
 }

@@ -23,6 +23,7 @@ namespace Client.Services
     public sealed class BackendApiClient
     {
         private readonly HttpClient _httpClient;
+        private readonly Dictionary<string, byte[]> _avatarCache = new(StringComparer.Ordinal);
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
             PropertyNameCaseInsensitive = true
@@ -157,6 +158,52 @@ namespace Client.Services
         public Task<ApiResult<bool>> DeleteCustomerAsync(long customerId, CancellationToken ct = default) =>
             SendAuthedNoContentAsync(HttpMethod.Delete, $"/api/v1/customers/{customerId}", ct);
 
+        public async Task<ApiResult<CustomerDto>> UploadCustomerAvatarAsync(long customerId, byte[] imageBytes, CancellationToken ct = default)
+        {
+            string b64 = Convert.ToBase64String(imageBytes);
+            var res = await SendAuthedAsync<CustomerDto>(
+                HttpMethod.Post,
+                $"/api/v1/customers/{customerId}/avatar",
+                new UploadAvatarRequest { ImageBase64 = b64 },
+                ct);
+            if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.AvatarUrl))
+            {
+                _avatarCache[res.Data.AvatarUrl] = imageBytes;
+            }
+            return res;
+        }
+
+        public Task<ApiResult<CustomerDto>> DeleteCustomerAvatarAsync(long customerId, CancellationToken ct = default) =>
+            SendAuthedAsync<CustomerDto>(HttpMethod.Delete, $"/api/v1/customers/{customerId}/avatar", null, ct);
+
+        public async Task<byte[]?> DownloadAvatarBytesAsync(string? avatarUrl, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(avatarUrl) || !IsAuthenticated) return null;
+            if (_avatarCache.TryGetValue(avatarUrl, out var cached)) return cached;
+
+            try
+            {
+                string path = avatarUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                    ? avatarUrl
+                    : $"{BaseUrl}{(avatarUrl.StartsWith('/') ? avatarUrl : "/" + avatarUrl)}";
+                using var req = new HttpRequestMessage(HttpMethod.Get, path);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", AccessToken);
+                using var resp = await _httpClient.SendAsync(req, ct);
+                if (!resp.IsSuccessStatusCode) return null;
+
+                byte[] bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+                if (bytes.Length > 0)
+                {
+                    _avatarCache[avatarUrl] = bytes;
+                }
+                return bytes;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         public Task<ApiResult<MessageListResponse>> ListCustomerMessagesAsync(long customerId, int limit = 100, CancellationToken ct = default) =>
             SendAuthedAsync<MessageListResponse>(HttpMethod.Get, $"/api/v1/customers/{customerId}/messages?limit={limit}", null, ct);
 
@@ -191,6 +238,27 @@ namespace Client.Services
                     Direction = direction,
                     Content = content.Trim()
                 }, ct);
+
+        // ---- WeChat Accounts, Group Members & Audit Logs ----
+
+        public Task<ApiResult<WeChatAccountListResponse>> ListWeChatAccountsAsync(CancellationToken ct = default) =>
+            SendAuthedAsync<WeChatAccountListResponse>(HttpMethod.Get, "/api/v1/wechat-accounts", null, ct);
+
+        public Task<ApiResult<WeChatAccountDto>> UpsertWeChatAccountAsync(UpsertWeChatAccountRequest payload, CancellationToken ct = default) =>
+            SendAuthedAsync<WeChatAccountDto>(HttpMethod.Post, "/api/v1/wechat-accounts", payload, ct);
+
+        public Task<ApiResult<GroupMemberListResponse>> ListGroupMembersAsync(long groupId, int limit = 100, CancellationToken ct = default) =>
+            SendAuthedAsync<GroupMemberListResponse>(HttpMethod.Get, $"/api/v1/groups/{groupId}/members?limit={limit}", null, ct);
+
+        public Task<ApiResult<GroupMemberDto>> CreateGroupMemberAsync(long groupId, CreateGroupMemberRequest payload, CancellationToken ct = default) =>
+            SendAuthedAsync<GroupMemberDto>(HttpMethod.Post, $"/api/v1/groups/{groupId}/members", payload, ct);
+
+        public Task<ApiResult<AuditLogListResponse>> ListAuditLogsAsync(int limit = 100, CancellationToken ct = default) =>
+            SendAuthedAsync<AuditLogListResponse>(HttpMethod.Get, $"/api/v1/audit-logs?limit={limit}", null, ct);
+
+        public Task<ApiResult<AuditLogDto>> CreateAuditLogAsync(string action, string targetType, string targetId, string detail, CancellationToken ct = default) =>
+            SendAuthedAsync<AuditLogDto>(HttpMethod.Post, "/api/v1/audit-logs",
+                new CreateAuditLogRequest { Action = action, TargetType = targetType, TargetId = targetId, Detail = detail }, ct);
 
         private async Task<ApiResult<T>> SendAuthedAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct)
         {
@@ -274,6 +342,7 @@ namespace Client.Services
             AccessToken = null;
             TokenExpiresAt = null;
             CurrentEmployee = null;
+            _avatarCache.Clear();
             SessionChanged?.Invoke(this, EventArgs.Empty);
         }
 

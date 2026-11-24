@@ -17,25 +17,30 @@ import (
 )
 
 type appConfig struct {
-	addr         string
-	dbPath       string
-	sessionTTL   time.Duration
-	mockAuth     bool
-	mockAccount  string
-	mockPassword string
+	addr          string
+	dbPath        string
+	sessionTTL    time.Duration
+	authHTTPURL   string
+	authHTTPToken string
+	mockAuth      bool
+	mockAccount   string
+	mockPassword  string
 }
 
 func loadConfig() (appConfig, error) {
+	mockAuthRaw := strings.TrimSpace(os.Getenv("MOCK_AUTH"))
 	cfg := appConfig{
-		addr:         envOr("SERVER_ADDR", "127.0.0.1:28765"),
-		dbPath:       envOr("DATABASE_PATH", "data/weixinorc.db"),
-		sessionTTL:   7 * 24 * time.Hour,
-		mockAuth:     strings.EqualFold(os.Getenv("MOCK_AUTH"), "1") || strings.EqualFold(os.Getenv("MOCK_AUTH"), "true"),
-		mockAccount:  os.Getenv("MOCK_ACCOUNT"),
-		mockPassword: os.Getenv("MOCK_PASSWORD"),
+		addr:          envOr("SERVER_ADDR", "127.0.0.1:28765"),
+		dbPath:        envOr("DATABASE_PATH", "data/weixinorc.db"),
+		sessionTTL:    7 * 24 * time.Hour,
+		authHTTPURL:   strings.TrimSpace(os.Getenv("AUTH_HTTP_URL")),
+		authHTTPToken: strings.TrimSpace(os.Getenv("AUTH_HTTP_TOKEN")),
+		mockAuth:      strings.EqualFold(mockAuthRaw, "1") || strings.EqualFold(mockAuthRaw, "true"),
+		mockAccount:   strings.TrimSpace(os.Getenv("MOCK_ACCOUNT")),
+		mockPassword:  strings.TrimSpace(os.Getenv("MOCK_PASSWORD")),
 	}
 
-	if raw := os.Getenv("SESSION_TTL_HOURS"); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("SESSION_TTL_HOURS")); raw != "" {
 		hours, err := strconv.Atoi(raw)
 		if err != nil || hours < 1 || hours > 24*30 {
 			return appConfig{}, fmt.Errorf("SESSION_TTL_HOURS must be between 1 and 720")
@@ -87,7 +92,10 @@ func main() {
 	defer db.Close()
 
 	var verifier auth.Verifier
-	if cfg.mockAuth {
+	switch {
+	case cfg.authHTTPURL != "":
+		verifier = auth.NewHTTPVerifier(cfg.authHTTPURL, cfg.authHTTPToken, 10*time.Second)
+	case cfg.mockAuth:
 		verifier = auth.NewMockVerifier(cfg.mockAccount, cfg.mockPassword)
 	}
 

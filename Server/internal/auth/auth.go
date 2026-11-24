@@ -1,12 +1,15 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -55,6 +58,89 @@ func (v *MockVerifier) Verify(_ context.Context, account, password string) (Iden
 		return Identity{}, ErrInvalidCredentials
 	}
 	return v.identity, nil
+}
+
+// HTTPVerifier delegates employee verification to an external HTTP endpoint (e.g. 智美员工Bot).
+type HTTPVerifier struct {
+	endpoint string
+	apiToken string
+	client   *http.Client
+}
+
+func NewHTTPVerifier(endpoint, apiToken string, timeout time.Duration) *HTTPVerifier {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	return &HTTPVerifier{
+		endpoint: strings.TrimSpace(endpoint),
+		apiToken: strings.TrimSpace(apiToken),
+		client:   &http.Client{Timeout: timeout},
+	}
+}
+
+func (v *HTTPVerifier) Verify(ctx context.Context, account, password string) (Identity, error) {
+	payload, err := json.Marshal(map[string]string{
+		"account":  account,
+		"password": password,
+	})
+	if err != nil {
+		return Identity{}, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return Identity{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if v.apiToken != "" {
+		req.Header.Set("Authorization", "Bearer "+v.apiToken)
+	}
+
+	resp, err := v.client.Do(req)
+	if err != nil {
+		return Identity{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return Identity{}, ErrInvalidCredentials
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return Identity{}, fmt.Errorf("external auth returned status %d", resp.StatusCode)
+	}
+
+	var raw struct {
+		EmployeeID  string    `json:"employee_id"`
+		Account     string    `json:"account"`
+		DisplayName string    `json:"display_name"`
+		Employee    *Identity `json:"employee"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return Identity{}, err
+	}
+
+	id := Identity{
+		EmployeeID:  strings.TrimSpace(raw.EmployeeID),
+		Account:     strings.TrimSpace(raw.Account),
+		DisplayName: strings.TrimSpace(raw.DisplayName),
+	}
+	if raw.Employee != nil && strings.TrimSpace(raw.Employee.EmployeeID) != "" {
+		id = Identity{
+			EmployeeID:  strings.TrimSpace(raw.Employee.EmployeeID),
+			Account:     strings.TrimSpace(raw.Employee.Account),
+			DisplayName: strings.TrimSpace(raw.Employee.DisplayName),
+		}
+	}
+	if id.EmployeeID == "" {
+		return Identity{}, ErrInvalidCredentials
+	}
+	if id.Account == "" {
+		id.Account = account
+	}
+	if id.DisplayName == "" {
+		id.DisplayName = id.Account
+	}
+	return id, nil
 }
 
 type sessionEntry struct {

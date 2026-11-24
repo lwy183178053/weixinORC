@@ -28,7 +28,7 @@ namespace Client.Services
         private static readonly HashSet<string> KnownSectionLabels = new(StringComparer.OrdinalIgnoreCase)
         {
             "朋友资料", "更多信息", "朋友圈", "朋友权限", "发消息", "语音聊天", "视频聊天",
-            "备注", "备注名", "电话", "手机号", "个性签名", "来源", "添加时间", "地区", "微信号", "昵称", "共同群聊"
+            "备注", "备注名", "标签", "电话", "手机号", "个性签名", "来源", "添加时间", "地区", "微信号", "昵称", "共同群聊"
         };
 
         public static WeChatOcrAnalysis Analyze(WeChatWindowInfo? window, OcrRecognitionResult ocr)
@@ -44,6 +44,7 @@ namespace Client.Services
                 CandidateWechatRemark = profile.Remark,
                 CandidateWechatName = profile.Name,
                 CandidateWechatAccount = profile.Account,
+                CandidateTags = profile.Tags,
                 CandidateRegion = profile.Region,
                 CandidatePhone = profile.Phone,
                 CandidateSignature = profile.Signature,
@@ -141,12 +142,13 @@ namespace Client.Services
                 .ToList();
         }
 
-        private static (string Remark, string Name, string Account, string Region, string Phone, string Signature, string Source, string AddedDate)
+        private static (string Remark, string Name, string Account, string Tags, string Region, string Phone, string Signature, string Source, string AddedDate)
             ExtractProfileFromRows(List<List<OcrLineResult>> rows)
         {
             string remarkFromTable = string.Empty;
             string explicitNickname = string.Empty;
             string account = string.Empty;
+            string tags = string.Empty;
             string region = string.Empty;
             string phone = string.Empty;
             string signature = string.Empty;
@@ -211,6 +213,15 @@ namespace Client.Services
                     if (!string.IsNullOrEmpty(rightValue) && !PlaceholderRemarks.Contains(rightValue))
                     {
                         remarkFromTable = rightValue;
+                    }
+                    continue;
+                }
+
+                if (label == "标签")
+                {
+                    if (!string.IsNullOrEmpty(rightValue) && !rightValue.Contains("添加标签", StringComparison.Ordinal))
+                    {
+                        tags = rightValue;
                     }
                     continue;
                 }
@@ -305,7 +316,7 @@ namespace Client.Services
                 wechatName = topHeadline;
             }
 
-            return (wechatRemark, wechatName, account, region, phone, signature, source, addedDate);
+            return (wechatRemark, wechatName, account, tags, region, phone, signature, source, addedDate);
         }
 
         private static string CleanHeadlineRow(List<OcrLineResult> row)

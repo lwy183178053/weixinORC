@@ -1,4 +1,8 @@
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 
 namespace Client.Models
 {
@@ -47,8 +51,18 @@ namespace Client.Models
         public string Error { get; set; } = string.Empty;
     }
 
-    public sealed class CustomerDto
+    public sealed class UploadAvatarRequest
     {
+        [JsonPropertyName("image_base64")]
+        public string ImageBase64 { get; set; } = string.Empty;
+    }
+
+    public sealed class CustomerDto : INotifyPropertyChanged
+    {
+        private ImageSource? _avatarImage;
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
         [JsonPropertyName("id")]
         public long Id { get; set; }
 
@@ -60,6 +74,27 @@ namespace Client.Models
 
         [JsonPropertyName("wechat_account")]
         public string WechatAccount { get; set; } = string.Empty;
+
+        [JsonPropertyName("gender")]
+        public string Gender { get; set; } = string.Empty;
+
+        [JsonPropertyName("avatar_url")]
+        public string AvatarUrl { get; set; } = string.Empty;
+
+        [JsonPropertyName("description")]
+        public string Description { get; set; } = string.Empty;
+
+        [JsonPropertyName("tags")]
+        public string Tags { get; set; } = string.Empty;
+
+        [JsonPropertyName("follow_status")]
+        public string FollowStatus { get; set; } = string.Empty;
+
+        [JsonPropertyName("local_key")]
+        public string LocalKey { get; set; } = string.Empty;
+
+        [JsonPropertyName("native_id")]
+        public string NativeId { get; set; } = string.Empty;
 
         [JsonPropertyName("note")]
         public string Note { get; set; } = string.Empty;
@@ -91,6 +126,28 @@ namespace Client.Models
         [JsonPropertyName("updated_at")]
         public string UpdatedAt { get; set; } = string.Empty;
 
+        [JsonIgnore]
+        public ImageSource? AvatarImage
+        {
+            get => _avatarImage;
+            set
+            {
+                if (!ReferenceEquals(_avatarImage, value))
+                {
+                    _avatarImage = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(AvatarImageVisibility));
+                    OnPropertyChanged(nameof(AvatarInitialVisibility));
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public Visibility AvatarImageVisibility => _avatarImage is not null ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public Visibility AvatarInitialVisibility => _avatarImage is null ? Visibility.Visible : Visibility.Collapsed;
+
         public string DisplayName => !string.IsNullOrWhiteSpace(WechatRemark)
             ? WechatRemark
             : !string.IsNullOrWhiteSpace(WechatName)
@@ -99,15 +156,20 @@ namespace Client.Models
 
         public string AvatarInitial => DisplayName.Length > 0 ? DisplayName[..1].ToUpperInvariant() : "客";
 
-        public string PreviewLine => !string.IsNullOrWhiteSpace(LastMessage)
-            ? LastMessage
-            : !string.IsNullOrWhiteSpace(Note)
-                ? $"跟进：{Note}"
-                : !string.IsNullOrWhiteSpace(WechatRemark) && !string.IsNullOrWhiteSpace(WechatName)
-                    ? $"昵称：{WechatName}"
-                    : !string.IsNullOrWhiteSpace(WechatAccount)
-                        ? $"微信号：{WechatAccount}"
-                        : "点击查看详情与聊天记录";
+        public string PreviewLine
+        {
+            get
+            {
+                var parts = new List<string>(2);
+                if (!string.IsNullOrWhiteSpace(WechatAccount)) parts.Add(WechatAccount);
+                if (!string.IsNullOrWhiteSpace(Region)) parts.Add(Region);
+                if (parts.Count > 0) return string.Join(" · ", parts);
+                if (!string.IsNullOrWhiteSpace(WechatRemark) && !string.IsNullOrWhiteSpace(WechatName))
+                    return $"昵称：{WechatName}";
+                if (!string.IsNullOrWhiteSpace(Phone)) return Phone;
+                return $"客户 #{Id}";
+            }
+        }
 
         public string TimeShort => FormatShortTime(string.IsNullOrWhiteSpace(LastMessageAt) ? UpdatedAt : LastMessageAt);
 
@@ -120,6 +182,9 @@ namespace Client.Models
             }
             return string.Empty;
         }
+
+        private void OnPropertyChanged([CallerMemberName] string? name = null) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
     public sealed class CustomerListResponse
@@ -142,6 +207,24 @@ namespace Client.Models
         [JsonPropertyName("wechat_account")]
         public string WechatAccount { get; set; } = string.Empty;
 
+        [JsonPropertyName("gender")]
+        public string Gender { get; set; } = string.Empty;
+
+        [JsonPropertyName("description")]
+        public string Description { get; set; } = string.Empty;
+
+        [JsonPropertyName("tags")]
+        public string Tags { get; set; } = string.Empty;
+
+        [JsonPropertyName("follow_status")]
+        public string FollowStatus { get; set; } = string.Empty;
+
+        [JsonPropertyName("local_key")]
+        public string LocalKey { get; set; } = string.Empty;
+
+        [JsonPropertyName("native_id")]
+        public string NativeId { get; set; } = string.Empty;
+
         [JsonPropertyName("note")]
         public string Note { get; set; } = string.Empty;
 
@@ -159,6 +242,10 @@ namespace Client.Models
 
         [JsonPropertyName("added_date")]
         public string AddedDate { get; set; } = string.Empty;
+
+        [JsonPropertyName("allow_duplicate")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool AllowDuplicate { get; set; }
     }
 
     public sealed class MessageDto
@@ -236,11 +323,15 @@ namespace Client.Models
         public string DisplayTitleWithCount => MemberCount > 0 ? $"{DisplayName} ({MemberCount})" : DisplayName;
         public string AvatarInitial => DisplayName.Length > 0 ? DisplayName[..1].ToUpperInvariant() : "群";
 
-        public string PreviewLine => !string.IsNullOrWhiteSpace(LastMessage)
-            ? LastMessage
-            : !string.IsNullOrWhiteSpace(Note)
-                ? Note
-                : MemberCount > 0 ? $"{MemberCount} 位群成员" : "点击查看群档案与聊天记录";
+        public string PreviewLine
+        {
+            get
+            {
+                if (MemberCount > 0) return $"{MemberCount} 位成员";
+                if (!string.IsNullOrWhiteSpace(GroupKey)) return GroupKey;
+                return $"群组 #{Id}";
+            }
+        }
 
         public string TimeShort => CustomerDto.FormatShortTime(string.IsNullOrWhiteSpace(LastMessageAt) ? UpdatedAt : LastMessageAt);
     }
@@ -315,5 +406,155 @@ namespace Client.Models
 
         [JsonPropertyName("content")]
         public string Content { get; set; } = string.Empty;
+    }
+
+    public sealed class WeChatAccountDto
+    {
+        [JsonPropertyName("id")]
+        public long Id { get; set; }
+
+        [JsonPropertyName("account_type")]
+        public string AccountType { get; set; } = "personal";
+
+        [JsonPropertyName("wechat_id")]
+        public string WechatId { get; set; } = string.Empty;
+
+        [JsonPropertyName("nickname")]
+        public string Nickname { get; set; } = string.Empty;
+
+        [JsonPropertyName("status")]
+        public string Status { get; set; } = "offline";
+
+        [JsonPropertyName("last_heartbeat_at")]
+        public string LastHeartbeatAt { get; set; } = string.Empty;
+    }
+
+    public sealed class WeChatAccountListResponse
+    {
+        [JsonPropertyName("items")]
+        public List<WeChatAccountDto> Items { get; set; } = [];
+    }
+
+    public sealed class UpsertWeChatAccountRequest
+    {
+        [JsonPropertyName("account_type")]
+        public string AccountType { get; set; } = "personal";
+
+        [JsonPropertyName("wechat_id")]
+        public string WechatId { get; set; } = string.Empty;
+
+        [JsonPropertyName("nickname")]
+        public string Nickname { get; set; } = string.Empty;
+
+        [JsonPropertyName("status")]
+        public string Status { get; set; } = "online";
+    }
+
+    public sealed class GroupMemberDto
+    {
+        [JsonPropertyName("id")]
+        public long Id { get; set; }
+
+        [JsonPropertyName("group_id")]
+        public long GroupId { get; set; }
+
+        [JsonPropertyName("local_key")]
+        public string LocalKey { get; set; } = string.Empty;
+
+        [JsonPropertyName("native_id")]
+        public string NativeId { get; set; } = string.Empty;
+
+        [JsonPropertyName("group_nickname")]
+        public string GroupNickname { get; set; } = string.Empty;
+
+        [JsonPropertyName("wechat_name")]
+        public string WechatName { get; set; } = string.Empty;
+
+        [JsonPropertyName("wechat_account")]
+        public string WechatAccount { get; set; } = string.Empty;
+
+        [JsonPropertyName("role")]
+        public string Role { get; set; } = string.Empty;
+
+        [JsonPropertyName("note")]
+        public string Note { get; set; } = string.Empty;
+    }
+
+    public sealed class GroupMemberListResponse
+    {
+        [JsonPropertyName("items")]
+        public List<GroupMemberDto> Items { get; set; } = [];
+
+        [JsonPropertyName("next_cursor")]
+        public long NextCursor { get; set; }
+    }
+
+    public sealed class CreateGroupMemberRequest
+    {
+        [JsonPropertyName("local_key")]
+        public string LocalKey { get; set; } = string.Empty;
+
+        [JsonPropertyName("native_id")]
+        public string NativeId { get; set; } = string.Empty;
+
+        [JsonPropertyName("group_nickname")]
+        public string GroupNickname { get; set; } = string.Empty;
+
+        [JsonPropertyName("wechat_name")]
+        public string WechatName { get; set; } = string.Empty;
+
+        [JsonPropertyName("wechat_account")]
+        public string WechatAccount { get; set; } = string.Empty;
+
+        [JsonPropertyName("role")]
+        public string Role { get; set; } = string.Empty;
+
+        [JsonPropertyName("note")]
+        public string Note { get; set; } = string.Empty;
+    }
+
+    public sealed class AuditLogDto
+    {
+        [JsonPropertyName("id")]
+        public long Id { get; set; }
+
+        [JsonPropertyName("action")]
+        public string Action { get; set; } = string.Empty;
+
+        [JsonPropertyName("target_type")]
+        public string TargetType { get; set; } = string.Empty;
+
+        [JsonPropertyName("target_id")]
+        public string TargetId { get; set; } = string.Empty;
+
+        [JsonPropertyName("detail")]
+        public string Detail { get; set; } = string.Empty;
+
+        [JsonPropertyName("created_at")]
+        public string CreatedAt { get; set; } = string.Empty;
+    }
+
+    public sealed class AuditLogListResponse
+    {
+        [JsonPropertyName("items")]
+        public List<AuditLogDto> Items { get; set; } = [];
+
+        [JsonPropertyName("next_cursor")]
+        public long NextCursor { get; set; }
+    }
+
+    public sealed class CreateAuditLogRequest
+    {
+        [JsonPropertyName("action")]
+        public string Action { get; set; } = string.Empty;
+
+        [JsonPropertyName("target_type")]
+        public string TargetType { get; set; } = string.Empty;
+
+        [JsonPropertyName("target_id")]
+        public string TargetId { get; set; } = string.Empty;
+
+        [JsonPropertyName("detail")]
+        public string Detail { get; set; } = string.Empty;
     }
 }

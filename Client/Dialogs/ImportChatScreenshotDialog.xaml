@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentDialog
+    x:Class="Client.Dialogs.ImportChatScreenshotDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="截图导入聊天记录（自动区分双方气泡）"
+    CloseButtonText="取消"
+    DefaultButton="Primary"
+    PrimaryButtonClick="Dialog_PrimaryButtonClick"
+    PrimaryButtonStyle="{StaticResource PrimaryVioletButtonStyle}"
+    PrimaryButtonText="确认导入消息"
+    RequestedTheme="Light"
+    mc:Ignorable="d">
+
+    <ContentDialog.KeyboardAccelerators>
+        <KeyboardAccelerator Key="V" Modifiers="Control" Invoked="PasteAccelerator_Invoked" />
+    </ContentDialog.KeyboardAccelerators>
+
+    <Grid Width="680" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Status Strip -->
+        <Border
+            x:Name="StatusBanner"
+            Grid.Row="0"
+            Padding="12,8"
+            Background="{StaticResource BrandSoftBgBrush}"
+            CornerRadius="7"
+            Visibility="Collapsed">
+            <TextBlock x:Name="StatusText" FontSize="12" Foreground="{StaticResource BrandPrimaryBrush}" TextWrapping="Wrap" />
+        </Border>
+
+        <!-- Top Action Bar -->
+        <Border
+            Grid.Row="1"
+            Padding="12,10"
+            Background="#F8F7FF"
+            BorderBrush="#C8BAFF"
+            BorderThickness="1.5"
+            CornerRadius="9">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                    <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="粘贴微信聊天窗口截图，自动识别左侧(对方)与右侧绿色(我方)气泡" />
+                    <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="截图复制后直接按 Ctrl+V，或点击右侧按钮导入；支持逐条核对、切换发送方或删除杂项" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <ProgressRing x:Name="OcrSpinner" Width="18" Height="18" IsActive="False" Visibility="Collapsed" />
+                    <Button x:Name="PasteButton" Height="32" Click="PasteButton_Click" Content="粘贴截图 (Ctrl+V)" FontSize="12" Style="{StaticResource PrimaryVioletButtonStyle}" />
+                    <Button x:Name="UploadButton" Height="32" Click="UploadButton_Click" Content="选图片" FontSize="12" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Two-Column Result Area: Left Thumbnail, Right Editable Parsed Bubble List -->
+        <Grid Grid.Row="2" Height="370" ColumnSpacing="14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="220" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Screenshot Thumbnail -->
+            <Border Grid.Column="0" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
+                <Grid>
+                    <StackPanel x:Name="EmptyPreviewHint" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="14" Spacing="8">
+                        <Border Width="42" Height="42" HorizontalAlignment="Center" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="10">
+                            <FontIcon FontSize="18" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8BD;" />
+                        </Border>
+                        <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="等待聊天截图&#x0a;支持 Ctrl+V 粘贴" TextAlignment="Center" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Image x:Name="PreviewImage" Stretch="Uniform" Visibility="Collapsed" />
+                </Grid>
+            </Border>
+
+            <!-- Parsed Messages Preview & Quick Edit List -->
+            <Border Grid.Column="1" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="34" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Padding="12,0" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1" CornerRadius="8,8,0,0">
+                        <TextBlock x:Name="ParsedCountText" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="待识别消息列表（0 条）" />
+                    </Border>
+
+                    <ScrollViewer Grid.Row="1" Padding="10">
+                        <StackPanel x:Name="ParsedListPanel" Spacing="8">
+                            <TextBlock
+                                x:Name="EmptyListHint"
+                                Margin="0,48,0,0"
+                                HorizontalAlignment="Center"
+                                FontSize="12.5"
+                                Foreground="{StaticResource TextMutedBrush}"
+                                Text="粘贴聊天截图后，这里将按时间顺序展示双方对话，可一键切换方向或微调文本"
+                                TextAlignment="Center"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</ContentDialog>

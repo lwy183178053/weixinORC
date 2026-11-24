@@ -43,6 +43,8 @@ func (s *Server) login(c *gin.Context) {
 		return
 	}
 
+	_, _ = s.store.CreateAuditLog(c.Request.Context(), identity.EmployeeID, "login", "employee", identity.EmployeeID, "account="+identity.Account)
+
 	c.JSON(http.StatusOK, gin.H{
 		"token":      token,
 		"expires_at": expiresAt.UTC(),
@@ -51,6 +53,8 @@ func (s *Server) login(c *gin.Context) {
 }
 
 func (s *Server) logout(c *gin.Context) {
+	id := auth.IdentityFromContext(c)
+	_, _ = s.store.CreateAuditLog(c.Request.Context(), id.EmployeeID, "logout", "employee", id.EmployeeID, "account="+id.Account)
 	s.sessions.Revoke(auth.TokenFromContext(c))
 	c.Status(http.StatusNoContent)
 }

@@ -1,3 +1,4 @@
+using Client.Controls;
 using Client.Models;
 using Client.Services;
 using Microsoft.UI;
@@ -16,14 +17,27 @@ namespace Client.Pages
     {
         private List<WeChatWindowInfo> _allWindows = [];
         private SoftwareBitmap? _currentBitmap;
+        private byte[]? _candidateAvatarPng;
+        private string _candidateGender = string.Empty;
+        private string _candidateTags = string.Empty;
         private OcrRecognitionResult? _lastOcrResult;
         private string _candidateAddedDate = string.Empty;
         private bool _isBusy;
         private bool _isInitialized;
 
+        private readonly ThreePaneResizeController _paneResizeController;
+
         public WeChatOcrPage()
         {
             InitializeComponent();
+            _paneResizeController = ThreePaneResizeController.Attach(
+                RootThreePaneGrid,
+                LeftPaneColumn, LeftPaneSplitter,
+                CenterPaneColumn, RightPaneSplitter,
+                RightPaneColumn,
+                leftDefault: 268, leftMin: 220, leftMax: 420,
+                centerMin: 450,
+                rightDefault: 368, rightMin: 290, rightMax: 520);
             _isInitialized = true;
             EngineNoteText.Text = AppServices.Ocr.RapidEngine.AvailabilityNote;
             Loaded += WeChatOcrPage_Loaded;
@@ -235,6 +249,10 @@ namespace Client.Pages
             _lastOcrResult = ocrResult;
 
             var analysis = WeChatOcrAnalyzer.Analyze(window, ocrResult);
+            var (avatarPng, detectedGender) = await AvatarImageService.TryExtractProfileAvatarAndGenderAsync(bitmap, ocrResult);
+            _candidateAvatarPng = avatarPng;
+            _candidateGender = detectedGender;
+            _candidateTags = analysis.CandidateTags;
             if (window is not null) window.DetectedState = analysis.InferredState;
 
             PreviewMetaText.Text = $"{sourceLabel} · {ocrResult.ImageWidth}×{ocrResult.ImageHeight}";
@@ -350,22 +368,88 @@ namespace Client.Pages
             SaveCustomerButton.IsEnabled = false;
             try
             {
-                var result = await AppServices.Backend.CreateCustomerAsync(new CreateCustomerRequest
+                var payload = new CreateCustomerRequest
                 {
                     WechatRemark = remark,
                     WechatName = name,
                     WechatAccount = account,
+                    Gender = _candidateGender,
+                    Tags = _candidateTags,
                     Region = CandidateRegionBox.Text.Trim(),
                     Phone = CandidatePhoneBox.Text.Trim(),
                     Signature = CandidateSignatureBox.Text.Trim(),
                     Source = CandidateSourceBox.Text.Trim(),
                     Note = CandidateNoteBox.Text.Trim(),
                     AddedDate = _candidateAddedDate
-                });
+                };
+
+                // Detect duplicate customer and let user choose Overwrite / Create New / Cancel
+                CustomerDto? dup = null;
+                var listRes = await AppServices.Backend.ListCustomersAsync(100);
+                if (listRes.IsSuccess && listRes.Data is not null)
+                {
+                    if (!string.IsNullOrEmpty(account))
+                        dup = listRes.Data.Items.FirstOrDefault(c => c.WechatAccount.Equals(account, StringComparison.OrdinalIgnoreCase));
+                    if (dup is null && !string.IsNullOrEmpty(remark))
+                        dup = listRes.Data.Items.FirstOrDefault(c => c.WechatRemark.Equals(remark, StringComparison.OrdinalIgnoreCase));
+                    if (dup is null && !string.IsNullOrEmpty(name))
+                        dup = listRes.Data.Items.FirstOrDefault(c => c.WechatName.Equals(name, StringComparison.OrdinalIgnoreCase));
+                }
+
+                ApiResult<CustomerDto> result;
+                bool overwritten = false;
+                if (dup is not null)
+                {
+                    var confirm = new ContentDialog
+                    {
+                        XamlRoot = XamlRoot,
+                        RequestedTheme = ElementTheme.Light,
+                        Title = "检测到重复客户档案",
+                        Content = $"系统中已存在客户「{dup.DisplayName}」{(string.IsNullOrWhiteSpace(dup.WechatAccount) ? "" : $"（微信号：{dup.WechatAccount}）")}。\n请选择覆盖已有档案、仍要新建独立档案，或取消。",
+                        PrimaryButtonText = "覆盖已有客户",
+                        SecondaryButtonText = "仍要新建",
+                        CloseButtonText = "取消",
+                        DefaultButton = ContentDialogButton.Primary,
+                        PrimaryButtonStyle = (Style)Application.Current.Resources["PrimaryVioletButtonStyle"]
+                    };
+
+                    var choice = await confirm.ShowAsync();
+                    if (choice == ContentDialogResult.None)
+                    {
+                        return;
+                    }
+                    if (choice == ContentDialogResult.Primary)
+                    {
+                        payload.Note = string.IsNullOrEmpty(payload.Note) ? dup.Note : payload.Note;
+                        payload.Description = dup.Description;
+                        payload.FollowStatus = dup.FollowStatus;
+                        payload.LocalKey = dup.LocalKey;
+                        payload.NativeId = dup.NativeId;
+                        result = await AppServices.Backend.UpdateCustomerAsync(dup.Id, payload);
+                        overwritten = true;
+                    }
+                    else
+                    {
+                        payload.AllowDuplicate = true;
+                        result = await AppServices.Backend.CreateCustomerAsync(payload);
+                    }
+                }
+                else
+                {
+                    result = await AppServices.Backend.CreateCustomerAsync(payload);
+                }
 
                 if (result.IsSuccess && result.Data is not null)
                 {
-                    ShowBanner($"保存成功：客户 #{result.Data.Id}（{result.Data.DisplayName}）已入库。", BannerKind.Success);
+                    if (_candidateAvatarPng is not null)
+                    {
+                        _ = await AppServices.Backend.UploadCustomerAvatarAsync(result.Data.Id, _candidateAvatarPng);
+                    }
+                    ShowBanner(
+                        overwritten
+                            ? $"覆盖成功：已更新客户 #{result.Data.Id}（{result.Data.DisplayName}）。"
+                            : $"保存成功：客户 #{result.Data.Id}（{result.Data.DisplayName}）已入库。",
+                        BannerKind.Success);
                 }
                 else
                 {

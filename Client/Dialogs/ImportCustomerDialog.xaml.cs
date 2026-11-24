@@ -13,10 +13,14 @@ namespace Client.Dialogs
     public sealed partial class ImportCustomerDialog : ContentDialog
     {
         private SoftwareBitmap? _bitmap;
+        private byte[]? _extractedAvatarPng;
+        private CustomerDto? _duplicateMatch;
+        private CreateCustomerRequest? _pendingRequest;
         private bool _isBusyOcr;
         private bool _isSubmitting;
 
         public CustomerDto? CreatedCustomer { get; private set; }
+        public bool WasOverwritten { get; private set; }
 
         public ImportCustomerDialog()
         {
@@ -145,17 +149,34 @@ namespace Client.Dialogs
 
                 var ocr = await AppServices.Ocr.RapidEngine.RecognizeAsync(bmp);
                 var parsed = WeChatOcrAnalyzer.Analyze(null, ocr);
+                var (avatarPng, detectedGender) = await AvatarImageService.TryExtractProfileAvatarAndGenderAsync(bmp, ocr);
 
                 RemarkBox.Text = parsed.CandidateWechatRemark;
                 NameBox.Text = parsed.CandidateWechatName;
                 AccountBox.Text = parsed.CandidateWechatAccount;
+                TagsBox.Text = parsed.CandidateTags;
                 RegionBox.Text = parsed.CandidateRegion;
                 PhoneBox.Text = parsed.CandidatePhone;
                 SignatureBox.Text = parsed.CandidateSignature;
                 SourceBox.Text = parsed.CandidateSource;
                 AddedDateBox.Text = parsed.CandidateAddedDate;
+                SelectGender(detectedGender);
 
-                ShowStatus($"识别完成（{ocr.ElapsedMilliseconds} ms，共 {ocr.Lines.Count} 行），请核对右侧信息后点击导入。");
+                _extractedAvatarPng = avatarPng;
+                if (avatarPng is not null)
+                {
+                    ExtractedAvatarImage.Source = await AvatarImageService.BytesToBitmapImageAsync(avatarPng);
+                    ExtractedAvatarBadge.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    ExtractedAvatarImage.Source = null;
+                    ExtractedAvatarBadge.Visibility = Visibility.Collapsed;
+                }
+
+                string extra = avatarPng is not null ? "，已自动裁剪头像" : "";
+                if (!string.IsNullOrEmpty(detectedGender)) extra += $"，性别识别为「{detectedGender}」";
+                ShowStatus($"识别完成（{ocr.ElapsedMilliseconds} ms，共 {ocr.Lines.Count} 行{extra}），请核对后导入。");
             }
             catch (Exception ex)
             {
@@ -185,44 +206,186 @@ namespace Client.Dialogs
                 return;
             }
 
-            _isSubmitting = true;
-            SubmitButton.IsEnabled = false;
-            SubmitSpinner.IsActive = true;
-            SubmitSpinner.Visibility = Visibility.Visible;
-            SubmitButtonText.Text = "正在导入...";
+            _pendingRequest = new CreateCustomerRequest
+            {
+                WechatRemark = remark,
+                WechatName = name,
+                WechatAccount = account,
+                Gender = GetSelectedGender(),
+                Tags = TagsBox.Text.Trim(),
+                Region = RegionBox.Text.Trim(),
+                Phone = PhoneBox.Text.Trim(),
+                Signature = SignatureBox.Text.Trim(),
+                Source = SourceBox.Text.Trim(),
+                AddedDate = AddedDateBox.Text.Trim(),
+                Note = string.Empty
+            };
+
+            SetSubmitting(true);
             try
             {
-                var res = await AppServices.Backend.CreateCustomerAsync(new CreateCustomerRequest
+                // Check for existing duplicate customer (match by wechat_account first, then exact display name / nickname)
+                var listRes = await AppServices.Backend.ListCustomersAsync(100);
+                CustomerDto? dup = null;
+                if (listRes.IsSuccess && listRes.Data is not null)
                 {
-                    WechatRemark = remark,
-                    WechatName = name,
-                    WechatAccount = account,
-                    Region = RegionBox.Text.Trim(),
-                    Phone = PhoneBox.Text.Trim(),
-                    Signature = SignatureBox.Text.Trim(),
-                    Source = SourceBox.Text.Trim(),
-                    AddedDate = AddedDateBox.Text.Trim(),
-                    Note = string.Empty
-                });
+                    if (!string.IsNullOrEmpty(account))
+                    {
+                        dup = listRes.Data.Items.FirstOrDefault(c =>
+                            !string.IsNullOrWhiteSpace(c.WechatAccount) &&
+                            c.WechatAccount.Equals(account, StringComparison.OrdinalIgnoreCase));
+                    }
+                    if (dup is null && !string.IsNullOrEmpty(remark))
+                    {
+                        dup = listRes.Data.Items.FirstOrDefault(c =>
+                            !string.IsNullOrWhiteSpace(c.WechatRemark) &&
+                            c.WechatRemark.Equals(remark, StringComparison.OrdinalIgnoreCase));
+                    }
+                    if (dup is null && !string.IsNullOrEmpty(name))
+                    {
+                        dup = listRes.Data.Items.FirstOrDefault(c =>
+                            !string.IsNullOrWhiteSpace(c.WechatName) &&
+                            c.WechatName.Equals(name, StringComparison.OrdinalIgnoreCase));
+                    }
+                }
 
-                if (res.IsSuccess && res.Data is not null)
+                if (dup is not null)
                 {
-                    CreatedCustomer = res.Data;
-                    Hide();
+                    _duplicateMatch = dup;
+                    DuplicateSummaryText.Text =
+                        $"系统中已存在客户「{dup.DisplayName}」" +
+                        $"{(string.IsNullOrWhiteSpace(dup.WechatAccount) ? "" : $"（微信号：{dup.WechatAccount}）")}。\n" +
+                        $"· 选择「覆盖已有客户」将用本次识别资料更新原档案（保留原员工备注）；\n" +
+                        $"· 选择「仍要新建」将另建一条独立客户档案。";
+                    DuplicateOverlay.Visibility = Visibility.Visible;
+                    return;
                 }
-                else
-                {
-                    ShowStatus($"保存失败：{res.ErrorMessage}", isError: true);
-                }
+
+                await ExecuteSaveAsync(overwriteExisting: false, allowDuplicate: false);
             }
             finally
             {
-                _isSubmitting = false;
-                SubmitButton.IsEnabled = true;
-                SubmitSpinner.IsActive = false;
-                SubmitSpinner.Visibility = Visibility.Collapsed;
-                SubmitButtonText.Text = "核验确认并导入";
+                SetSubmitting(false);
             }
+        }
+
+        private async void DuplicateOverwriteButton_Click(object sender, RoutedEventArgs e)
+        {
+            DuplicateOverlay.Visibility = Visibility.Collapsed;
+            SetSubmitting(true);
+            try
+            {
+                await ExecuteSaveAsync(overwriteExisting: true, allowDuplicate: false);
+            }
+            finally
+            {
+                SetSubmitting(false);
+            }
+        }
+
+        private async void DuplicateCreateNewButton_Click(object sender, RoutedEventArgs e)
+        {
+            DuplicateOverlay.Visibility = Visibility.Collapsed;
+            SetSubmitting(true);
+            try
+            {
+                await ExecuteSaveAsync(overwriteExisting: false, allowDuplicate: true);
+            }
+            finally
+            {
+                SetSubmitting(false);
+            }
+        }
+
+        private void DuplicateCancelButton_Click(object sender, RoutedEventArgs e)
+        {
+            DuplicateOverlay.Visibility = Visibility.Collapsed;
+            _duplicateMatch = null;
+        }
+
+        private async Task ExecuteSaveAsync(bool overwriteExisting, bool allowDuplicate)
+        {
+            if (_pendingRequest is null) return;
+
+            ApiResult<CustomerDto> res;
+            if (overwriteExisting && _duplicateMatch is not null)
+            {
+                // Preserve existing employee follow-up note & CRM fields unless overwritten
+                var patch = new CreateCustomerRequest
+                {
+                    WechatRemark = string.IsNullOrEmpty(_pendingRequest.WechatRemark) ? _duplicateMatch.WechatRemark : _pendingRequest.WechatRemark,
+                    WechatName = string.IsNullOrEmpty(_pendingRequest.WechatName) ? _duplicateMatch.WechatName : _pendingRequest.WechatName,
+                    WechatAccount = string.IsNullOrEmpty(_pendingRequest.WechatAccount) ? _duplicateMatch.WechatAccount : _pendingRequest.WechatAccount,
+                    Gender = string.IsNullOrEmpty(_pendingRequest.Gender) ? _duplicateMatch.Gender : _pendingRequest.Gender,
+                    Tags = string.IsNullOrEmpty(_pendingRequest.Tags) ? _duplicateMatch.Tags : _pendingRequest.Tags,
+                    Region = string.IsNullOrEmpty(_pendingRequest.Region) ? _duplicateMatch.Region : _pendingRequest.Region,
+                    Phone = string.IsNullOrEmpty(_pendingRequest.Phone) ? _duplicateMatch.Phone : _pendingRequest.Phone,
+                    Signature = string.IsNullOrEmpty(_pendingRequest.Signature) ? _duplicateMatch.Signature : _pendingRequest.Signature,
+                    Source = string.IsNullOrEmpty(_pendingRequest.Source) ? _duplicateMatch.Source : _pendingRequest.Source,
+                    AddedDate = string.IsNullOrEmpty(_pendingRequest.AddedDate) ? _duplicateMatch.AddedDate : _pendingRequest.AddedDate,
+                    Description = _duplicateMatch.Description,
+                    FollowStatus = _duplicateMatch.FollowStatus,
+                    LocalKey = _duplicateMatch.LocalKey,
+                    NativeId = _duplicateMatch.NativeId,
+                    Note = _duplicateMatch.Note
+                };
+                res = await AppServices.Backend.UpdateCustomerAsync(_duplicateMatch.Id, patch);
+                WasOverwritten = true;
+            }
+            else
+            {
+                _pendingRequest.AllowDuplicate = allowDuplicate;
+                res = await AppServices.Backend.CreateCustomerAsync(_pendingRequest);
+                WasOverwritten = false;
+            }
+
+            if (res.IsSuccess && res.Data is not null)
+            {
+                var saved = res.Data;
+                if (_extractedAvatarPng is not null)
+                {
+                    var avRes = await AppServices.Backend.UploadCustomerAvatarAsync(saved.Id, _extractedAvatarPng);
+                    if (avRes.IsSuccess && avRes.Data is not null)
+                    {
+                        saved = avRes.Data;
+                    }
+                }
+                CreatedCustomer = saved;
+                Hide();
+            }
+            else
+            {
+                ShowStatus($"保存失败：{res.ErrorMessage}", isError: true);
+            }
+        }
+
+        private void SetSubmitting(bool busy)
+        {
+            _isSubmitting = busy;
+            SubmitButton.IsEnabled = !busy;
+            SubmitSpinner.IsActive = busy;
+            SubmitSpinner.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+            SubmitButtonText.Text = busy ? "正在保存..." : "核验确认并导入";
+        }
+
+        private void SelectGender(string gender)
+        {
+            GenderBox.SelectedIndex = gender switch
+            {
+                "男" => 1,
+                "女" => 2,
+                _ => 0
+            };
+        }
+
+        private string GetSelectedGender()
+        {
+            return GenderBox.SelectedIndex switch
+            {
+                1 => "男",
+                2 => "女",
+                _ => string.Empty
+            };
         }
 
         private void ShowStatus(string message, bool isError = false)

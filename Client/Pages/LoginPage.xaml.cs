@@ -45,12 +45,12 @@ namespace Client.Pages
             if (result.IsSuccess)
             {
                 HealthDot.Fill = new SolidColorBrush(Color.FromArgb(255, 23, 163, 74));
-                HealthBadgeText.Text = "后端服务在线";
+                HealthBadgeText.Text = "服务在线";
             }
             else
             {
                 HealthDot.Fill = new SolidColorBrush(Color.FromArgb(255, 220, 38, 38));
-                HealthBadgeText.Text = "后端未连接";
+                HealthBadgeText.Text = "服务未连接";
             }
         }
 
@@ -65,8 +65,8 @@ namespace Client.Pages
         {
             string host = ServerUrlBox.Text.Replace("http://", "").Replace("https://", "");
             ServerConfigToggleText.Text = expanded
-                ? $"▾ 隐藏后端服务地址 ({host})"
-                : $"▸ 后端服务地址配置 ({host})";
+                ? $"▾ 隐藏服务地址 ({host})"
+                : $"▸ 服务地址配置 ({host})";
         }
 
         private void FillDemoButton_Click(object sender, RoutedEventArgs e)

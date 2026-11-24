@@ -104,7 +104,7 @@ namespace Client.Services
                     nFilterIndex = 1,
                     lpstrFile = fileBuffer,
                     nMaxFile = maxChars,
-                    lpstrTitle = "选择用于 OCR 测试的截图或图片",
+                    lpstrTitle = "选择需要识别的图片",
                     Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR
                 };
 
@@ -115,6 +115,9 @@ namespace Client.Services
                 Marshal.FreeHGlobal(fileBuffer);
             }
         }
+
+        [DllImport("user32.dll")]
+        internal static extern uint GetDpiForWindow(nint hwnd);
 
         [DllImport("user32.dll")]
         internal static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, nint lParam);

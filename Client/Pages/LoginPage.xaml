@@ -96,14 +96,14 @@
                                 FontWeight="Bold"
                                 Foreground="#FFFFFF"
                                 LineHeight="34"
-                                Text="微信客户管理与&#x0a;受控 OCR 智能工作台"
+                                Text="微信客户管理与&#x0a;智能识别工作台"
                                 TextWrapping="Wrap" />
 
                             <TextBlock
                                 FontSize="13"
                                 Foreground="#E6E1FF"
                                 LineHeight="20"
-                                Text="为企业员工提供安全隔离的客户档案管理、微信窗口识别、人工核验与 AI 回复辅助。"
+                                Text="为企业员工提供安全隔离的客户档案管理、窗口识别与沟通记录沉淀。"
                                 TextWrapping="Wrap" />
                         </StackPanel>
 
@@ -118,15 +118,15 @@
 
                             <Border Background="#20FFFFFF" CornerRadius="10" Padding="14,10">
                                 <StackPanel Spacing="2">
-                                    <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="#FFFFFF" Text="双引擎离线 OCR 定位" />
-                                    <TextBlock FontSize="11.5" Foreground="#E0DBFF" Text="支持窗口受控截图、坐标框选与状态巡检" />
+                                    <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="#FFFFFF" Text="智能截图识别" />
+                                    <TextBlock FontSize="11.5" Foreground="#E0DBFF" Text="支持窗口截图、剪贴板粘贴与资料自动提取" />
                                 </StackPanel>
                             </Border>
 
                             <Border Background="#20FFFFFF" CornerRadius="10" Padding="14,10">
                                 <StackPanel Spacing="2">
-                                    <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="#FFFFFF" Text="人工核验安全闭环" />
-                                    <TextBlock FontSize="11.5" Foreground="#E0DBFF" Text="关键微信号确认后再绑定，掉线自动熔断" />
+                                    <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="#FFFFFF" Text="人工核验入库" />
+                                    <TextBlock FontSize="11.5" Foreground="#E0DBFF" Text="核对信息后安全绑定，状态异常及时提醒" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>
@@ -136,7 +136,7 @@
                             Grid.Row="2"
                             FontSize="11.5"
                             Foreground="#CFC7FF"
-                            Text="V1.0 原型 · WinUI 3 + Go 后端服务" />
+                            Text="智美员工工作台 · V1.0" />
                     </Grid>
                 </Border>
 
@@ -239,7 +239,7 @@
                                     BorderThickness="0"
                                     Click="ToggleServerConfigButton_Click"
                                     Foreground="{StaticResource BrandPrimaryBrush}">
-                                    <TextBlock x:Name="ServerConfigToggleText" FontSize="12" Text="▸ 后端服务地址配置 (127.0.0.1:8080)" />
+                                    <TextBlock x:Name="ServerConfigToggleText" FontSize="12" Text="▸ 服务地址配置 (127.0.0.1:8080)" />
                                 </Button>
 
                                 <Button
@@ -306,7 +306,7 @@
                         <TextBlock
                             FontSize="11.5"
                             Foreground="{StaticResource TextMutedBrush}"
-                            Text="不开放员工自行注册，登录凭证由甲方“智美员工Bot”接口统一校验。本地联调默认模拟账号：demo / demo123"
+                            Text="账号由管理员统一分配，不支持自行注册。"
                             TextWrapping="Wrap" />
                     </Border>
                 </Grid>

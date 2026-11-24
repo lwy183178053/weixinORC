@@ -46,9 +46,17 @@ func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.
 	authed.POST("/customers", s.createCustomer)
 	authed.GET("/customers/:id", s.getCustomer)
 	authed.PATCH("/customers/:id", s.updateCustomer)
-
+	authed.DELETE("/customers/:id", s.deleteCustomer)
 	authed.GET("/customers/:id/messages", s.listMessages)
 	authed.POST("/customers/:id/messages", s.createMessage)
+
+	authed.GET("/groups", s.listGroups)
+	authed.POST("/groups", s.createGroup)
+	authed.GET("/groups/:id", s.getGroup)
+	authed.PATCH("/groups/:id", s.updateGroup)
+	authed.DELETE("/groups/:id", s.deleteGroup)
+	authed.GET("/groups/:id/messages", s.listGroupMessages)
+	authed.POST("/groups/:id/messages", s.createGroupMessage)
 
 	return r
 }
@@ -69,7 +77,7 @@ func parseID(raw string) (int64, bool) {
 }
 
 func parsePagination(c *gin.Context) (cursor int64, limit int, ok bool) {
-	limit = 20
+	limit = 50
 	if raw := c.Query("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > 100 {

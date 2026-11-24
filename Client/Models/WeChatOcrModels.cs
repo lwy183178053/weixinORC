@@ -76,8 +76,11 @@ namespace Client.Models
     {
         public int Index { get; init; }
         public string Text { get; init; } = string.Empty;
+        public float Confidence { get; init; }
         public PixelRect Bounds { get; init; }
-        public string BoundsLabel => Bounds.Format();
+        public string BoundsLabel => Confidence > 0
+            ? $"{Bounds.Format()} · {Confidence * 100:F0}%"
+            : Bounds.Format();
     }
 
     public sealed class OcrRecognitionResult
@@ -100,5 +103,17 @@ namespace Client.Models
         public string CandidateWechatAccount { get; init; } = string.Empty;
         public string CandidateNote { get; init; } = string.Empty;
         public string CandidateRegion { get; init; } = string.Empty;
+        public string CandidatePhone { get; init; } = string.Empty;
+        public string CandidateSignature { get; init; } = string.Empty;
+        public string CandidateSource { get; init; } = string.Empty;
+        public string CandidateAddedDate { get; init; } = string.Empty;
+    }
+
+    public sealed class GroupOcrAnalysis
+    {
+        public string CandidateGroupName { get; init; } = string.Empty;
+        public int CandidateMemberCount { get; init; }
+        public string CandidateMembersText { get; init; } = string.Empty;
+        public string CandidateNote { get; init; } = string.Empty;
     }
 }

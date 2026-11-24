@@ -8,7 +8,7 @@ namespace Client.Pages
 {
     public sealed partial class WorkbenchPage : Page
     {
-        private string _activeTag = "ocr";
+        private string _activeTag = "customers";
 
         public WorkbenchPage()
         {
@@ -21,14 +21,15 @@ namespace Client.Pages
             Loaded -= WorkbenchPage_Loaded;
             MainWindow.Instance?.SetDragRegion(WorkbenchDragRegion);
             RefreshHeaderAndFooter();
-            SwitchSection("ocr");
+            SwitchSection("customers");
         }
 
         private void RefreshHeaderAndFooter()
         {
             var employee = AppServices.Backend.CurrentEmployee;
             string host = AppServices.Backend.BaseUrl.Replace("http://", "").Replace("https://", "");
-            TopBackendText.Text = $"Go 后端 · {host}";
+            TopBackendText.Text = "服务已连接";
+            ToolTipService.SetToolTip(TopServerBadge, $"当前服务地址：{host}");
 
             if (employee is not null)
             {
@@ -38,7 +39,7 @@ namespace Client.Pages
                 FooterEmployeeText.Text = $"员工 ID: {employee.EmployeeId}";
             }
 
-            FooterOcrText.Text = $"OCR 引擎: {AppServices.Ocr.GetDefaultEngine().DisplayName}";
+            FooterOcrText.Text = AppServices.Ocr.RapidEngine.IsAvailable ? "识别服务: 就绪" : "识别服务: 未就绪";
         }
 
         private void RailNav_Click(object sender, RoutedEventArgs e)
@@ -56,9 +57,11 @@ namespace Client.Pages
 
             (Type pageType, string title) = tag switch
             {
-                "customers" => (typeof(CustomersPage), "客户档案管理"),
-                "about" => (typeof(AboutPage), "OCR 引擎与环境状态"),
-                _ => (typeof(WeChatOcrPage), "微信监控与 OCR 识别")
+                "customers" => (typeof(CustomersPage), "客户档案"),
+                "groups" => (typeof(GroupsPage), "群组档案"),
+                "logs" or "about" => (typeof(AboutPage), "运行日志"),
+                "guide" => (typeof(GuidePage), "使用介绍"),
+                _ => (typeof(WeChatOcrPage), "窗口识别")
             };
 
             ActiveTabTitleText.Text = title;
@@ -75,9 +78,11 @@ namespace Client.Pages
             var inactiveBg = new SolidColorBrush(Colors.Transparent);
             var inactiveFg = (Brush)Application.Current.Resources["TextSecondaryBrush"];
 
-            SetRailItemState(RailOcrButton, RailOcrIcon, RailOcrLabel, _activeTag == "ocr", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailCustomersButton, RailCustomersIcon, RailCustomersLabel, _activeTag == "customers", activeBg, activeFg, inactiveBg, inactiveFg);
-            SetRailItemState(RailAboutButton, RailAboutIcon, RailAboutLabel, _activeTag == "about", activeBg, activeFg, inactiveBg, inactiveFg);
+            SetRailItemState(RailGroupsButton, RailGroupsIcon, RailGroupsLabel, _activeTag == "groups", activeBg, activeFg, inactiveBg, inactiveFg);
+            SetRailItemState(RailOcrButton, RailOcrIcon, RailOcrLabel, _activeTag == "ocr", activeBg, activeFg, inactiveBg, inactiveFg);
+            SetRailItemState(RailLogsButton, RailLogsIcon, RailLogsLabel, _activeTag is "logs" or "about", activeBg, activeFg, inactiveBg, inactiveFg);
+            SetRailItemState(RailGuideButton, RailGuideIcon, RailGuideLabel, _activeTag == "guide", activeBg, activeFg, inactiveBg, inactiveFg);
         }
 
         private static void SetRailItemState(

@@ -14,7 +14,7 @@
             <RowDefinition Height="28" />
         </Grid.RowDefinitions>
 
-        <!-- Row 0: Apifox-style Top Workspace Chrome -->
+        <!-- Row 0: Top Workspace Chrome -->
         <Border
             Grid.Row="0"
             Background="{StaticResource AppChromeBgBrush}"
@@ -27,7 +27,6 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <!-- Left Brand & Workspace Tabs -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <Border
                         Width="26"
@@ -51,7 +50,6 @@
 
                     <Border Width="1" Height="16" Margin="6,0" Background="{StaticResource AppBorderBrush}" />
 
-                    <!-- Active Workspace Tab Pill -->
                     <Border
                         Padding="12,5"
                         Background="#FFFFFF"
@@ -65,17 +63,16 @@
                                 FontSize="12.5"
                                 FontWeight="SemiBold"
                                 Foreground="{StaticResource TextPrimaryBrush}"
-                                Text="微信监控与 OCR" />
+                                Text="客户档案" />
                         </StackPanel>
                     </Border>
                 </StackPanel>
 
-                <!-- Draggable Center Title Bar Region -->
                 <Grid x:Name="WorkbenchDragRegion" Grid.Column="1" Background="Transparent" />
 
-                <!-- Right: Backend Env Pill + Employee Chip + Logout -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                     <Border
+                        x:Name="TopServerBadge"
                         Padding="10,4"
                         Background="{StaticResource BrandSoftBgBrush}"
                         BorderBrush="{StaticResource BrandSoftBorderBrush}"
@@ -88,7 +85,7 @@
                                 FontSize="11.5"
                                 FontWeight="SemiBold"
                                 Foreground="{StaticResource BrandPrimaryBrush}"
-                                Text="Go 后端 · 127.0.0.1:8080" />
+                                Text="服务已连接" />
                         </StackPanel>
                     </Border>
 
@@ -121,26 +118,17 @@
                                 Text="员工" />
                         </StackPanel>
                     </Border>
-
-                    <Button
-                        Height="28"
-                        Padding="10,0"
-                        Click="LogoutButton_Click"
-                        Content="退出登录"
-                        FontSize="12"
-                        Style="{StaticResource SecondaryOutlineButtonStyle}" />
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Row 1: Primary Icon Rail + Active Module Content -->
+        <!-- Row 1: Narrow Icon Rail + Active Module -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="68" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- Apifox-style Left Narrow Icon Rail -->
             <Border
                 Grid.Column="0"
                 Background="{StaticResource AppRailBgBrush}"
@@ -154,47 +142,57 @@
 
                     <StackPanel Grid.Row="0" HorizontalAlignment="Center" Spacing="8">
                         <Button
+                            x:Name="RailCustomersButton"
+                            Click="RailNav_Click"
+                            Style="{StaticResource RailButtonStyle}"
+                            Tag="customers">
+                            <StackPanel HorizontalAlignment="Center" Spacing="4">
+                                <FontIcon x:Name="RailCustomersIcon" FontSize="18" Glyph="&#xE77B;" />
+                                <TextBlock x:Name="RailCustomersLabel" HorizontalAlignment="Center" FontSize="11" Text="客户档案" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button
+                            x:Name="RailGroupsButton"
+                            Click="RailNav_Click"
+                            Style="{StaticResource RailButtonStyle}"
+                            Tag="groups">
+                            <StackPanel HorizontalAlignment="Center" Spacing="4">
+                                <FontIcon x:Name="RailGroupsIcon" FontSize="18" Glyph="&#xE716;" />
+                                <TextBlock x:Name="RailGroupsLabel" HorizontalAlignment="Center" FontSize="11" Text="群组档案" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button
                             x:Name="RailOcrButton"
                             Click="RailNav_Click"
                             Style="{StaticResource RailButtonStyle}"
                             Tag="ocr">
                             <StackPanel HorizontalAlignment="Center" Spacing="4">
                                 <FontIcon x:Name="RailOcrIcon" FontSize="18" Glyph="&#xE8FE;" />
-                                <TextBlock
-                                    x:Name="RailOcrLabel"
-                                    HorizontalAlignment="Center"
-                                    FontSize="11"
-                                    Text="微信OCR" />
+                                <TextBlock x:Name="RailOcrLabel" HorizontalAlignment="Center" FontSize="11" Text="窗口识别" />
                             </StackPanel>
                         </Button>
 
                         <Button
-                            x:Name="RailCustomersButton"
+                            x:Name="RailLogsButton"
                             Click="RailNav_Click"
                             Style="{StaticResource RailButtonStyle}"
-                            Tag="customers">
+                            Tag="logs">
                             <StackPanel HorizontalAlignment="Center" Spacing="4">
-                                <FontIcon x:Name="RailCustomersIcon" FontSize="18" Glyph="&#xE716;" />
-                                <TextBlock
-                                    x:Name="RailCustomersLabel"
-                                    HorizontalAlignment="Center"
-                                    FontSize="11"
-                                    Text="客户档案" />
+                                <FontIcon x:Name="RailLogsIcon" FontSize="18" Glyph="&#xE756;" />
+                                <TextBlock x:Name="RailLogsLabel" HorizontalAlignment="Center" FontSize="11" Text="运行日志" />
                             </StackPanel>
                         </Button>
 
                         <Button
-                            x:Name="RailAboutButton"
+                            x:Name="RailGuideButton"
                             Click="RailNav_Click"
                             Style="{StaticResource RailButtonStyle}"
-                            Tag="about">
+                            Tag="guide">
                             <StackPanel HorizontalAlignment="Center" Spacing="4">
-                                <FontIcon x:Name="RailAboutIcon" FontSize="18" Glyph="&#xE9D9;" />
-                                <TextBlock
-                                    x:Name="RailAboutLabel"
-                                    HorizontalAlignment="Center"
-                                    FontSize="11"
-                                    Text="引擎状态" />
+                                <FontIcon x:Name="RailGuideIcon" FontSize="18" Glyph="&#xE897;" />
+                                <TextBlock x:Name="RailGuideLabel" HorizontalAlignment="Center" FontSize="11" Text="使用介绍" />
                             </StackPanel>
                         </Button>
                     </StackPanel>
@@ -205,26 +203,18 @@
                             Style="{StaticResource RailButtonStyle}"
                             ToolTipService.ToolTip="退出登录并返回登录界面">
                             <StackPanel HorizontalAlignment="Center" Spacing="3">
-                                <FontIcon
-                                    FontSize="16"
-                                    Foreground="{StaticResource TextSecondaryBrush}"
-                                    Glyph="&#xF3B1;" />
-                                <TextBlock
-                                    HorizontalAlignment="Center"
-                                    FontSize="10.5"
-                                    Foreground="{StaticResource TextSecondaryBrush}"
-                                    Text="退出" />
+                                <FontIcon FontSize="16" Foreground="{StaticResource TextSecondaryBrush}" Glyph="&#xF3B1;" />
+                                <TextBlock HorizontalAlignment="Center" FontSize="10.5" Foreground="{StaticResource TextSecondaryBrush}" Text="退出" />
                             </StackPanel>
                         </Button>
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <!-- Active Module Frame -->
             <Frame x:Name="WorkspaceFrame" Grid.Column="1" />
         </Grid>
 
-        <!-- Row 2: Apifox-style Thin Bottom Status Bar -->
+        <!-- Row 2: Bottom Status Bar -->
         <Border
             Grid.Row="2"
             Padding="14,0"
@@ -237,25 +227,16 @@
                         <Ellipse Width="7" Height="7" Fill="{StaticResource SuccessTextBrush}" />
                         <TextBlock FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="在线" />
                     </StackPanel>
-                    <TextBlock
-                        x:Name="FooterEmployeeText"
-                        FontSize="11.5"
-                        Foreground="{StaticResource TextMutedBrush}"
-                        Text="员工 ID: -" />
-                    <TextBlock
-                        x:Name="FooterOcrText"
-                        FontSize="11.5"
-                        Foreground="{StaticResource TextMutedBrush}"
-                        Text="OCR 引擎: 加载中..." />
+                    <TextBlock x:Name="FooterEmployeeText" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="员工 ID: -" />
+                    <TextBlock x:Name="FooterOcrText" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="识别服务: 就绪" />
                 </StackPanel>
 
                 <TextBlock
-                    x:Name="FooterRightText"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
                     FontSize="11.5"
                     Foreground="{StaticResource TextMutedBrush}"
-                    Text="受控桌面识别模式 · 人工核验后落库" />
+                    Text="Ctrl+V 快捷导入截图" />
             </Grid>
         </Border>
     </Grid>

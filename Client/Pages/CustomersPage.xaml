@@ -8,189 +8,482 @@
     xmlns:models="using:Client.Models"
     mc:Ignorable="d">
 
+    <Page.KeyboardAccelerators>
+        <KeyboardAccelerator Key="V" Modifiers="Control" Invoked="PasteAccelerator_Invoked" />
+    </Page.KeyboardAccelerators>
+
     <Grid Background="#FFFFFF">
         <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="268" />
             <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="340" />
+            <ColumnDefinition Width="356" />
         </Grid.ColumnDefinitions>
 
-        <!-- Left: Clean Apifox-style Customer Table -->
-        <Grid Grid.Column="0" Padding="20,16" RowSpacing="12">
+        <!-- Column 0: WeChat-style Customer List Sidebar -->
+        <Border
+            Grid.Column="0"
+            Background="#FAFAFC"
+            BorderBrush="{StaticResource AppBorderBrush}"
+            BorderThickness="0,0,1,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="56" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Search + Top-Left "+" Popup Import Button -->
+                <Border
+                    Grid.Row="0"
+                    Padding="12,0"
+                    Background="#FFFFFF"
+                    BorderBrush="{StaticResource AppBorderBrush}"
+                    BorderThickness="0,0,0,1">
+                    <Grid ColumnSpacing="8" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox
+                            x:Name="SearchBox"
+                            Height="34"
+                            Padding="10,6"
+                            FontSize="12.5"
+                            PlaceholderText="搜索客户昵称、微信号..."
+                            Style="{StaticResource SoftTextBoxStyle}"
+                            TextChanged="SearchBox_TextChanged" />
+                        <Button
+                            Grid.Column="1"
+                            Width="34"
+                            Height="34"
+                            Padding="0"
+                            Click="AddCustomerButton_Click"
+                            CornerRadius="7"
+                            Style="{StaticResource PrimaryVioletButtonStyle}"
+                            ToolTipService.ToolTip="新建客户 / 截图识别导入">
+                            <FontIcon FontSize="14" Foreground="#FFFFFF" Glyph="&#xE710;" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <!-- Customer Conversation List -->
+                <Grid Grid.Row="1">
+                    <StackPanel
+                        x:Name="EmptyListHint"
+                        Margin="20,44"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Spacing="10"
+                        Visibility="Collapsed">
+                        <TextBlock HorizontalAlignment="Center" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="暂无客户档案" />
+                        <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="点击上方「+」弹窗截图识别导入，或截图复制后直接按 Ctrl+V。" TextAlignment="Center" TextWrapping="Wrap" />
+                        <Button
+                            HorizontalAlignment="Center"
+                            Height="32"
+                            Click="AddCustomerButton_Click"
+                            Content="+ 新建 / 截图导入"
+                            FontSize="12"
+                            Style="{StaticResource PrimaryVioletButtonStyle}" />
+                    </StackPanel>
+
+                    <ListView
+                        x:Name="CustomersListView"
+                        Padding="6,6"
+                        SelectionChanged="CustomersListView_SelectionChanged"
+                        SelectionMode="Single">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="models:CustomerDto">
+                                <Grid Padding="6,9" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="42" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Border
+                                        Grid.Column="0"
+                                        Width="40"
+                                        Height="40"
+                                        Background="{StaticResource BrandSoftBgBrush}"
+                                        BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8">
+                                        <TextBlock
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            FontSize="15"
+                                            FontWeight="Bold"
+                                            Foreground="{StaticResource BrandPrimaryBrush}"
+                                            Text="{x:Bind AvatarInitial}" />
+                                    </Border>
+
+                                    <Grid Grid.Column="1" RowSpacing="3">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <Grid Grid.Row="0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayName}" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeShort}" />
+                                        </Grid>
+
+                                        <TextBlock Grid.Row="1" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind PreviewLine}" TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- Column 1: WeChat-style IM Chat History & Composer -->
+        <Grid Grid.Column="1" Background="#F5F6F9">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
+                <RowDefinition Height="56" />
                 <RowDefinition Height="*" />
+                <RowDefinition Height="148" />
             </Grid.RowDefinitions>
 
-            <!-- Header & Search Bar -->
-            <Grid Grid.Row="0" ColumnSpacing="10">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="260" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-
-                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
-                    <TextBlock FontSize="17" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="客户档案库" />
-                    <TextBlock x:Name="OwnerSubtitleText" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="按当前员工身份严格隔离" />
-                </StackPanel>
-
-                <TextBox
-                    x:Name="SearchBox"
-                    Grid.Column="1"
-                    Height="34"
-                    VerticalAlignment="Center"
-                    PlaceholderText="搜索昵称、微信号或备注..."
-                    Style="{StaticResource SoftTextBoxStyle}"
-                    TextChanged="SearchBox_TextChanged" />
-
-                <Button
-                    x:Name="RefreshButton"
-                    Grid.Column="2"
-                    Height="34"
-                    VerticalAlignment="Center"
-                    Click="RefreshButton_Click"
-                    Content="刷新列表"
-                    Style="{StaticResource SecondaryOutlineButtonStyle}" />
-            </Grid>
-
-            <!-- Status Strip -->
+            <!-- Chat Header -->
             <Border
-                x:Name="StatusBanner"
-                Grid.Row="1"
-                Padding="12,8"
-                Background="{StaticResource BrandSoftBgBrush}"
-                CornerRadius="7"
-                Visibility="Collapsed">
-                <TextBlock x:Name="StatusText" FontSize="12" Foreground="{StaticResource BrandPrimaryBrush}" />
+                Grid.Row="0"
+                Padding="18,0"
+                Background="#FFFFFF"
+                BorderBrush="{StaticResource AppBorderBrush}"
+                BorderThickness="0,0,0,1">
+                <Grid>
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock x:Name="ActiveCustomerTitle" FontSize="15.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="请选择左侧客户" />
+                        <TextBlock x:Name="ActiveCustomerMeta" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="点左上角「+」可弹出截图识别导入窗口" />
+                    </StackPanel>
+
+                    <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                        <Button Height="30" Padding="10,0" Click="RefreshButton_Click" Content="刷新" FontSize="12" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                    </StackPanel>
+                </Grid>
             </Border>
 
-            <!-- Structured Data Table -->
-            <Border
-                Grid.Row="2"
-                BorderBrush="{StaticResource AppBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="10">
-                <Grid>
+            <!-- Chat Bubbles -->
+            <Grid Grid.Row="1">
+                <StackPanel x:Name="EmptyChatHint" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
+                    <Border Width="52" Height="52" HorizontalAlignment="Center" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="14">
+                        <FontIcon FontSize="22" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8BD;" />
+                    </Border>
+                    <TextBlock x:Name="EmptyChatTitle" HorizontalAlignment="Center" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="暂无聊天记录" />
+                    <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="可在下方输入或点击“粘贴截图提取文字”记录对话" />
+                </StackPanel>
+
+                <ListView x:Name="MessagesListView" Padding="18,14" SelectionMode="None">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Padding" Value="0,6" />
+                            <Setter Property="MinHeight" Value="0" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="models:ChatBubbleItem">
+                            <Grid>
+                                <!-- Incoming (Left white bubble) -->
+                                <Grid ColumnSpacing="10" Visibility="{x:Bind IncomingVisibility}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="34" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Width="34" Height="34" VerticalAlignment="Top" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="6">
+                                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind SenderInitial}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" HorizontalAlignment="Left" MaxWidth="460" Spacing="3">
+                                        <Border Padding="12,9" Background="#FFFFFF" BorderBrush="#E5E7EB" BorderThickness="1" CornerRadius="4,10,10,10">
+                                            <TextBlock FontSize="13.5" Foreground="#1F2329" IsTextSelectionEnabled="True" Text="{x:Bind Content}" TextWrapping="Wrap" />
+                                        </Border>
+                                        <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Outgoing (Right WeChat-green bubble) -->
+                                <Grid ColumnSpacing="10" Visibility="{x:Bind OutgoingVisibility}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="34" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" HorizontalAlignment="Right" MaxWidth="460" Spacing="3">
+                                        <Border Padding="12,9" Background="#95EC69" CornerRadius="10,4,10,10">
+                                            <TextBlock FontSize="13.5" Foreground="#1F2329" IsTextSelectionEnabled="True" Text="{x:Bind Content}" TextWrapping="Wrap" />
+                                        </Border>
+                                        <TextBlock HorizontalAlignment="Right" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel}" />
+                                    </StackPanel>
+                                    <Border Grid.Column="1" Width="34" Height="34" VerticalAlignment="Top" Background="{StaticResource BrandPrimaryBrush}" CornerRadius="6">
+                                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12.5" FontWeight="Bold" Foreground="#FFFFFF" Text="我" />
+                                    </Border>
+                                </Grid>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+
+            <!-- Bottom IM Composer -->
+            <Border Grid.Row="2" Padding="16,10,16,12" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,1,0,0">
+                <Grid RowSpacing="8">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="38" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <!-- Table Column Header -->
-                    <Border
-                        Grid.Row="0"
-                        Padding="16,0"
-                        Background="{StaticResource AppCanvasBgBrush}"
-                        BorderBrush="{StaticResource AppBorderSubtleBrush}"
-                        BorderThickness="0,0,0,1"
-                        CornerRadius="10,10,0,0">
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="64" />
-                                <ColumnDefinition Width="180" />
-                                <ColumnDefinition Width="190" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="ID" />
-                            <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="微信昵称" />
-                            <TextBlock Grid.Column="2" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="微信号" />
-                            <TextBlock Grid.Column="3" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="员工备注" />
-                        </Grid>
-                    </Border>
+                    <Grid Grid.Row="0">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <RadioButton x:Name="DirOutgoingRadio" Content="我方回复 (绿色)" GroupName="CustomerMsgDir" IsChecked="True" MinWidth="0" />
+                            <RadioButton x:Name="DirIncomingRadio" Content="客户发来 (白色)" GroupName="CustomerMsgDir" MinWidth="0" />
+                        </StackPanel>
 
-                    <!-- Rows -->
-                    <Grid Grid.Row="1">
-                        <TextBlock
-                            x:Name="EmptyTableHint"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            FontSize="13"
-                            Foreground="{StaticResource TextMutedBrush}"
-                            Text="当前员工名下暂无客户档案，可在右侧新增或在“微信OCR”页核验导入。"
-                            Visibility="Collapsed" />
+                        <Button HorizontalAlignment="Right" Height="28" Padding="10,0" Click="OcrChatClipboardButton_Click" Content="粘贴截图提取文字" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                    </Grid>
 
-                        <ListView x:Name="CustomersListView" SelectionMode="None">
-                            <ListView.ItemTemplate>
-                                <DataTemplate x:DataType="models:CustomerDto">
-                                    <Border
-                                        Padding="4,10"
-                                        BorderBrush="{StaticResource AppBorderSubtleBrush}"
-                                        BorderThickness="0,0,0,1">
-                                        <Grid ColumnSpacing="12">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="64" />
-                                                <ColumnDefinition Width="180" />
-                                                <ColumnDefinition Width="190" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border
-                                                Grid.Column="0"
-                                                HorizontalAlignment="Left"
-                                                Padding="7,2"
-                                                Background="{StaticResource BrandSoftBgBrush}"
-                                                CornerRadius="4">
-                                                <TextBlock FontFamily="Consolas" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind Id}" />
-                                            </Border>
-                                            <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind WechatName}" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Grid.Column="2" VerticalAlignment="Center" FontFamily="Consolas" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind WechatAccount}" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Grid.Column="3" VerticalAlignment="Center" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind Note}" TextWrapping="Wrap" />
-                                        </Grid>
-                                    </Border>
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
+                    <TextBox
+                        x:Name="MessageInputBox"
+                        Grid.Row="1"
+                        AcceptsReturn="True"
+                        Background="#F8F9FC"
+                        BorderThickness="0"
+                        CornerRadius="6"
+                        Padding="10,7"
+                        PlaceholderText="输入聊天内容，或粘贴聊天截图自动提取文字..."
+                        TextWrapping="Wrap" />
+
+                    <Grid Grid.Row="2">
+                        <TextBlock x:Name="ComposerHintText" VerticalAlignment="Center" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="内容将保存至当前客户沟通记录" />
+                        <Button
+                            x:Name="SendMessageButton"
+                            HorizontalAlignment="Right"
+                            Height="30"
+                            Padding="18,0"
+                            Click="SendMessageButton_Click"
+                            Content="发送记录"
+                            FontSize="12.5"
+                            IsEnabled="False"
+                            Style="{StaticResource PrimaryVioletButtonStyle}" />
                     </Grid>
                 </Grid>
             </Border>
         </Grid>
 
-        <!-- Right: Quick Add Customer Drawer -->
-        <Border
-            Grid.Column="1"
-            Padding="20,18"
-            Background="{StaticResource AppCanvasBgBrush}"
-            BorderBrush="{StaticResource AppBorderBrush}"
-            BorderThickness="1,0,0,0">
-            <StackPanel Spacing="14">
-                <StackPanel Spacing="2">
-                    <TextBlock FontSize="15" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="手动新建客户" />
-                    <TextBlock FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="直接写入当前登录员工名下的 Go 后端数据库" TextWrapping="Wrap" />
+        <!-- Column 2: Dedicated Right Customer Profile Panel (View / Edit / Save / Employee Notes / Delete) -->
+        <Border Grid.Column="2" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1,0,0,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="56" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Top Profile Header + Edit/Save/Delete Controls -->
+                <Border Grid.Row="0" Padding="16,0" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,0,1">
+                    <Grid>
+                        <TextBlock VerticalAlignment="Center" FontSize="14.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="客户信息" />
+
+                        <!-- Read Mode Actions -->
+                        <StackPanel x:Name="ViewActionsBar" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="EditProfileButton" Height="30" Padding="12,0" Click="EditProfileButton_Click" Content="编辑" FontSize="12" IsEnabled="False" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                            <Button x:Name="DeleteCustomerButton" Height="30" Padding="12,0" Click="DeleteCustomerButton_Click" Content="删除" FontSize="12" IsEnabled="False" Style="{StaticResource DangerOutlineButtonStyle}" />
+                        </StackPanel>
+
+                        <!-- Edit Mode Actions -->
+                        <StackPanel x:Name="EditActionsBar" HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
+                            <Button x:Name="CancelEditButton" Height="30" Padding="12,0" Click="CancelEditButton_Click" Content="取消" FontSize="12" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                            <Button x:Name="SaveProfileButton" Height="30" Padding="14,0" Click="SaveProfileButton_Click" Content="保存" FontSize="12" Style="{StaticResource PrimaryVioletButtonStyle}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Empty Selection State -->
+                <StackPanel
+                    x:Name="EmptyProfileHint"
+                    Grid.Row="1"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Padding="24"
+                    Spacing="10">
+                    <Border Width="48" Height="48" HorizontalAlignment="Center" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="12">
+                        <FontIcon FontSize="20" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE77B;" />
+                    </Border>
+                    <TextBlock HorizontalAlignment="Center" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="未选择客户" />
+                    <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="在左侧选择客户即可查看、编辑资料与填写员工专属备注，或点左上角「+」截图导入。" TextAlignment="Center" TextWrapping="Wrap" />
                 </StackPanel>
 
-                <Border Padding="16" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
-                    <StackPanel Spacing="12">
-                        <StackPanel Spacing="5">
-                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="微信昵称" />
-                            <TextBox x:Name="NewNameBox" PlaceholderText="请输入客户微信昵称" Style="{StaticResource SoftTextBoxStyle}" />
+                <!-- Profile Content Scroll Area -->
+                <ScrollViewer x:Name="ProfileContentScroll" Grid.Row="1" Padding="16,14" Visibility="Collapsed">
+                    <StackPanel Spacing="14">
+                        <!-- Feedback Banner -->
+                        <Border x:Name="ProfileStatusBanner" Padding="10,7" Background="{StaticResource SuccessBgBrush}" CornerRadius="7" Visibility="Collapsed">
+                            <TextBlock x:Name="ProfileStatusText" FontSize="12" Foreground="{StaticResource SuccessTextBrush}" TextWrapping="Wrap" />
+                        </Border>
+
+                        <!-- Top Avatar & Name Identity -->
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="52" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Width="52" Height="52" Background="{StaticResource BrandSoftBgBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
+                                <TextBlock x:Name="ProfileAvatarText" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="20" FontWeight="Bold" Foreground="{StaticResource BrandPrimaryBrush}" Text="客" />
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock x:Name="ProfileHeaderNameText" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="-" TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="ProfileHeaderAccountText" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Text="微信号：-" TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="ProfileHeaderRegionText" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="地区：-" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Border Height="1" Background="{StaticResource AppBorderSubtleBrush}" />
+
+                        <!-- VIEW MODE: Clean WeChat-style Info Card -->
+                        <StackPanel x:Name="ProfileViewModePanel" Spacing="12">
+                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextMutedBrush}" Text="微信基础资料" />
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="12.5" Foreground="{StaticResource TextMutedBrush}" Text="电话" />
+                                <TextBlock x:Name="ViewPhoneText" Grid.Column="1" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" IsTextSelectionEnabled="True" Text="-" />
+                            </Grid>
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="12.5" Foreground="{StaticResource TextMutedBrush}" Text="个性签名" />
+                                <TextBlock x:Name="ViewSignatureText" Grid.Column="1" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" IsTextSelectionEnabled="True" Text="-" TextWrapping="Wrap" />
+                            </Grid>
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="12.5" Foreground="{StaticResource TextMutedBrush}" Text="来源" />
+                                <TextBlock x:Name="ViewSourceText" Grid.Column="1" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Text="-" TextWrapping="Wrap" />
+                            </Grid>
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="12.5" Foreground="{StaticResource TextMutedBrush}" Text="添加时间" />
+                                <TextBlock x:Name="ViewAddedDateText" Grid.Column="1" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Text="-" />
+                            </Grid>
+
+                            <Border Height="1" Margin="0,4" Background="{StaticResource AppBorderSubtleBrush}" />
+
+                            <!-- Dedicated Bottom Employee Follow-up Notes Card (Read Mode) -->
+                            <Border Padding="14" Background="#F8F7FF" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
+                                <StackPanel Spacing="8">
+                                    <Grid>
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="员工跟进备注" />
+                                        <Border HorizontalAlignment="Right" Padding="7,2" Background="#FFFFFF" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="8">
+                                            <TextBlock FontSize="10.5" Foreground="{StaticResource BrandPrimaryBrush}" Text="员工专属" />
+                                        </Border>
+                                    </Grid>
+                                    <TextBlock
+                                        x:Name="ViewEmployeeNoteText"
+                                        FontSize="13"
+                                        Foreground="{StaticResource TextSecondaryBrush}"
+                                        IsTextSelectionEnabled="True"
+                                        LineHeight="20"
+                                        Text="暂无员工备注，点击「编辑」即可补充客户意向与跟进内容。"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
 
-                        <StackPanel Spacing="5">
-                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="微信号" />
-                            <TextBox x:Name="NewAccountBox" PlaceholderText="请输入核验后的微信号" Style="{StaticResource SoftTextBoxStyle}" />
-                        </StackPanel>
+                        <!-- EDIT MODE: Full Editable Fields + Bottom Employee Notes Input -->
+                        <StackPanel x:Name="ProfileEditModePanel" Spacing="9" Visibility="Collapsed">
+                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="正在编辑客户资料与备注" />
 
-                        <StackPanel Spacing="5">
-                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="员工备注" />
-                            <TextBox
-                                x:Name="NewNoteBox"
-                                Height="84"
-                                AcceptsReturn="True"
-                                PlaceholderText="客户来源、跟进状态或需求备注..."
-                                Style="{StaticResource SoftTextBoxStyle}"
-                                TextWrapping="Wrap" />
-                        </StackPanel>
+                            <TextBox x:Name="EditNameBox" Header="微信昵称" Style="{StaticResource SoftTextBoxStyle}" />
+                            <TextBox x:Name="EditAccountBox" Header="微信号" Style="{StaticResource SoftTextBoxStyle}" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="EditRegionBox" Grid.Column="0" Header="地区" Style="{StaticResource SoftTextBoxStyle}" />
+                                <TextBox x:Name="EditPhoneBox" Grid.Column="1" Header="电话" Style="{StaticResource SoftTextBoxStyle}" />
+                            </Grid>
+                            <TextBox x:Name="EditSignatureBox" Header="个性签名" Style="{StaticResource SoftTextBoxStyle}" TextWrapping="Wrap" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="118" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="EditSourceBox" Grid.Column="0" Header="来源" Style="{StaticResource SoftTextBoxStyle}" />
+                                <TextBox x:Name="EditAddedDateBox" Grid.Column="1" Header="添加时间" Style="{StaticResource SoftTextBoxStyle}" />
+                            </Grid>
 
-                        <Button
-                            x:Name="CreateButton"
-                            Height="38"
-                            HorizontalAlignment="Stretch"
-                            Click="CreateButton_Click"
-                            Content="+ 添加到我的客户库"
-                            Style="{StaticResource PrimaryVioletButtonStyle}" />
+                            <!-- Dedicated Bottom Employee Follow-up Notes Card (Edit Mode) -->
+                            <Border Margin="0,4,0,0" Padding="12" Background="#F8F7FF" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
+                                <StackPanel Spacing="6">
+                                    <Grid>
+                                        <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="员工跟进备注" />
+                                        <TextBlock HorizontalAlignment="Right" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="可随时补充跟进要点" />
+                                    </Grid>
+                                    <TextBox
+                                        x:Name="EditEmployeeNoteBox"
+                                        MinHeight="96"
+                                        AcceptsReturn="True"
+                                        Background="#FFFFFF"
+                                        BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                                        CornerRadius="7"
+                                        Padding="10,8"
+                                        PlaceholderText="填写客户需求、报价记录、意向程度或下次跟进时间..."
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
+                </ScrollViewer>
+
+                <!-- Bottom Convenience Action Footer -->
+                <Border
+                    x:Name="ProfileFooterBar"
+                    Grid.Row="2"
+                    Padding="14,10"
+                    Background="{StaticResource AppCanvasBgBrush}"
+                    BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                    BorderThickness="0,1,0,0"
+                    Visibility="Collapsed">
+                    <Grid>
+                        <!-- View Footer -->
+                        <Grid x:Name="FooterViewButtons" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Height="34" HorizontalAlignment="Stretch" Click="EditProfileButton_Click" Content="编辑资料与备注" FontSize="12.5" Style="{StaticResource PrimaryVioletButtonStyle}" />
+                            <Button Grid.Column="1" Height="34" Padding="14,0" Click="DeleteCustomerButton_Click" Content="删除客户" FontSize="12.5" Style="{StaticResource DangerOutlineButtonStyle}" />
+                        </Grid>
+
+                        <!-- Edit Footer -->
+                        <Grid x:Name="FooterEditButtons" ColumnSpacing="8" Visibility="Collapsed">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="FooterSaveButton" Grid.Column="0" Height="34" HorizontalAlignment="Stretch" Click="SaveProfileButton_Click" Content="保存修改" FontSize="12.5" Style="{StaticResource PrimaryVioletButtonStyle}" />
+                            <Button Grid.Column="1" Height="34" Padding="16,0" Click="CancelEditButton_Click" Content="取消" FontSize="12.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                        </Grid>
+                    </Grid>
                 </Border>
-            </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </Page>

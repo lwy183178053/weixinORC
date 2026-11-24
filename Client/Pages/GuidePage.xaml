@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Client.Pages.GuidePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <ScrollViewer Background="{StaticResource AppCanvasBgBrush}" Padding="28,22">
+        <StackPanel MaxWidth="980" HorizontalAlignment="Left" Spacing="16">
+            <!-- Header -->
+            <StackPanel Spacing="4">
+                <TextBlock
+                    FontSize="20"
+                    FontWeight="SemiBold"
+                    Foreground="{StaticResource TextPrimaryBrush}"
+                    Text="使用介绍" />
+                <TextBlock
+                    FontSize="12.5"
+                    Foreground="{StaticResource TextMutedBrush}"
+                    Text="快速了解工作台的核心功能与日常操作流程" />
+            </StackPanel>
+
+            <!-- Quick Start 3-Step Strip -->
+            <Border
+                Padding="20"
+                Background="#FFFFFF"
+                BorderBrush="{StaticResource AppBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="10">
+                <StackPanel Spacing="14">
+                    <TextBlock
+                        FontSize="14.5"
+                        FontWeight="SemiBold"
+                        Foreground="{StaticResource TextPrimaryBrush}"
+                        Text="三步快速上手" />
+
+                    <Grid ColumnSpacing="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.Column="0" Padding="14" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="8">
+                            <StackPanel Spacing="6">
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <Border Width="22" Height="22" Background="{StaticResource BrandPrimaryBrush}" CornerRadius="11">
+                                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" FontWeight="Bold" Foreground="#FFFFFF" Text="1" />
+                                    </Border>
+                                    <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="截图录入档案" />
+                                </StackPanel>
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="20" Text="截取微信资料页或群信息页后，直接按 Ctrl+V 即可自动识别并填入表单，核对无误后一键导入。" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="1" Padding="14" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="8">
+                            <StackPanel Spacing="6">
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <Border Width="22" Height="22" Background="{StaticResource BrandPrimaryBrush}" CornerRadius="11">
+                                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" FontWeight="Bold" Foreground="#FFFFFF" Text="2" />
+                                    </Border>
+                                    <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="沉淀沟通与备注" />
+                                </StackPanel>
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="20" Text="在会话区记录客户与群组沟通内容，支持粘贴聊天截图快速提取文字；右侧随时补充员工专属跟进备注。" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Column="2" Padding="14" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="8">
+                            <StackPanel Spacing="6">
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <Border Width="22" Height="22" Background="{StaticResource BrandPrimaryBrush}" CornerRadius="11">
+                                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" FontWeight="Bold" Foreground="#FFFFFF" Text="3" />
+                                    </Border>
+                                    <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="窗口监控与排查" />
+                                </StackPanel>
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="20" Text="通过“窗口识别”直接管理与截取微信窗口；需要确认连接或识别记录时，可随时查看“运行日志”。" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Feature Cards 2x2 Grid -->
+            <Grid ColumnSpacing="14" RowSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Card 1: Customers -->
+                <Border Grid.Row="0" Grid.Column="0" Padding="18" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Border Width="30" Height="30" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="7">
+                                <FontIcon FontSize="15" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE77B;" />
+                            </Border>
+                            <TextBlock FontSize="14.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="客户档案" />
+                        </StackPanel>
+                        <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 点击列表上方「+」或直接按 Ctrl+V 打开导入弹窗，自动提取微信昵称、微信号、地区、签名、来源与添加时间。" TextWrapping="Wrap" />
+                        <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 支持按昵称、微信号、手机号或备注实时搜索客户；右侧面板可随时编辑客户资料并维护仅本人可见的跟进备注。" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Card 2: Groups -->
+                <Border Grid.Row="0" Grid.Column="1" Padding="18" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Border Width="30" Height="30" Background="{StaticResource InfoBgBrush}" CornerRadius="7">
+                                <FontIcon FontSize="15" Foreground="{StaticResource InfoTextBrush}" Glyph="&#xE716;" />
+                            </Border>
+                            <TextBlock FontSize="14.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="群组档案" />
+                        </StackPanel>
+                        <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 支持截取群信息或群成员列表后粘贴导入，自动整理群名称、人数和群成员名单。" TextWrapping="Wrap" />
+                        <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 会话区可区分我方发言与群成员发言，并支持粘贴群聊截图自动提取对话文字。" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Card 3: Window Monitor -->
+                <Border Grid.Row="1" Grid.Column="0" Padding="18" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Border Width="30" Height="30" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="7">
+                                <FontIcon FontSize="15" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8FE;" />
+                            </Border>
+                            <TextBlock FontSize="14.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="窗口识别" />
+                        </StackPanel>
+                        <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 自动检测本机运行中的微信与企业微信窗口，可快速切换显示或隐藏暂停。" TextWrapping="Wrap" />
+                        <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 支持直接截取目标窗口或导入本地图片，在画布中查看定位框并人工核验后保存到客户档案。" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Card 4: Shortcuts & Logs -->
+                <Border Grid.Row="1" Grid.Column="1" Padding="18" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Border Width="30" Height="30" Background="{StaticResource SuccessBgBrush}" CornerRadius="7">
+                                <FontIcon FontSize="15" Foreground="{StaticResource SuccessTextBrush}" Glyph="&#xE756;" />
+                            </Border>
+                            <TextBlock FontSize="14.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="常用快捷键与运行日志" />
+                        </StackPanel>
+                        <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• Ctrl + V：在客户页、群组页或导入弹窗中，直接粘贴剪贴板截图并触发识别。" TextWrapping="Wrap" />
+                        <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• Esc：快速关闭当前弹窗。若遇到连接或识别异常，可切换至“运行日志”查看实时输出或执行自检。" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

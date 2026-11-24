@@ -139,6 +139,7 @@ namespace Client.Services
             window.IsMinimized = false;
             IsAutomationPaused = false;
             PauseReason = string.Empty;
+            AppServices.Logs.Info("WIN", $"恢复显示窗口：{window.DisplayTitle}");
             return true;
         }
 
@@ -154,12 +155,14 @@ namespace Client.Services
             window.IsMinimized = true;
             window.DetectedState = WeChatLoginState.HiddenOrMinimized;
             IsAutomationPaused = true;
-            PauseReason = "窗口已隐藏/最小化，已暂停依赖可见画面的识别与键鼠任务；重新显示并复核后可继续。";
+            PauseReason = "窗口已隐藏，已暂停相关识别任务；重新显示后可继续。";
+            AppServices.Logs.Warn("WIN", $"隐藏暂停窗口：{window.DisplayTitle}");
             return true;
         }
 
         public SoftwareBitmap CaptureWindow(WeChatWindowInfo window)
         {
+            AppServices.Logs.Info("WIN", $"正在截取窗口画面：{window.DisplayTitle} ({window.DimensionsLabel})");
             return Win32WindowHelper.CaptureWindowToSoftwareBitmap(window.Hwnd);
         }
 

@@ -9,9 +9,6 @@ namespace Client.Services
     {
         public string Theme { get; set; } = "light";
         public string BackendUrl { get; set; } = "http://127.0.0.1:28765";
-        public bool DefaultBatchOverwrite { get; set; }
-        public bool EnableCtrlVPaste { get; set; } = true;
-        public bool DefaultShowOcrOverlay { get; set; } = true;
     }
 
     public sealed class AppSettingsService
@@ -27,7 +24,6 @@ namespace Client.Services
         public AppSettingsData Current { get; private set; } = new();
         public bool IsDarkMode => string.Equals(Current.Theme, "dark", StringComparison.OrdinalIgnoreCase);
         public ElementTheme CurrentElementTheme => IsDarkMode ? ElementTheme.Dark : ElementTheme.Light;
-        public string SettingsFilePath => _settingsPath;
 
         public event Action<bool>? ThemeChanged;
 
@@ -178,6 +174,9 @@ namespace Client.Services
                 SetBrush(res, "AccentFillColorTertiaryBrush", 0x74, 0x54, 0xF5);
                 SetBrush(res, "ContentDialogBackground", 0x15, 0x18, 0x21);
                 SetBrush(res, "ContentDialogBorderBrush", 0x2A, 0x30, 0x40);
+                SetBrush(res, "SmokeFillColorDefaultBrush", 0x04, 0x05, 0x0A, 0xB2);
+                SetBrush(res, "ContentDialogSmokeFill", 0x04, 0x05, 0x0A, 0xB2);
+                SetBrush(res, "SystemControlPageBackgroundMediumAltMediumBrush", 0x04, 0x05, 0x0A, 0xB2);
                 SetBrush(res, "LoginBgBrush", 0x0C, 0x0E, 0x14);
             }
             else
@@ -250,6 +249,9 @@ namespace Client.Services
                 SetBrush(res, "AccentFillColorTertiaryBrush", 0x58, 0x35, 0xE0);
                 SetBrush(res, "ContentDialogBackground", 0xFF, 0xFF, 0xFF);
                 SetBrush(res, "ContentDialogBorderBrush", 0xE2, 0xE5, 0xF0);
+                SetBrush(res, "SmokeFillColorDefaultBrush", 0x0F, 0x17, 0x2A, 0x4D);
+                SetBrush(res, "ContentDialogSmokeFill", 0x0F, 0x17, 0x2A, 0x4D);
+                SetBrush(res, "SystemControlPageBackgroundMediumAltMediumBrush", 0x0F, 0x17, 0x2A, 0x4D);
                 SetBrush(res, "LoginBgBrush", 0xF2, 0xF3, 0xFB);
             }
         }
@@ -264,6 +266,19 @@ namespace Client.Services
             else
             {
                 res[key] = new SolidColorBrush(color);
+            }
+
+            if (res.ThemeDictionaries is not null)
+            {
+                foreach (var entry in res.ThemeDictionaries.Values)
+                {
+                    if (entry is ResourceDictionary td &&
+                        td.TryGetValue(key, out object? tdExisting) &&
+                        tdExisting is SolidColorBrush tdBrush)
+                    {
+                        tdBrush.Color = color;
+                    }
+                }
             }
         }
     }

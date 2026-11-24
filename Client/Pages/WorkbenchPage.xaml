@@ -178,18 +178,6 @@
                         </Button>
 
                         <Button
-                            x:Name="RailLogsButton"
-                            Click="RailNav_Click"
-                            Style="{StaticResource RailButtonStyle}"
-                            Tag="logs"
-                            ToolTipService.ToolTip="运行日志">
-                            <StackPanel HorizontalAlignment="Center" Spacing="2">
-                                <FontIcon x:Name="RailLogsIcon" FontSize="15" Glyph="&#xE756;" />
-                                <TextBlock x:Name="RailLogsLabel" HorizontalAlignment="Center" FontSize="9.5" Text="运行日志" />
-                            </StackPanel>
-                        </Button>
-
-                        <Button
                             x:Name="RailGuideButton"
                             Click="RailNav_Click"
                             Style="{StaticResource RailButtonStyle}"

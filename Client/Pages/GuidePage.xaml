@@ -75,7 +75,7 @@
                                     </Border>
                                     <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="窗口监控与排查" />
                                 </StackPanel>
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="20" Text="通过“窗口识别”直接管理与截取微信窗口；需要确认连接或识别记录时，可随时查看“运行日志”。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="20" Text="通过“窗口识别”直接管理与截取微信窗口；需要排查连接或识别记录时，可在左下角“设置 → 服务”查看运行日志。" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
                     </Grid>
@@ -145,7 +145,7 @@
                             <TextBlock FontSize="14.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="常用快捷键与运行日志" />
                         </StackPanel>
                         <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• Ctrl + V：在客户页、群组页或导入弹窗中，直接粘贴剪贴板截图并触发识别。" TextWrapping="Wrap" />
-                        <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• Esc：快速关闭当前弹窗。若遇到连接或识别异常，可切换至“运行日志”查看实时输出或执行自检。" TextWrapping="Wrap" />
+                        <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• Esc：快速关闭当前弹窗。若遇到连接或识别异常，可点击左下角“设置 → 服务 → 查看运行日志”排查或自检。" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
             </Grid>

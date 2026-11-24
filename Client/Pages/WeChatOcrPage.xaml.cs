@@ -39,7 +39,6 @@ namespace Client.Pages
                 centerMin: 450,
                 rightDefault: 368, rightMin: 290, rightMax: 520);
             _isInitialized = true;
-            ShowOverlayCheck.IsChecked = AppServices.Settings.Current.DefaultShowOcrOverlay;
             EngineNoteText.Text = AppServices.Ocr.RapidEngine.AvailabilityNote;
             Loaded += WeChatOcrPage_Loaded;
         }

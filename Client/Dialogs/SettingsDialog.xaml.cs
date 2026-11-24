@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Client.Services;
 using Microsoft.UI;
@@ -5,55 +6,71 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace Client.Dialogs
 {
+    public sealed class CompactLogRow
+    {
+        public CompactLogRow(AppLogEntry entry)
+        {
+            Entry = entry;
+            TimeLabel = entry.TimeText;
+            LevelLabel = entry.LevelTag;
+            ModuleLabel = $"[{entry.Module}]";
+            Message = entry.Message;
+
+            string brushKey = entry.Level switch
+            {
+                AppLogLevel.Success => "SuccessTextBrush",
+                AppLogLevel.Warning => "WarningTextBrush",
+                AppLogLevel.Error => "DangerTextBrush",
+                _ => "InfoTextBrush"
+            };
+            LevelBrush = Application.Current?.Resources[brushKey] as Brush
+                ?? new SolidColorBrush(Colors.Gray);
+        }
+
+        public AppLogEntry Entry { get; }
+        public string TimeLabel { get; }
+        public string LevelLabel { get; }
+        public string ModuleLabel { get; }
+        public string Message { get; }
+        public Brush LevelBrush { get; }
+    }
+
     public sealed partial class SettingsDialog : ContentDialog
     {
-        private string _activeSection = "appearance";
-        private bool _initializing = true;
-
-        public bool RequestedNavigateLogs { get; private set; }
+        private readonly ObservableCollection<CompactLogRow> _visibleLogs = [];
+        private string _activeSection = "general";
+        private bool _logsSubscribed;
 
         public SettingsDialog()
         {
             InitializeComponent();
+            RequestedTheme = AppServices.Settings.CurrentElementTheme;
+            LogsListView.ItemsSource = _visibleLogs;
             Loaded += SettingsDialog_Loaded;
+            Closed += (_, _) => UnsubscribeLogs();
         }
 
         private void SettingsDialog_Loaded(object sender, RoutedEventArgs e)
         {
-            _initializing = true;
-
-            var s = AppServices.Settings.Current;
-            CtrlVPasteToggle.IsOn = s.EnableCtrlVPaste;
-            ShowOverlayToggle.IsOn = s.DefaultShowOcrOverlay;
             BackendUrlBox.Text = AppServices.Backend.BaseUrl;
-            SettingsPathText.Text = AppServices.Settings.SettingsFilePath;
 
             var emp = AppServices.Backend.CurrentEmployee;
             if (emp is not null)
             {
                 string display = string.IsNullOrWhiteSpace(emp.DisplayName) ? emp.Account : emp.DisplayName;
-                SidebarAvatarText.Text = display.Length > 0 ? display[..1].ToUpperInvariant() : "E";
-                SidebarEmployeeName.Text = display;
-                SidebarEmployeeAccount.Text = emp.Account;
+                AccountAvatarText.Text = display.Length > 0 ? display[..1].ToUpperInvariant() : "E";
+                AccountHeadlineName.Text = display;
+                AccountHeadlineSub.Text = $"账号：{emp.Account}";
                 AccountNameText.Text = display;
                 AccountLoginText.Text = emp.Account;
                 AccountIdText.Text = emp.EmployeeId;
             }
 
-            bool ocrReady = AppServices.Ocr.RapidEngine.IsAvailable;
-            OcrStatusPillText.Text = ocrReady ? "已就绪" : "模型缺失";
-            OcrEngineDetailText.Text = ocrReady
-                ? "RapidOCR PP-OCRv5（全本地离线推理，支持多行自动拼接与头像定位）"
-                : "未检测到 RapidOCR 模型文件，请检查安装目录";
-
-            UpdateThemeCardVisuals();
-            UpdateDedupSegmentVisuals();
-            SelectCategory("appearance");
-
-            _initializing = false;
+            SelectCategory("general");
         }
 
         private void NavCategory_Click(object sender, RoutedEventArgs e)
@@ -67,19 +84,31 @@ namespace Client.Dialogs
         private void SelectCategory(string tag)
         {
             _activeSection = tag;
+            bool isLogs = tag == "logs";
 
-            AppearancePanel.Visibility = tag == "appearance" ? Visibility.Visible : Visibility.Collapsed;
             GeneralPanel.Visibility = tag == "general" ? Visibility.Visible : Visibility.Collapsed;
+            AccountPanel.Visibility = tag == "account" ? Visibility.Visible : Visibility.Collapsed;
             ServerPanel.Visibility = tag == "server" ? Visibility.Visible : Visibility.Collapsed;
-            AboutPanel.Visibility = tag == "about" ? Visibility.Visible : Visibility.Collapsed;
+            LogsPanel.Visibility = isLogs ? Visibility.Visible : Visibility.Collapsed;
+            BackToServerButton.Visibility = isLogs ? Visibility.Visible : Visibility.Collapsed;
 
             (SectionTitleText.Text, SectionSubtitleText.Text) = tag switch
             {
-                "general" => ("通用与导入", "配置批量导入默认去重方式、快捷粘贴与窗口识别默认偏好。"),
-                "server" => ("服务与账号", "配置后端服务地址、检测实时连通性并查看当前员工隔离会话。"),
-                "about" => ("关于工作台", "版本信息、合规说明与本地配置文件快速入口。"),
-                _ => ("外观与主题", "自由切换明亮 / 黑夜界面风格，修改后实时生效并自动保存。")
+                "account" => ("账号", "当前已登录员工的账户信息"),
+                "server" => ("服务", "配置后端服务端 IP 地址并检测连接状态"),
+                "logs" => ("运行日志", "轻量实时日志流，支持筛选、自检与一键复制"),
+                _ => ("通用", "工作台基础偏好配置")
             };
+
+            if (isLogs)
+            {
+                SubscribeLogs();
+                ReloadLogs();
+            }
+            else
+            {
+                UnsubscribeLogs();
+            }
 
             UpdateNavVisuals();
         }
@@ -91,10 +120,9 @@ namespace Client.Dialogs
             var inactiveBg = new SolidColorBrush(Colors.Transparent);
             var inactiveFg = (Brush)Application.Current.Resources["TextSecondaryBrush"];
 
-            SetNavState(NavAppearanceButton, NavAppearanceIcon, NavAppearanceText, _activeSection == "appearance", activeBg, activeFg, inactiveBg, inactiveFg);
             SetNavState(NavGeneralButton, NavGeneralIcon, NavGeneralText, _activeSection == "general", activeBg, activeFg, inactiveBg, inactiveFg);
-            SetNavState(NavServerButton, NavServerIcon, NavServerText, _activeSection == "server", activeBg, activeFg, inactiveBg, inactiveFg);
-            SetNavState(NavAboutButton, NavAboutIcon, NavAboutText, _activeSection == "about", activeBg, activeFg, inactiveBg, inactiveFg);
+            SetNavState(NavAccountButton, NavAccountIcon, NavAccountText, _activeSection == "account", activeBg, activeFg, inactiveBg, inactiveFg);
+            SetNavState(NavServerButton, NavServerIcon, NavServerText, _activeSection is "server" or "logs", activeBg, activeFg, inactiveBg, inactiveFg);
         }
 
         private static void SetNavState(Button btn, FontIcon icon, TextBlock text, bool active, Brush activeBg, Brush activeFg, Brush inactiveBg, Brush inactiveFg)
@@ -103,78 +131,6 @@ namespace Client.Dialogs
             icon.Foreground = active ? activeFg : inactiveFg;
             text.Foreground = active ? activeFg : inactiveFg;
             text.FontWeight = active ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
-        }
-
-        private void SelectLightTheme_Click(object sender, RoutedEventArgs e)
-        {
-            ApplyThemeLive(isDark: false);
-        }
-
-        private void SelectDarkTheme_Click(object sender, RoutedEventArgs e)
-        {
-            ApplyThemeLive(isDark: true);
-        }
-
-        private void QuickFlipTheme_Click(object sender, RoutedEventArgs e)
-        {
-            ApplyThemeLive(!AppServices.Settings.IsDarkMode);
-        }
-
-        private void ApplyThemeLive(bool isDark)
-        {
-            AppServices.Settings.ApplyTheme(isDark, save: true);
-            RequestedTheme = AppServices.Settings.CurrentElementTheme;
-            UpdateThemeCardVisuals();
-            UpdateNavVisuals();
-            UpdateDedupSegmentVisuals();
-        }
-
-        private void UpdateThemeCardVisuals()
-        {
-            bool isDark = AppServices.Settings.IsDarkMode;
-            var activeBorder = (Brush)Application.Current.Resources["BrandPrimaryBrush"];
-            var inactiveBorder = (Brush)Application.Current.Resources["AppBorderBrush"];
-
-            LightThemeCardBorder.BorderBrush = isDark ? inactiveBorder : activeBorder;
-            DarkThemeCardBorder.BorderBrush = isDark ? activeBorder : inactiveBorder;
-            LightActiveBadge.Visibility = isDark ? Visibility.Collapsed : Visibility.Visible;
-            DarkActiveBadge.Visibility = isDark ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        private void SegBackfillBtn_Click(object sender, RoutedEventArgs e)
-        {
-            AppServices.Settings.Current.DefaultBatchOverwrite = false;
-            AppServices.Settings.Save();
-            UpdateDedupSegmentVisuals();
-        }
-
-        private void SegOverwriteBtn_Click(object sender, RoutedEventArgs e)
-        {
-            AppServices.Settings.Current.DefaultBatchOverwrite = true;
-            AppServices.Settings.Save();
-            UpdateDedupSegmentVisuals();
-        }
-
-        private void UpdateDedupSegmentVisuals()
-        {
-            bool overwrite = AppServices.Settings.Current.DefaultBatchOverwrite;
-            var activeBg = (Brush)Application.Current.Resources["BrandPrimaryBrush"];
-            var activeFg = new SolidColorBrush(Colors.White);
-            var inactiveBg = new SolidColorBrush(Colors.Transparent);
-            var inactiveFg = (Brush)Application.Current.Resources["TextSecondaryBrush"];
-
-            SegBackfillBtn.Background = overwrite ? inactiveBg : activeBg;
-            SegBackfillBtn.Foreground = overwrite ? inactiveFg : activeFg;
-            SegOverwriteBtn.Background = overwrite ? activeBg : inactiveBg;
-            SegOverwriteBtn.Foreground = overwrite ? activeFg : inactiveFg;
-        }
-
-        private void GeneralToggle_Toggled(object sender, RoutedEventArgs e)
-        {
-            if (_initializing) return;
-            AppServices.Settings.Current.EnableCtrlVPaste = CtrlVPasteToggle.IsOn;
-            AppServices.Settings.Current.DefaultShowOcrOverlay = ShowOverlayToggle.IsOn;
-            AppServices.Settings.Save();
         }
 
         private async void TestBackendBtn_Click(object sender, RoutedEventArgs e)
@@ -197,6 +153,7 @@ namespace Client.Dialogs
                 ServerPingText.Foreground = (Brush)Application.Current.Resources["DangerTextBrush"];
                 return;
             }
+
             AppServices.Settings.Current.BackendUrl = AppServices.Backend.BaseUrl;
             AppServices.Settings.Save();
 
@@ -232,27 +189,147 @@ namespace Client.Dialogs
             }
         }
 
-        private void OpenSettingsFolderBtn_Click(object sender, RoutedEventArgs e)
+        private void OpenLogsSubView_Click(object sender, RoutedEventArgs e)
         {
-            try
+            SelectCategory("logs");
+        }
+
+        private void BackToServerButton_Click(object sender, RoutedEventArgs e)
+        {
+            SelectCategory("server");
+        }
+
+        private void SubscribeLogs()
+        {
+            if (_logsSubscribed) return;
+            AppServices.Logs.LogAdded += Logs_LogAdded;
+            AppServices.Logs.LogsCleared += Logs_LogsCleared;
+            _logsSubscribed = true;
+        }
+
+        private void UnsubscribeLogs()
+        {
+            if (!_logsSubscribed) return;
+            AppServices.Logs.LogAdded -= Logs_LogAdded;
+            AppServices.Logs.LogsCleared -= Logs_LogsCleared;
+            _logsSubscribed = false;
+        }
+
+        private void Logs_LogAdded(object? sender, AppLogEntry entry)
+        {
+            DispatcherQueue.TryEnqueue(() =>
             {
-                string? dir = Path.GetDirectoryName(AppServices.Settings.SettingsFilePath);
-                if (!string.IsNullOrEmpty(dir))
+                if (MatchesLogFilter(entry))
                 {
-                    Directory.CreateDirectory(dir);
-                    Process.Start(new ProcessStartInfo("explorer.exe", dir) { UseShellExecute = true });
+                    var row = new CompactLogRow(entry);
+                    _visibleLogs.Add(row);
+                    UpdateLogSummary();
+                    LogsListView.ScrollIntoView(row);
+                }
+            });
+        }
+
+        private void Logs_LogsCleared(object? sender, EventArgs e)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _visibleLogs.Clear();
+                UpdateLogSummary();
+            });
+        }
+
+        private void ReloadLogs()
+        {
+            _visibleLogs.Clear();
+            foreach (var entry in AppServices.Logs.GetSnapshot())
+            {
+                if (MatchesLogFilter(entry))
+                {
+                    _visibleLogs.Add(new CompactLogRow(entry));
                 }
             }
-            catch
+
+            UpdateLogSummary();
+            if (_visibleLogs.Count > 0)
             {
-                // Ignore shell error
+                LogsListView.ScrollIntoView(_visibleLogs[^1]);
             }
         }
 
-        private void JumpToLogsBtn_Click(object sender, RoutedEventArgs e)
+        private bool MatchesLogFilter(AppLogEntry entry)
         {
-            RequestedNavigateLogs = true;
-            Hide();
+            string levelTag = (LogLevelFilterCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? "all";
+            bool levelOk = levelTag switch
+            {
+                "info" => entry.Level == AppLogLevel.Info,
+                "ok" => entry.Level == AppLogLevel.Success,
+                "warn" => entry.Level == AppLogLevel.Warning,
+                "err" => entry.Level == AppLogLevel.Error,
+                _ => true
+            };
+            if (!levelOk) return false;
+
+            string query = LogSearchBox.Text.Trim();
+            if (string.IsNullOrEmpty(query)) return true;
+
+            return entry.Message.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || entry.Module.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || entry.LevelTag.Contains(query, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void UpdateLogSummary()
+        {
+            LogCountText.Text = $"共 {_visibleLogs.Count} 条记录";
+            EmptyLogsHint.Visibility = _visibleLogs.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void LogFilter_Changed(object sender, SelectionChangedEventArgs e)
+        {
+            if (LogsListView is not null && _activeSection == "logs")
+            {
+                ReloadLogs();
+            }
+        }
+
+        private void LogSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (LogsListView is not null && _activeSection == "logs")
+            {
+                ReloadLogs();
+            }
+        }
+
+        private async void RunSelfCheck_Click(object sender, RoutedEventArgs e)
+        {
+            AppServices.Logs.Info("SYS", "开始执行运行环境自检...");
+            if (AppServices.Ocr.RapidEngine.IsAvailable)
+            {
+                AppServices.Logs.Success("OCR", "本地识别组件检查通过，状态正常。");
+            }
+            else
+            {
+                AppServices.Logs.Error("OCR", AppServices.Ocr.RapidEngine.AvailabilityNote);
+            }
+            _ = await AppServices.Backend.CheckHealthAsync();
+        }
+
+        private void CopyLogs_Click(object sender, RoutedEventArgs e)
+        {
+            if (_visibleLogs.Count == 0) return;
+
+            var text = string.Join(Environment.NewLine, _visibleLogs.Select(x => x.Entry.FormattedLine));
+            var pkg = new DataPackage();
+            pkg.SetText(text);
+            Clipboard.SetContent(pkg);
+
+            LogCopyFeedbackText.Text = $"已复制 {_visibleLogs.Count} 条日志";
+            LogCopyFeedbackText.Visibility = Visibility.Visible;
+        }
+
+        private void ClearLogs_Click(object sender, RoutedEventArgs e)
+        {
+            LogCopyFeedbackText.Visibility = Visibility.Collapsed;
+            AppServices.Logs.Clear();
         }
 
         private void CloseButton_Click(object sender, RoutedEventArgs e)

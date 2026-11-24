@@ -274,17 +274,6 @@ namespace Client.Services
             _ = SendInput(1, inputs, Marshal.SizeOf<INPUT>());
         }
 
-        internal static void SendEscapeKey()
-        {
-            var inputs = new INPUT[2];
-            inputs[0].type = INPUT_KEYBOARD;
-            inputs[0].u.ki.wVk = VK_ESCAPE;
-            inputs[1].type = INPUT_KEYBOARD;
-            inputs[1].u.ki.wVk = VK_ESCAPE;
-            inputs[1].u.ki.dwFlags = KEYEVENTF_KEYUP;
-            _ = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
-        }
-
         internal static SoftwareBitmap CaptureScreenRectToSoftwareBitmap(int left, int top, int width, int height)
         {
             if (width <= 0 || height <= 0)

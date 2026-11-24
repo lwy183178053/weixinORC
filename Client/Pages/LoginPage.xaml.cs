@@ -17,13 +17,38 @@ namespace Client.Pages
             InitializeComponent();
             ServerUrlBox.Text = AppServices.Backend.BaseUrl;
             Loaded += LoginPage_Loaded;
+            Unloaded += LoginPage_Unloaded;
         }
 
         private async void LoginPage_Loaded(object sender, RoutedEventArgs e)
         {
             Loaded -= LoginPage_Loaded;
+            AppServices.Settings.ThemeChanged += OnThemeChanged;
             MainWindow.Instance?.SetDragRegion(LoginTitleDragBar);
+            UpdateThemeVisual(AppServices.Settings.IsDarkMode);
+            UpdateServerConfigToggleLabel(false);
             await CheckBackendHealthAsync();
+        }
+
+        private void LoginPage_Unloaded(object sender, RoutedEventArgs e)
+        {
+            AppServices.Settings.ThemeChanged -= OnThemeChanged;
+        }
+
+        private void OnThemeChanged(bool isDark)
+        {
+            UpdateThemeVisual(isDark);
+        }
+
+        private void UpdateThemeVisual(bool isDark)
+        {
+            LoginThemeIcon.Glyph = isDark ? "\uE706" : "\uE708";
+            LoginThemeLabel.Text = isDark ? "明亮" : "黑夜";
+        }
+
+        private void LoginThemeButton_Click(object sender, RoutedEventArgs e)
+        {
+            AppServices.Settings.ToggleTheme();
         }
 
         private async void BackendStatusButton_Click(object sender, RoutedEventArgs e)
@@ -39,7 +64,7 @@ namespace Client.Pages
         private async Task CheckBackendHealthAsync()
         {
             HealthDot.Fill = new SolidColorBrush(Color.FromArgb(255, 217, 119, 6));
-            HealthBadgeText.Text = "检测服务中...";
+            HealthBadgeText.Text = "检测中...";
 
             var result = await AppServices.Backend.CheckHealthAsync();
             if (result.IsSuccess)
@@ -65,8 +90,8 @@ namespace Client.Pages
         {
             string host = ServerUrlBox.Text.Replace("http://", "").Replace("https://", "");
             ServerConfigToggleText.Text = expanded
-                ? $"▾ 隐藏服务地址 ({host})"
-                : $"▸ 服务地址配置 ({host})";
+                ? $"▾ 服务地址 ({host})"
+                : $"▸ 服务地址 ({host})";
         }
 
         private void FillDemoButton_Click(object sender, RoutedEventArgs e)
@@ -107,7 +132,7 @@ namespace Client.Pages
             string password = PasswordBox.Password;
             if (string.IsNullOrWhiteSpace(account) || string.IsNullOrEmpty(password))
             {
-                ShowError("请输入员工账号和登录密码。");
+                ShowError("请输入账号和密码。");
                 return;
             }
 
@@ -137,6 +162,8 @@ namespace Client.Pages
             try
             {
                 AppServices.Backend.SetBaseUrl(ServerUrlBox.Text);
+                AppServices.Settings.Current.BackendUrl = AppServices.Backend.BaseUrl;
+                AppServices.Settings.Save();
                 UpdateServerConfigToggleLabel(ServerConfigPanel.Visibility == Visibility.Visible);
                 return true;
             }
@@ -155,7 +182,7 @@ namespace Client.Pages
             PasswordBox.IsEnabled = !busy;
             LoginSpinner.IsActive = busy;
             LoginSpinner.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
-            LoginButtonText.Text = busy ? "正在验证身份..." : "立即登录";
+            LoginButtonText.Text = busy ? "登录中..." : "登录";
         }
 
         private void ShowError(string message)

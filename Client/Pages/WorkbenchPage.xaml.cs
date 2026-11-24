@@ -82,7 +82,6 @@ namespace Client.Pages
             {
                 "customers" => (typeof(CustomersPage), "客户档案"),
                 "groups" => (typeof(GroupsPage), "群组档案"),
-                "logs" or "about" => (typeof(AboutPage), "运行日志"),
                 "guide" => (typeof(GuidePage), "使用介绍"),
                 _ => (typeof(WeChatOcrPage), "窗口识别")
             };
@@ -104,7 +103,6 @@ namespace Client.Pages
             SetRailItemState(RailCustomersButton, RailCustomersIcon, RailCustomersLabel, _activeTag == "customers", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailGroupsButton, RailGroupsIcon, RailGroupsLabel, _activeTag == "groups", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailOcrButton, RailOcrIcon, RailOcrLabel, _activeTag == "ocr", activeBg, activeFg, inactiveBg, inactiveFg);
-            SetRailItemState(RailLogsButton, RailLogsIcon, RailLogsLabel, _activeTag is "logs" or "about", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailGuideButton, RailGuideIcon, RailGuideLabel, _activeTag == "guide", activeBg, activeFg, inactiveBg, inactiveFg);
         }
 
@@ -138,11 +136,6 @@ namespace Client.Pages
             };
             await dialog.ShowAsync();
             RefreshHeaderAndFooter();
-
-            if (dialog.RequestedNavigateLogs)
-            {
-                SwitchSection("logs");
-            }
         }
 
         private async void LogoutButton_Click(object sender, RoutedEventArgs e)

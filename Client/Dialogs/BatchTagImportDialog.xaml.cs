@@ -23,10 +23,6 @@ namespace Client.Dialogs
         {
             InitializeComponent();
             RequestedTheme = AppServices.Settings.CurrentElementTheme;
-            if (AppServices.Settings.Current.DefaultBatchOverwrite)
-            {
-                DedupOverwriteRadio.IsChecked = true;
-            }
             TagsListView.ItemsSource = _tags;
             Closed += (_, _) => _cts?.Cancel();
         }

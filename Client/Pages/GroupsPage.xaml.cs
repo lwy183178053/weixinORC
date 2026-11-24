@@ -285,7 +285,7 @@ namespace Client.Pages
 
         private async void PasteAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
         {
-            if (_dialogOpen || _isEditing || !AppServices.Settings.Current.EnableCtrlVPaste) return;
+            if (_dialogOpen || _isEditing) return;
             var data = Clipboard.GetContent();
             if (data is null) return;
 

@@ -10,6 +10,19 @@
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
 
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="SmokeFillColorDefaultBrush" Color="#4D0F172A" />
+                    <SolidColorBrush x:Key="ContentDialogSmokeFill" Color="#4D0F172A" />
+                    <SolidColorBrush x:Key="SystemControlPageBackgroundMediumAltMediumBrush" Color="#4D0F172A" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="SmokeFillColorDefaultBrush" Color="#B804050A" />
+                    <SolidColorBrush x:Key="ContentDialogSmokeFill" Color="#B804050A" />
+                    <SolidColorBrush x:Key="SystemControlPageBackgroundMediumAltMediumBrush" Color="#B804050A" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
             <!-- Brand & Semantic Dynamic Palette (Mutated live by AppSettingsService for instant Light/Dark switch) -->
             <Color x:Key="BrandPrimaryColor">#7C5CFC</Color>
             <Color x:Key="BrandPrimaryHoverColor">#6946F5</Color>
@@ -89,6 +102,9 @@
             <CornerRadius x:Key="OverlayCornerRadius">12</CornerRadius>
             <SolidColorBrush x:Key="ContentDialogBackground" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ContentDialogBorderBrush" Color="#E2E5F0" />
+            <SolidColorBrush x:Key="SmokeFillColorDefaultBrush" Color="#4D0F172A" />
+            <SolidColorBrush x:Key="ContentDialogSmokeFill" Color="#4D0F172A" />
+            <SolidColorBrush x:Key="SystemControlPageBackgroundMediumAltMediumBrush" Color="#4D0F172A" />
 
             <!-- Subtle Top-Right Dialog Close Button -->
             <Style x:Key="DialogCloseButtonStyle" TargetType="Button">

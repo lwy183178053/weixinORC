@@ -13,6 +13,7 @@
     PrimaryButtonText="确认导入消息"
     Background="{StaticResource ContentDialogBackground}"
     BorderBrush="{StaticResource ContentDialogBorderBrush}"
+    KeyboardAcceleratorPlacementMode="Hidden"
     mc:Ignorable="d">
 
     <ContentDialog.KeyboardAccelerators>

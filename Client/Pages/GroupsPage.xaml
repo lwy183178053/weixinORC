@@ -7,6 +7,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:models="using:Client.Models"
+    KeyboardAcceleratorPlacementMode="Hidden"
     mc:Ignorable="d">
 
     <Page.KeyboardAccelerators>
@@ -145,7 +146,7 @@
         <controls:VerticalResizeSplitter x:Name="LeftPaneSplitter" Grid.Column="1" />
 
         <!-- Column 2: WeChat-style Group IM Chat Stage -->
-        <Grid x:Name="ChatStageGrid" Grid.Column="2" Background="{StaticResource AppChatCanvasBgBrush}" SizeChanged="ChatStageGrid_SizeChanged">
+        <Grid x:Name="ChatStageGrid" Grid.Column="2" Background="{StaticResource AppChatCanvasBgBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="56" />
                 <RowDefinition Height="*" MinHeight="160" />
@@ -232,10 +233,6 @@
                 Background="{StaticResource AppChatCanvasBgBrush}"
                 BorderBrush="{StaticResource AppBorderBrush}"
                 BorderThickness="0,1,0,0"
-                PointerCaptureLost="ComposerSplitter_PointerCaptureLost"
-                PointerMoved="ComposerSplitter_PointerMoved"
-                PointerPressed="ComposerSplitter_PointerPressed"
-                PointerReleased="ComposerSplitter_PointerReleased"
                 ToolTipService.ToolTip="上下拖动可调整输入框高度">
                 <Border Width="40" Height="3" HorizontalAlignment="Center" VerticalAlignment="Center" Background="{StaticResource AppSplitterGripBrush}" CornerRadius="2" />
             </controls:HorizontalResizeSplitter>

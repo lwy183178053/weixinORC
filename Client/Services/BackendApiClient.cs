@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -23,7 +24,7 @@ namespace Client.Services
     public sealed class BackendApiClient
     {
         private readonly HttpClient _httpClient;
-        private readonly Dictionary<string, byte[]> _avatarCache = new(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, byte[]> _avatarCache = new(StringComparer.Ordinal);
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
             PropertyNameCaseInsensitive = true
@@ -36,11 +37,8 @@ namespace Client.Services
 
         public string BaseUrl { get; private set; } = "http://127.0.0.1:28765";
         public string? AccessToken { get; private set; }
-        public DateTimeOffset? TokenExpiresAt { get; private set; }
         public EmployeeIdentity? CurrentEmployee { get; private set; }
         public bool IsAuthenticated => !string.IsNullOrEmpty(AccessToken) && CurrentEmployee is not null;
-
-        public event EventHandler? SessionChanged;
 
         public void SetBaseUrl(string rawUrl)
         {
@@ -94,9 +92,7 @@ namespace Client.Services
                         return ApiResult<LoginResponse>.Fail("登录响应缺少有效令牌。", resp.StatusCode);
                     }
                     AccessToken = data.Token;
-                    TokenExpiresAt = data.ExpiresAt;
                     CurrentEmployee = data.Employee;
-                    SessionChanged?.Invoke(this, EventArgs.Empty);
                     AppServices.Logs.Success("AUTH", $"账号「{payload.Account}」登录成功。");
                     return ApiResult<LoginResponse>.Ok(data, resp.StatusCode);
                 }
@@ -143,17 +139,77 @@ namespace Client.Services
             return SendAuthedAsync<CustomerListResponse>(HttpMethod.Get, $"/api/v1/customers{qs}", null, ct);
         }
 
+        public async Task<List<CustomerDto>> ListAllCustomersAsync(int maxItems = 2000, CancellationToken ct = default)
+        {
+            var all = new List<CustomerDto>();
+            long cursor = 0;
+            while (all.Count < maxItems)
+            {
+                var res = await ListCustomersAsync(limit: 100, cursor: cursor, ct: ct);
+                if (!res.IsSuccess || res.Data is null || res.Data.Items.Count == 0)
+                {
+                    break;
+                }
+                all.AddRange(res.Data.Items);
+                if (res.Data.NextCursor <= 0)
+                {
+                    break;
+                }
+                cursor = res.Data.NextCursor;
+            }
+            return all;
+        }
+
+        /// <summary>
+        /// Finds an existing duplicate customer safely:
+        /// 1. Matches exact WechatAccount first.
+        /// 2. Falls back to WechatName / WechatRemark ONLY when incoming account is empty OR the existing record has no WechatAccount,
+        ///    preventing false collisions between two different contacts who share a common nickname/remark.
+        /// </summary>
+        public static CustomerDto? FindDuplicateCustomer(
+            IEnumerable<CustomerDto> customers,
+            string account,
+            string nickname,
+            string remark)
+        {
+            string acc = account.Trim();
+            string name = nickname.Trim();
+            string rem = remark.Trim();
+
+            if (!string.IsNullOrEmpty(acc))
+            {
+                var byAcc = customers.FirstOrDefault(c =>
+                    !string.IsNullOrWhiteSpace(c.WechatAccount) &&
+                    c.WechatAccount.Equals(acc, StringComparison.OrdinalIgnoreCase));
+                if (byAcc is not null) return byAcc;
+            }
+
+            bool CanMatchByNameOrRemark(CustomerDto c) =>
+                string.IsNullOrEmpty(acc) || string.IsNullOrWhiteSpace(c.WechatAccount);
+
+            if (!string.IsNullOrEmpty(name))
+            {
+                var byName = customers.FirstOrDefault(c =>
+                    CanMatchByNameOrRemark(c) &&
+                    !string.IsNullOrWhiteSpace(c.WechatName) &&
+                    c.WechatName.Equals(name, StringComparison.OrdinalIgnoreCase));
+                if (byName is not null) return byName;
+            }
+
+            if (!string.IsNullOrEmpty(rem))
+            {
+                var byRem = customers.FirstOrDefault(c =>
+                    CanMatchByNameOrRemark(c) &&
+                    !string.IsNullOrWhiteSpace(c.WechatRemark) &&
+                    c.WechatRemark.Equals(rem, StringComparison.OrdinalIgnoreCase));
+                if (byRem is not null) return byRem;
+            }
+
+            return null;
+        }
+
         public Task<ApiResult<CustomerDto>> CreateCustomerAsync(CreateCustomerRequest payload, CancellationToken ct = default) =>
             SendAuthedAsync<CustomerDto>(HttpMethod.Post, "/api/v1/customers", payload, ct);
-
-        public Task<ApiResult<CustomerDto>> CreateCustomerAsync(
-            string wechatName, string wechatAccount, string note, CancellationToken ct = default) =>
-            CreateCustomerAsync(new CreateCustomerRequest
-            {
-                WechatName = wechatName.Trim(),
-                WechatAccount = wechatAccount.Trim(),
-                Note = note.Trim()
-            }, ct);
 
         public Task<ApiResult<CustomerDto>> UpdateCustomerAsync(long customerId, CreateCustomerRequest payload, CancellationToken ct = default) =>
             SendAuthedAsync<CustomerDto>(HttpMethod.Patch, $"/api/v1/customers/{customerId}", payload, ct);
@@ -176,8 +232,15 @@ namespace Client.Services
             return res;
         }
 
-        public Task<ApiResult<CustomerDto>> DeleteCustomerAvatarAsync(long customerId, CancellationToken ct = default) =>
-            SendAuthedAsync<CustomerDto>(HttpMethod.Delete, $"/api/v1/customers/{customerId}/avatar", null, ct);
+        public async Task<ApiResult<CustomerDto>> DeleteCustomerAvatarAsync(long customerId, string? oldAvatarUrl = null, CancellationToken ct = default)
+        {
+            var res = await SendAuthedAsync<CustomerDto>(HttpMethod.Delete, $"/api/v1/customers/{customerId}/avatar", null, ct);
+            if (res.IsSuccess && !string.IsNullOrWhiteSpace(oldAvatarUrl))
+            {
+                _avatarCache.TryRemove(oldAvatarUrl, out _);
+            }
+            return res;
+        }
 
         public async Task<byte[]?> DownloadAvatarBytesAsync(string? avatarUrl, CancellationToken ct = default)
         {
@@ -186,6 +249,15 @@ namespace Client.Services
 
             try
             {
+                // Only send Bearer token to relative paths on our configured backend host.
+                if (avatarUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                    avatarUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!avatarUrl.StartsWith(BaseUrl, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return null;
+                    }
+                }
                 string path = avatarUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
                     ? avatarUrl
                     : $"{BaseUrl}{(avatarUrl.StartsWith('/') ? avatarUrl : "/" + avatarUrl)}";
@@ -242,28 +314,31 @@ namespace Client.Services
                     Content = content.Trim()
                 }, ct);
 
-        // ---- WeChat Accounts, Group Members & Audit Logs ----
-
-        public Task<ApiResult<WeChatAccountListResponse>> ListWeChatAccountsAsync(CancellationToken ct = default) =>
-            SendAuthedAsync<WeChatAccountListResponse>(HttpMethod.Get, "/api/v1/wechat-accounts", null, ct);
-
-        public Task<ApiResult<WeChatAccountDto>> UpsertWeChatAccountAsync(UpsertWeChatAccountRequest payload, CancellationToken ct = default) =>
-            SendAuthedAsync<WeChatAccountDto>(HttpMethod.Post, "/api/v1/wechat-accounts", payload, ct);
-
-        public Task<ApiResult<GroupMemberListResponse>> ListGroupMembersAsync(long groupId, int limit = 100, CancellationToken ct = default) =>
-            SendAuthedAsync<GroupMemberListResponse>(HttpMethod.Get, $"/api/v1/groups/{groupId}/members?limit={limit}", null, ct);
-
-        public Task<ApiResult<GroupMemberDto>> CreateGroupMemberAsync(long groupId, CreateGroupMemberRequest payload, CancellationToken ct = default) =>
-            SendAuthedAsync<GroupMemberDto>(HttpMethod.Post, $"/api/v1/groups/{groupId}/members", payload, ct);
-
-        public Task<ApiResult<AuditLogListResponse>> ListAuditLogsAsync(int limit = 100, CancellationToken ct = default) =>
-            SendAuthedAsync<AuditLogListResponse>(HttpMethod.Get, $"/api/v1/audit-logs?limit={limit}", null, ct);
+        // ---- Audit Logs ----
 
         public Task<ApiResult<AuditLogDto>> CreateAuditLogAsync(string action, string targetType, string targetId, string detail, CancellationToken ct = default) =>
             SendAuthedAsync<AuditLogDto>(HttpMethod.Post, "/api/v1/audit-logs",
                 new CreateAuditLogRequest { Action = action, TargetType = targetType, TargetId = targetId, Detail = detail }, ct);
 
-        private async Task<ApiResult<T>> SendAuthedAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct)
+        private Task<ApiResult<T>> SendAuthedAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct) =>
+            SendAuthedCoreAsync(method, path, body, async (resp, token) =>
+            {
+                var data = await resp.Content.ReadFromJsonAsync<T>(JsonOptions, token);
+                return data is not null
+                    ? ApiResult<T>.Ok(data, resp.StatusCode)
+                    : ApiResult<T>.Fail("响应解析为空。", resp.StatusCode);
+            }, ct);
+
+        private Task<ApiResult<bool>> SendAuthedNoContentAsync(HttpMethod method, string path, CancellationToken ct) =>
+            SendAuthedCoreAsync(method, path, null, (resp, _) =>
+                Task.FromResult(ApiResult<bool>.Ok(true, resp.StatusCode)), ct);
+
+        private async Task<ApiResult<T>> SendAuthedCoreAsync<T>(
+            HttpMethod method,
+            string path,
+            object? body,
+            Func<HttpResponseMessage, CancellationToken, Task<ApiResult<T>>> onSuccess,
+            CancellationToken ct)
         {
             if (!IsAuthenticated)
             {
@@ -279,14 +354,11 @@ namespace Client.Services
                 using var resp = await _httpClient.SendAsync(req, ct);
                 if (resp.IsSuccessStatusCode)
                 {
-                    var data = await resp.Content.ReadFromJsonAsync<T>(JsonOptions, ct);
                     if (method != HttpMethod.Get)
                     {
                         AppServices.Logs.Success("API", $"{method} {path} -> {(int)resp.StatusCode}");
                     }
-                    return data is not null
-                        ? ApiResult<T>.Ok(data, resp.StatusCode)
-                        : ApiResult<T>.Fail("响应解析为空。", resp.StatusCode);
+                    return await onSuccess(resp, ct);
                 }
                 if (resp.StatusCode == HttpStatusCode.Unauthorized)
                 {
@@ -303,36 +375,6 @@ namespace Client.Services
             }
         }
 
-        private async Task<ApiResult<bool>> SendAuthedNoContentAsync(HttpMethod method, string path, CancellationToken ct)
-        {
-            if (!IsAuthenticated)
-            {
-                return ApiResult<bool>.Fail("请先登录员工账号。");
-            }
-            try
-            {
-                using var req = CreateAuthedRequest(method, path);
-                using var resp = await _httpClient.SendAsync(req, ct);
-                if (resp.IsSuccessStatusCode)
-                {
-                    AppServices.Logs.Success("API", $"{method} {path} -> {(int)resp.StatusCode}");
-                    return ApiResult<bool>.Ok(true, resp.StatusCode);
-                }
-                if (resp.StatusCode == HttpStatusCode.Unauthorized)
-                {
-                    ClearSession();
-                }
-                string errMsg = await ReadFriendlyErrorAsync(resp, ct);
-                AppServices.Logs.Warn("API", $"{method} {path} -> {(int)resp.StatusCode} ({errMsg})");
-                return ApiResult<bool>.Fail(errMsg, resp.StatusCode);
-            }
-            catch (Exception ex)
-            {
-                AppServices.Logs.Error("API", $"{method} {path} 异常：{ex.Message}");
-                return ApiResult<bool>.Fail($"请求失败：{ex.Message}");
-            }
-        }
-
         private HttpRequestMessage CreateAuthedRequest(HttpMethod method, string relativePath)
         {
             var request = new HttpRequestMessage(method, $"{BaseUrl}{relativePath}");
@@ -343,10 +385,8 @@ namespace Client.Services
         private void ClearSession()
         {
             AccessToken = null;
-            TokenExpiresAt = null;
             CurrentEmployee = null;
             _avatarCache.Clear();
-            SessionChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private static async Task<string> ReadFriendlyErrorAsync(HttpResponseMessage response, CancellationToken ct)

@@ -168,6 +168,10 @@ namespace Client.Services
                 SetBrush(res, "InfoBgBrush", 0x15, 0x24, 0x3B);
                 SetBrush(res, "InfoBorderBrush", 0x24, 0x3E, 0x66);
                 SetBrush(res, "InfoTextBrush", 0x60, 0xA5, 0xFA);
+                SetBrush(res, "GenderMaleBgBrush", 0x15, 0x24, 0x3B);
+                SetBrush(res, "GenderMaleTextBrush", 0x60, 0xA5, 0xFA);
+                SetBrush(res, "GenderFemaleBgBrush", 0x31, 0x17, 0x28);
+                SetBrush(res, "GenderFemaleTextBrush", 0xF4, 0x72, 0xB6);
 
                 SetBrush(res, "AccentFillColorDefaultBrush", 0x8B, 0x6E, 0xFF);
                 SetBrush(res, "AccentFillColorSecondaryBrush", 0x9B, 0x82, 0xFF);
@@ -177,7 +181,6 @@ namespace Client.Services
                 SetBrush(res, "SmokeFillColorDefaultBrush", 0x04, 0x05, 0x0A, 0xB2);
                 SetBrush(res, "ContentDialogSmokeFill", 0x04, 0x05, 0x0A, 0xB2);
                 SetBrush(res, "SystemControlPageBackgroundMediumAltMediumBrush", 0x04, 0x05, 0x0A, 0xB2);
-                SetBrush(res, "LoginBgBrush", 0x0C, 0x0E, 0x14);
             }
             else
             {
@@ -243,6 +246,10 @@ namespace Client.Services
                 SetBrush(res, "InfoBgBrush", 0xEA, 0xF3, 0xFF);
                 SetBrush(res, "InfoBorderBrush", 0xBF, 0xDB, 0xFE);
                 SetBrush(res, "InfoTextBrush", 0x25, 0x63, 0xEB);
+                SetBrush(res, "GenderMaleBgBrush", 0xEB, 0xF5, 0xFF);
+                SetBrush(res, "GenderMaleTextBrush", 0x25, 0x63, 0xEB);
+                SetBrush(res, "GenderFemaleBgBrush", 0xFD, 0xF2, 0xF8);
+                SetBrush(res, "GenderFemaleTextBrush", 0xDB, 0x27, 0x77);
 
                 SetBrush(res, "AccentFillColorDefaultBrush", 0x7C, 0x5C, 0xFC);
                 SetBrush(res, "AccentFillColorSecondaryBrush", 0x69, 0x46, 0xF5);
@@ -252,7 +259,6 @@ namespace Client.Services
                 SetBrush(res, "SmokeFillColorDefaultBrush", 0x0F, 0x17, 0x2A, 0x4D);
                 SetBrush(res, "ContentDialogSmokeFill", 0x0F, 0x17, 0x2A, 0x4D);
                 SetBrush(res, "SystemControlPageBackgroundMediumAltMediumBrush", 0x0F, 0x17, 0x2A, 0x4D);
-                SetBrush(res, "LoginBgBrush", 0xF2, 0xF3, 0xFB);
             }
         }
 

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -103,9 +104,11 @@ func (v *HTTPVerifier) Verify(ctx context.Context, account, password string) (Id
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		return Identity{}, ErrInvalidCredentials
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		return Identity{}, fmt.Errorf("external auth returned status %d", resp.StatusCode)
 	}
 
@@ -115,7 +118,7 @@ func (v *HTTPVerifier) Verify(ctx context.Context, account, password string) (Id
 		DisplayName string    `json:"display_name"`
 		Employee    *Identity `json:"employee"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&raw); err != nil {
 		return Identity{}, err
 	}
 
@@ -150,13 +153,16 @@ type sessionEntry struct {
 
 // Sessions manages in-memory Bearer tokens keyed by SHA-256 hash.
 type Sessions struct {
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	ttl     time.Duration
 	entries map[[32]byte]sessionEntry
 	now     func() time.Time
 }
 
 func NewSessions(ttl time.Duration) *Sessions {
+	if ttl <= 0 {
+		ttl = 24 * time.Hour
+	}
 	return &Sessions{
 		ttl:     ttl,
 		entries: make(map[[32]byte]sessionEntry),
@@ -171,12 +177,12 @@ func (s *Sessions) Create(identity Identity) (string, time.Time, error) {
 	}
 
 	token := hex.EncodeToString(raw[:])
-	expires := s.now().Add(s.ttl)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := s.now()
+	expires := now.Add(s.ttl)
 	for key, entry := range s.entries {
 		if !now.Before(entry.expires) {
 			delete(s.entries, key)
@@ -195,15 +201,19 @@ func (s *Sessions) Lookup(token string) (Identity, bool) {
 	}
 
 	key := sha256.Sum256([]byte(token))
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	s.mu.RLock()
 	entry, ok := s.entries[key]
+	now := s.now()
+	s.mu.RUnlock()
 	if !ok {
 		return Identity{}, false
 	}
-	if !s.now().Before(entry.expires) {
-		delete(s.entries, key)
+	if !now.Before(entry.expires) {
+		s.mu.Lock()
+		if cur, exists := s.entries[key]; exists && !s.now().Before(cur.expires) {
+			delete(s.entries, key)
+		}
+		s.mu.Unlock()
 		return Identity{}, false
 	}
 	return entry.identity, true

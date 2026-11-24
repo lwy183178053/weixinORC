@@ -10,6 +10,7 @@ namespace Client.Pages
     public sealed partial class WorkbenchPage : Page
     {
         private string _activeTag = "customers";
+        private bool _isLoggingOut;
 
         public WorkbenchPage()
         {
@@ -129,19 +130,44 @@ namespace Client.Pages
 
         private async void SettingsButton_Click(object sender, RoutedEventArgs e)
         {
-            var dialog = new SettingsDialog
+            if (!AppServices.TryBeginModalDialog()) return;
+            try
             {
-                XamlRoot = XamlRoot,
-                RequestedTheme = AppServices.Settings.CurrentElementTheme
-            };
-            await dialog.ShowAsync();
-            RefreshHeaderAndFooter();
+                var dialog = new SettingsDialog
+                {
+                    XamlRoot = XamlRoot,
+                    RequestedTheme = AppServices.Settings.CurrentElementTheme
+                };
+                await dialog.ShowAsync();
+                RefreshHeaderAndFooter();
+            }
+            catch (Exception ex)
+            {
+                AppServices.Logs.Error("UI", $"打开设置弹窗失败：{ex.Message}");
+            }
+            finally
+            {
+                AppServices.EndModalDialog();
+            }
         }
 
         private async void LogoutButton_Click(object sender, RoutedEventArgs e)
         {
-            await AppServices.Backend.LogoutAsync();
-            MainWindow.Instance?.ShowLoginView();
+            if (_isLoggingOut) return;
+            _isLoggingOut = true;
+            try
+            {
+                await AppServices.Backend.LogoutAsync();
+                MainWindow.Instance?.ShowLoginView();
+            }
+            catch (Exception ex)
+            {
+                AppServices.Logs.Error("AUTH", $"退出登录异常：{ex.Message}");
+            }
+            finally
+            {
+                _isLoggingOut = false;
+            }
         }
     }
 }

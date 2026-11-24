@@ -30,7 +30,7 @@ func validWeChatStatus(s string) bool {
 	return s == "online" || s == "offline" || s == "disconnected" || s == "paused"
 }
 
-func (s *Server) listWeChatAccounts(c *gin.Context) {
+func (s *server) listWeChatAccounts(c *gin.Context) {
 	ownerID := auth.IdentityFromContext(c).EmployeeID
 	items, err := s.store.ListWeChatAccounts(c.Request.Context(), ownerID)
 	if err != nil {
@@ -40,7 +40,7 @@ func (s *Server) listWeChatAccounts(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
-func (s *Server) upsertWeChatAccount(c *gin.Context) {
+func (s *server) upsertWeChatAccount(c *gin.Context) {
 	var req upsertWeChatAccountRequest
 	if !bindJSON(c, &req) {
 		return
@@ -81,10 +81,9 @@ func (s *Server) upsertWeChatAccount(c *gin.Context) {
 	c.JSON(http.StatusOK, acc)
 }
 
-func (s *Server) updateWeChatAccount(c *gin.Context) {
-	id, ok := parseID(c.Param("id"))
+func (s *server) updateWeChatAccount(c *gin.Context) {
+	id, ok := parsePathID(c, "id", "invalid_account_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_account_id"})
 		return
 	}
 	var req patchWeChatAccountRequest
@@ -95,12 +94,12 @@ func (s *Server) updateWeChatAccount(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "empty_patch"})
 		return
 	}
-	if req.Status != nil && !validWeChatStatus(*req.Status) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_status"})
+	if !trimAndCheck(&req.WechatID, 128) || !trimAndCheck(&req.Nickname, 128) || !trimAndCheck(&req.Status, 32) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "field_too_long"})
 		return
 	}
-	if (req.WechatID != nil && !validText(*req.WechatID, 128)) || (req.Nickname != nil && !validText(*req.Nickname, 128)) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "field_too_long"})
+	if req.Status != nil && !validWeChatStatus(*req.Status) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_status"})
 		return
 	}
 
@@ -118,10 +117,9 @@ func (s *Server) updateWeChatAccount(c *gin.Context) {
 	c.JSON(http.StatusOK, acc)
 }
 
-func (s *Server) deleteWeChatAccount(c *gin.Context) {
-	id, ok := parseID(c.Param("id"))
+func (s *server) deleteWeChatAccount(c *gin.Context) {
+	id, ok := parsePathID(c, "id", "invalid_account_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_account_id"})
 		return
 	}
 	ownerID := auth.IdentityFromContext(c).EmployeeID
@@ -155,10 +153,9 @@ type patchGroupMemberRequest struct {
 	Note          *string `json:"note"`
 }
 
-func (s *Server) listGroupMembers(c *gin.Context) {
-	groupID, ok := parseID(c.Param("id"))
+func (s *server) listGroupMembers(c *gin.Context) {
+	groupID, ok := parsePathID(c, "id", "invalid_group_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_group_id"})
 		return
 	}
 	cursor, limit, ok := parsePagination(c)
@@ -174,10 +171,9 @@ func (s *Server) listGroupMembers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items, "next_cursor": next})
 }
 
-func (s *Server) createGroupMember(c *gin.Context) {
-	groupID, ok := parseID(c.Param("id"))
+func (s *server) createGroupMember(c *gin.Context) {
+	groupID, ok := parsePathID(c, "id", "invalid_group_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_group_id"})
 		return
 	}
 	var req createGroupMemberRequest
@@ -217,15 +213,13 @@ func (s *Server) createGroupMember(c *gin.Context) {
 	c.JSON(http.StatusCreated, member)
 }
 
-func (s *Server) updateGroupMember(c *gin.Context) {
-	groupID, ok := parseID(c.Param("id"))
+func (s *server) updateGroupMember(c *gin.Context) {
+	groupID, ok := parsePathID(c, "id", "invalid_group_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_group_id"})
 		return
 	}
-	memberID, ok := parseID(c.Param("memberId"))
+	memberID, ok := parsePathID(c, "memberId", "invalid_member_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_member_id"})
 		return
 	}
 	var req patchGroupMemberRequest
@@ -235,6 +229,12 @@ func (s *Server) updateGroupMember(c *gin.Context) {
 	if req.LocalKey == nil && req.NativeID == nil && req.GroupNickname == nil &&
 		req.WechatName == nil && req.WechatAccount == nil && req.Role == nil && req.Note == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "empty_patch"})
+		return
+	}
+	if !trimAndCheck(&req.LocalKey, 128) || !trimAndCheck(&req.NativeID, 128) || !trimAndCheck(&req.GroupNickname, 128) ||
+		!trimAndCheck(&req.WechatName, 128) || !trimAndCheck(&req.WechatAccount, 128) || !trimAndCheck(&req.Role, 32) ||
+		(req.Note != nil && !validText(*req.Note, 1000)) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "field_too_long"})
 		return
 	}
 
@@ -255,15 +255,13 @@ func (s *Server) updateGroupMember(c *gin.Context) {
 	c.JSON(http.StatusOK, member)
 }
 
-func (s *Server) deleteGroupMember(c *gin.Context) {
-	groupID, ok := parseID(c.Param("id"))
+func (s *server) deleteGroupMember(c *gin.Context) {
+	groupID, ok := parsePathID(c, "id", "invalid_group_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_group_id"})
 		return
 	}
-	memberID, ok := parseID(c.Param("memberId"))
+	memberID, ok := parsePathID(c, "memberId", "invalid_member_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_member_id"})
 		return
 	}
 	ownerID := auth.IdentityFromContext(c).EmployeeID
@@ -283,7 +281,7 @@ type createAuditLogRequest struct {
 	Detail     string `json:"detail"`
 }
 
-func (s *Server) listAuditLogs(c *gin.Context) {
+func (s *server) listAuditLogs(c *gin.Context) {
 	cursor, limit, ok := parsePagination(c)
 	if !ok {
 		return
@@ -297,7 +295,7 @@ func (s *Server) listAuditLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items, "next_cursor": next})
 }
 
-func (s *Server) createAuditLog(c *gin.Context) {
+func (s *server) createAuditLog(c *gin.Context) {
 	var req createAuditLogRequest
 	if !bindJSON(c, &req) {
 		return

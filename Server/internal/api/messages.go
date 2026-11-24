@@ -3,7 +3,6 @@ package api
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"weixinorc/server/internal/auth"
@@ -16,10 +15,9 @@ type createMessageRequest struct {
 	SentAt    string `json:"sent_at"`
 }
 
-func (s *Server) listMessages(c *gin.Context) {
-	customerID, ok := parseID(c.Param("id"))
+func (s *server) listMessages(c *gin.Context) {
+	customerID, ok := parsePathID(c, "id", "invalid_customer_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_customer_id"})
 		return
 	}
 	cursor, limit, ok := parsePagination(c)
@@ -36,10 +34,9 @@ func (s *Server) listMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items, "next_cursor": next})
 }
 
-func (s *Server) createMessage(c *gin.Context) {
-	customerID, ok := parseID(c.Param("id"))
+func (s *server) createMessage(c *gin.Context) {
+	customerID, ok := parsePathID(c, "id", "invalid_customer_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_customer_id"})
 		return
 	}
 
@@ -56,14 +53,9 @@ func (s *Server) createMessage(c *gin.Context) {
 		return
 	}
 
-	sentAt := time.Now().UTC()
-	if req.SentAt != "" {
-		parsed, err := time.Parse(time.RFC3339, req.SentAt)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_sent_at"})
-			return
-		}
-		sentAt = parsed
+	sentAt, ok := parseSentAt(c, req.SentAt)
+	if !ok {
+		return
 	}
 
 	ownerID := auth.IdentityFromContext(c).EmployeeID

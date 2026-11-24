@@ -30,7 +30,6 @@ namespace Client.Services
             "mmui::MainWindow"
         };
 
-        public bool IsAutomationPaused { get; private set; }
         public string PauseReason { get; private set; } = string.Empty;
 
         public List<WeChatWindowInfo> EnumerateWindows(bool includeAllVisibleWindows = false)
@@ -137,7 +136,6 @@ namespace Client.Services
 
             window.IsVisible = true;
             window.IsMinimized = false;
-            IsAutomationPaused = false;
             PauseReason = string.Empty;
             AppServices.Logs.Info("WIN", $"恢复显示窗口：{window.DisplayTitle}");
             return true;
@@ -154,7 +152,6 @@ namespace Client.Services
             _ = Win32WindowHelper.ShowWindow(window.Hwnd, Win32WindowHelper.SW_MINIMIZE);
             window.IsMinimized = true;
             window.DetectedState = WeChatLoginState.HiddenOrMinimized;
-            IsAutomationPaused = true;
             PauseReason = "窗口已隐藏，已暂停相关识别任务；重新显示后可继续。";
             AppServices.Logs.Warn("WIN", $"隐藏暂停窗口：{window.DisplayTitle}");
             return true;

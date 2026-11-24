@@ -7,7 +7,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
-using Windows.ApplicationModel.DataTransfer;
 
 namespace Client.Pages
 {
@@ -16,17 +15,11 @@ namespace Client.Pages
         private List<GroupDto> _allGroups = [];
         private GroupDto? _selectedGroup;
         private bool _isEditing;
-        private bool _dialogOpen;
-        private bool _isDraggingSplitter;
-        private double _dragStartY;
-        private double _dragStartHeight;
-
-        private readonly ThreePaneResizeController _paneResizeController;
 
         public GroupsPage()
         {
             InitializeComponent();
-            _paneResizeController = ThreePaneResizeController.Attach(
+            _ = ThreePaneResizeController.Attach(
                 RootThreePaneGrid,
                 LeftPaneColumn, LeftPaneSplitter,
                 CenterPaneColumn, RightPaneSplitter,
@@ -34,17 +27,20 @@ namespace Client.Pages
                 leftDefault: 268, leftMin: 220, leftMax: 420,
                 centerMin: 450,
                 rightDefault: 356, rightMin: 290, rightMax: 520);
+            _ = ComposerResizeController.Attach(ChatStageGrid, ComposerRow, ComposerSplitter, minHeight: 128);
         }
 
         protected override async void OnNavigatedTo(NavigationEventArgs e)
         {
             base.OnNavigatedTo(e);
-            await LoadGroupsAsync();
+            try { await LoadGroupsAsync(); }
+            catch (Exception ex) { AppServices.Logs.Error("UI", $"加载群组列表异常：{ex.Message}"); }
         }
 
         private async void RefreshButton_Click(object sender, RoutedEventArgs e)
         {
-            await LoadGroupsAsync(_selectedGroup?.Id);
+            try { await LoadGroupsAsync(_selectedGroup?.Id); }
+            catch (Exception ex) { ShowDetailStatus($"刷新失败：{ex.Message}", isError: true); }
         }
 
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -102,9 +98,10 @@ namespace Client.Pages
             DetailStatusBanner.Visibility = Visibility.Collapsed;
             UpdateSelectedGroupUi();
 
-            if (_selectedGroup is not null)
+            if (_selectedGroup is { } selected)
             {
-                await LoadGroupMessagesAsync(_selectedGroup);
+                try { await LoadGroupMessagesAsync(selected); }
+                catch (Exception ex) { AppServices.Logs.Error("UI", $"加载群聊记录异常：{ex.Message}"); }
             }
             else
             {
@@ -236,16 +233,15 @@ namespace Client.Pages
 
         private async void DeleteGroupButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_selectedGroup is null || _dialogOpen) return;
             var target = _selectedGroup;
+            if (target is null || !AppServices.TryBeginModalDialog()) return;
 
-            _dialogOpen = true;
             try
             {
                 var confirm = new ContentDialog
                 {
                     XamlRoot = XamlRoot,
-                    RequestedTheme = ElementTheme.Light,
+                    RequestedTheme = AppServices.Settings.CurrentElementTheme,
                     Title = "确认删除群组",
                     Content = $"确定要删除群组「{target.DisplayName}」及其全部群聊记录吗？删除后无法恢复。",
                     PrimaryButtonText = "确认删除",
@@ -272,48 +268,42 @@ namespace Client.Pages
                     ShowDetailStatus($"删除失败：{res.ErrorMessage}", isError: true);
                 }
             }
+            catch (Exception ex)
+            {
+                ShowDetailStatus($"删除异常：{ex.Message}", isError: true);
+            }
             finally
             {
-                _dialogOpen = false;
+                AppServices.EndModalDialog();
             }
         }
 
         private async void AddGroupButton_Click(object sender, RoutedEventArgs e)
         {
-            await ShowImportDialogAsync(autoPasteClipboard: false);
+            try { await ShowImportDialogAsync(autoPasteClipboard: false); }
+            catch (Exception ex) { ShowDetailStatus($"打开建群窗口失败：{ex.Message}", isError: true); }
         }
 
         private async void PasteAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
         {
-            if (_dialogOpen || _isEditing) return;
-            var data = Clipboard.GetContent();
-            if (data is null) return;
-
-            bool hasImage = data.Contains(StandardDataFormats.Bitmap);
-            if (!hasImage && data.Contains(StandardDataFormats.StorageItems))
+            if (AppServices.IsModalDialogOpen || _isEditing) return;
+            if (OcrService.HasClipboardBitmapFast())
             {
-                try
-                {
-                    var items = await data.GetStorageItemsAsync();
-                    hasImage = items.Any(i =>
-                        i.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase));
-                }
-                catch { }
+                args.Handled = true;
+                try { await ShowImportDialogAsync(autoPasteClipboard: true); }
+                catch (Exception ex) { ShowDetailStatus($"快捷建群失败：{ex.Message}", isError: true); }
+                return;
             }
-
-            if (!hasImage) return;
+            if (!await OcrService.HasClipboardImageAsync()) return;
 
             args.Handled = true;
-            await ShowImportDialogAsync(autoPasteClipboard: true);
+            try { await ShowImportDialogAsync(autoPasteClipboard: true); }
+            catch (Exception ex) { ShowDetailStatus($"快捷建群失败：{ex.Message}", isError: true); }
         }
 
         private async Task ShowImportDialogAsync(bool autoPasteClipboard)
         {
-            if (_dialogOpen) return;
-            _dialogOpen = true;
+            if (!AppServices.TryBeginModalDialog()) return;
             try
             {
                 var dialog = new ImportGroupDialog { XamlRoot = XamlRoot };
@@ -331,13 +321,15 @@ namespace Client.Pages
             }
             finally
             {
-                _dialogOpen = false;
+                AppServices.EndModalDialog();
             }
         }
 
         private async Task LoadGroupMessagesAsync(GroupDto group)
         {
             var res = await AppServices.Backend.ListGroupMessagesAsync(group.Id);
+            if (_selectedGroup?.Id != group.Id) return;
+
             if (!res.IsSuccess || res.Data is null)
             {
                 EmptyChatTitle.Text = $"加载群消息失败：{res.ErrorMessage}";
@@ -376,7 +368,8 @@ namespace Client.Pages
 
         private async void SendMessageButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_selectedGroup is null) return;
+            var target = _selectedGroup;
+            if (target is null) return;
             string content = MessageInputBox.Text.Trim();
             if (string.IsNullOrEmpty(content)) return;
 
@@ -389,17 +382,20 @@ namespace Client.Pages
             SendMessageButton.IsEnabled = false;
             try
             {
-                var res = await AppServices.Backend.CreateGroupMessageAsync(_selectedGroup.Id, senderName, direction, content);
+                var res = await AppServices.Backend.CreateGroupMessageAsync(target.Id, senderName, direction, content);
                 if (res.IsSuccess)
                 {
                     MessageInputBox.Text = string.Empty;
-                    await LoadGroupMessagesAsync(_selectedGroup);
-                    await LoadGroupsAsync(_selectedGroup.Id);
+                    await LoadGroupsAsync(target.Id);
                 }
                 else
                 {
                     ComposerHintText.Text = $"发送失败：{res.ErrorMessage}";
                 }
+            }
+            catch (Exception ex)
+            {
+                ComposerHintText.Text = $"发送异常：{ex.Message}";
             }
             finally
             {
@@ -407,51 +403,10 @@ namespace Client.Pages
             }
         }
 
-        private void ComposerSplitter_PointerPressed(object sender, PointerRoutedEventArgs e)
-        {
-            _isDraggingSplitter = true;
-            _dragStartY = e.GetCurrentPoint(ChatStageGrid).Position.Y;
-            _dragStartHeight = ComposerRow.ActualHeight;
-            ComposerSplitter.CapturePointer(e.Pointer);
-            e.Handled = true;
-        }
-
-        private void ComposerSplitter_PointerMoved(object sender, PointerRoutedEventArgs e)
-        {
-            if (!_isDraggingSplitter) return;
-            double currentY = e.GetCurrentPoint(ChatStageGrid).Position.Y;
-            double delta = _dragStartY - currentY;
-            double maxAllowed = Math.Min(440, Math.Max(160, ChatStageGrid.ActualHeight - 240));
-            double nextHeight = Math.Clamp(_dragStartHeight + delta, 128, maxAllowed);
-            ComposerRow.Height = new GridLength(nextHeight);
-        }
-
-        private void ComposerSplitter_PointerReleased(object sender, PointerRoutedEventArgs e)
-        {
-            if (!_isDraggingSplitter) return;
-            _isDraggingSplitter = false;
-            ComposerSplitter.ReleasePointerCapture(e.Pointer);
-        }
-
-        private void ComposerSplitter_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
-        {
-            _isDraggingSplitter = false;
-        }
-
-        private void ChatStageGrid_SizeChanged(object sender, SizeChangedEventArgs e)
-        {
-            double maxAllowed = Math.Min(440, Math.Max(128, ChatStageGrid.ActualHeight - 240));
-            if (ComposerRow.Height.IsAbsolute && ComposerRow.Height.Value > maxAllowed)
-            {
-                ComposerRow.Height = new GridLength(Math.Max(128, maxAllowed));
-            }
-        }
-
         private async void ImportChatScreenshotButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_selectedGroup is null || _dialogOpen) return;
             var target = _selectedGroup;
-            _dialogOpen = true;
+            if (target is null || !AppServices.TryBeginModalDialog()) return;
             try
             {
                 var dialog = new ImportChatScreenshotDialog { XamlRoot = XamlRoot };
@@ -469,47 +424,44 @@ namespace Client.Pages
                     if (res.IsSuccess) saved++;
                 }
 
-                await LoadGroupMessagesAsync(target);
+                if (_selectedGroup?.Id == target.Id)
+                {
+                    await LoadGroupMessagesAsync(target);
+                }
                 ComposerHintText.Text = $"已从群聊截图批量导入 {saved} 条消息。";
+            }
+            catch (Exception ex)
+            {
+                ComposerHintText.Text = $"截图导入异常：{ex.Message}";
             }
             finally
             {
-                _dialogOpen = false;
+                AppServices.EndModalDialog();
             }
         }
 
         private async void OcrChatClipboardButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!AppServices.Ocr.RapidEngine.IsAvailable)
-            {
-                ComposerHintText.Text = AppServices.Ocr.RapidEngine.AvailabilityNote;
-                return;
-            }
-
             try
             {
-                var (bmp, _) = await AppServices.Ocr.TryLoadImageFromClipboardAsync();
-                if (bmp is null)
+                ComposerHintText.Text = "正在提取截图文字...";
+                var (ocr, err) = await AppServices.Ocr.TryRecognizeClipboardTextAsync();
+                if (ocr is null)
                 {
-                    ComposerHintText.Text = "剪贴板中没有图片，请先截群聊画面再试。";
+                    ComposerHintText.Text = err;
                     return;
                 }
 
-                using (bmp)
+                if (!string.IsNullOrWhiteSpace(ocr.FullText))
                 {
-                    ComposerHintText.Text = "正在提取截图文字...";
-                    var ocr = await AppServices.Ocr.RapidEngine.RecognizeAsync(bmp);
-                    if (!string.IsNullOrWhiteSpace(ocr.FullText))
-                    {
-                        MessageInputBox.Text = string.IsNullOrWhiteSpace(MessageInputBox.Text)
-                            ? ocr.FullText
-                            : $"{MessageInputBox.Text}\n{ocr.FullText}";
-                        ComposerHintText.Text = $"已识别 {ocr.Lines.Count} 行群聊文字（{ocr.ElapsedMilliseconds} ms）。";
-                    }
-                    else
-                    {
-                        ComposerHintText.Text = "未识别到文字。";
-                    }
+                    MessageInputBox.Text = string.IsNullOrWhiteSpace(MessageInputBox.Text)
+                        ? ocr.FullText
+                        : $"{MessageInputBox.Text}\n{ocr.FullText}";
+                    ComposerHintText.Text = $"已识别 {ocr.Lines.Count} 行群聊文字（{ocr.ElapsedMilliseconds} ms）。";
+                }
+                else
+                {
+                    ComposerHintText.Text = "未识别到文字。";
                 }
             }
             catch (Exception ex)

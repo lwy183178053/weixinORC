@@ -24,11 +24,6 @@
             </ResourceDictionary.ThemeDictionaries>
 
             <!-- Brand & Semantic Dynamic Palette (Mutated live by AppSettingsService for instant Light/Dark switch) -->
-            <Color x:Key="BrandPrimaryColor">#7C5CFC</Color>
-            <Color x:Key="BrandPrimaryHoverColor">#6946F5</Color>
-            <Color x:Key="BrandPrimaryPressedColor">#5835E0</Color>
-            <Color x:Key="BrandSoftBgColor">#F1EEFF</Color>
-
             <SolidColorBrush x:Key="BrandPrimaryBrush" Color="#7C5CFC" />
             <SolidColorBrush x:Key="BrandPrimaryHoverBrush" Color="#6946F5" />
             <SolidColorBrush x:Key="BrandPrimaryPressedBrush" Color="#5835E0" />
@@ -49,7 +44,6 @@
             <SolidColorBrush x:Key="AppBorderBrush" Color="#E6E8F0" />
             <SolidColorBrush x:Key="AppBorderSubtleBrush" Color="#EEF0F6" />
             <SolidColorBrush x:Key="AppSplitterGripBrush" Color="#CBD0DC" />
-            <SolidColorBrush x:Key="LoginBgBrush" Color="#F2F3FB" />
 
             <SolidColorBrush x:Key="ButtonBgBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="ButtonBorderBrush" Color="#D8DCE6" />
@@ -92,6 +86,10 @@
             <SolidColorBrush x:Key="InfoBgBrush" Color="#EAF3FF" />
             <SolidColorBrush x:Key="InfoBorderBrush" Color="#BFDBFE" />
             <SolidColorBrush x:Key="InfoTextBrush" Color="#2563EB" />
+            <SolidColorBrush x:Key="GenderMaleBgBrush" Color="#EBF5FF" />
+            <SolidColorBrush x:Key="GenderMaleTextBrush" Color="#2563EB" />
+            <SolidColorBrush x:Key="GenderFemaleBgBrush" Color="#FDF2F8" />
+            <SolidColorBrush x:Key="GenderFemaleTextBrush" Color="#DB2777" />
 
             <!-- Override default accent so standard controls harmonize -->
             <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#7C5CFC" />

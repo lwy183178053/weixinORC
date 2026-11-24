@@ -5,7 +5,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics.Imaging;
 
 namespace Client.Dialogs
@@ -15,6 +14,7 @@ namespace Client.Dialogs
         private SoftwareBitmap? _bitmap;
         private bool _isBusyOcr;
         private bool _isSubmitting;
+        private bool _isClosed;
 
         public GroupDto? CreatedGroup { get; private set; }
 
@@ -24,8 +24,12 @@ namespace Client.Dialogs
             RequestedTheme = AppServices.Settings.CurrentElementTheme;
             Closed += (_, _) =>
             {
-                _bitmap?.Dispose();
-                _bitmap = null;
+                _isClosed = true;
+                if (!_isBusyOcr)
+                {
+                    _bitmap?.Dispose();
+                    _bitmap = null;
+                }
             };
         }
 
@@ -53,25 +57,14 @@ namespace Client.Dialogs
 
         private async void PasteAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
         {
-            var data = Clipboard.GetContent();
-            if (data is null) return;
-
-            bool hasImage = data.Contains(StandardDataFormats.Bitmap);
-            if (!hasImage && data.Contains(StandardDataFormats.StorageItems))
+            if (_isSubmitting || _isBusyOcr) return;
+            if (OcrService.HasClipboardBitmapFast())
             {
-                try
-                {
-                    var items = await data.GetStorageItemsAsync();
-                    hasImage = items.Any(i =>
-                        i.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase));
-                }
-                catch { }
+                args.Handled = true;
+                await ImportFromClipboardAsync();
+                return;
             }
-
-            if (!hasImage) return;
+            if (!await OcrService.HasClipboardImageAsync()) return;
 
             args.Handled = true;
             await ImportFromClipboardAsync();
@@ -81,7 +74,7 @@ namespace Client.Dialogs
 
         private async void UploadButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_isBusyOcr) return;
+            if (_isBusyOcr || _isSubmitting) return;
             string? filePath = Win32WindowHelper.PickImageFilePath(AppServices.MainWindowHandle);
             if (string.IsNullOrWhiteSpace(filePath)) return;
 
@@ -99,7 +92,7 @@ namespace Client.Dialogs
 
         private async Task ImportFromClipboardAsync()
         {
-            if (_isBusyOcr) return;
+            if (_isBusyOcr || _isSubmitting) return;
             try
             {
                 var (bmp, label) = await AppServices.Ocr.TryLoadImageFromClipboardAsync();
@@ -145,6 +138,7 @@ namespace Client.Dialogs
                 EmptyPreviewHint.Visibility = Visibility.Collapsed;
 
                 var ocr = await AppServices.Ocr.RapidEngine.RecognizeAsync(bmp);
+                if (_isClosed) return;
                 var parsed = WeChatOcrAnalyzer.AnalyzeGroup(ocr);
 
                 GroupNameBox.Text = parsed.CandidateGroupName;
@@ -160,21 +154,29 @@ namespace Client.Dialogs
             catch (Exception ex)
             {
                 AppServices.Logs.Error("OCR", $"群截图识别失败：{ex.Message}");
-                ShowStatus($"识别失败：{ex.Message}", isError: true);
+                if (!_isClosed) ShowStatus($"识别失败：{ex.Message}", isError: true);
             }
             finally
             {
                 _isBusyOcr = false;
-                OcrSpinner.IsActive = false;
-                OcrSpinner.Visibility = Visibility.Collapsed;
-                PasteButton.IsEnabled = true;
-                UploadButton.IsEnabled = true;
+                if (_isClosed)
+                {
+                    _bitmap?.Dispose();
+                    _bitmap = null;
+                }
+                else
+                {
+                    OcrSpinner.IsActive = false;
+                    OcrSpinner.Visibility = Visibility.Collapsed;
+                    PasteButton.IsEnabled = true;
+                    UploadButton.IsEnabled = true;
+                }
             }
         }
 
         private async void SubmitButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_isSubmitting) return;
+            if (_isSubmitting || _isBusyOcr) return;
 
             string name = GroupNameBox.Text.Trim();
             if (string.IsNullOrEmpty(name))
@@ -199,6 +201,7 @@ namespace Client.Dialogs
                     MembersText = MembersTextBox.Text.Trim(),
                     Note = NoteBox.Text.Trim()
                 });
+                if (_isClosed) return;
 
                 if (res.IsSuccess && res.Data is not null)
                 {
@@ -210,13 +213,20 @@ namespace Client.Dialogs
                     ShowStatus($"保存失败：{res.ErrorMessage}", isError: true);
                 }
             }
+            catch (Exception ex)
+            {
+                if (!_isClosed) ShowStatus($"保存异常：{ex.Message}", isError: true);
+            }
             finally
             {
                 _isSubmitting = false;
-                SubmitButton.IsEnabled = true;
-                SubmitSpinner.IsActive = false;
-                SubmitSpinner.Visibility = Visibility.Collapsed;
-                SubmitButtonText.Text = "核验确认并导入";
+                if (!_isClosed)
+                {
+                    SubmitButton.IsEnabled = true;
+                    SubmitSpinner.IsActive = false;
+                    SubmitSpinner.Visibility = Visibility.Collapsed;
+                    SubmitButtonText.Text = "核验确认并导入";
+                }
             }
         }
 

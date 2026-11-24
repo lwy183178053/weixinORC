@@ -7,8 +7,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
-using Windows.ApplicationModel.DataTransfer;
-using Windows.UI;
 
 namespace Client.Pages
 {
@@ -16,18 +14,13 @@ namespace Client.Pages
     {
         private List<CustomerDto> _allCustomers = [];
         private CustomerDto? _selectedCustomer;
+        private CancellationTokenSource? _avatarHydrationCts;
         private bool _isEditing;
-        private bool _dialogOpen;
-        private bool _isDraggingSplitter;
-        private double _dragStartY;
-        private double _dragStartHeight;
-
-        private readonly ThreePaneResizeController _paneResizeController;
 
         public CustomersPage()
         {
             InitializeComponent();
-            _paneResizeController = ThreePaneResizeController.Attach(
+            _ = ThreePaneResizeController.Attach(
                 RootThreePaneGrid,
                 LeftPaneColumn, LeftPaneSplitter,
                 CenterPaneColumn, RightPaneSplitter,
@@ -35,17 +28,26 @@ namespace Client.Pages
                 leftDefault: 268, leftMin: 220, leftMax: 420,
                 centerMin: 450,
                 rightDefault: 356, rightMin: 290, rightMax: 520);
+            _ = ComposerResizeController.Attach(ChatStageGrid, ComposerRow, ComposerSplitter, minHeight: 120);
+            Unloaded += (_, _) =>
+            {
+                _avatarHydrationCts?.Cancel();
+                _avatarHydrationCts?.Dispose();
+                _avatarHydrationCts = null;
+            };
         }
 
         protected override async void OnNavigatedTo(NavigationEventArgs e)
         {
             base.OnNavigatedTo(e);
-            await LoadCustomersAsync();
+            try { await LoadCustomersAsync(); }
+            catch (Exception ex) { AppServices.Logs.Error("UI", $"加载客户列表异常：{ex.Message}"); }
         }
 
         private async void RefreshButton_Click(object sender, RoutedEventArgs e)
         {
-            await LoadCustomersAsync(_selectedCustomer?.Id);
+            try { await LoadCustomersAsync(_selectedCustomer?.Id); }
+            catch (Exception ex) { ShowProfileStatus($"刷新失败：{ex.Message}", isError: true); }
         }
 
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -63,7 +65,7 @@ namespace Client.Pages
             {
                 _allCustomers = result.Data.Items;
                 ApplyFilter(selectId);
-                _ = HydrateCustomerAvatarsAsync(_allCustomers);
+                StartAvatarHydration(_allCustomers);
             }
             else
             {
@@ -71,22 +73,42 @@ namespace Client.Pages
             }
         }
 
-        private async Task HydrateCustomerAvatarsAsync(List<CustomerDto> customers)
+        private void StartAvatarHydration(List<CustomerDto> customers)
         {
-            foreach (var c in customers)
+            _avatarHydrationCts?.Cancel();
+            _avatarHydrationCts?.Dispose();
+            var cts = new CancellationTokenSource();
+            _avatarHydrationCts = cts;
+            _ = HydrateCustomerAvatarsAsync(customers, cts.Token);
+        }
+
+        private async Task HydrateCustomerAvatarsAsync(List<CustomerDto> customers, CancellationToken ct)
+        {
+            try
             {
-                if (string.IsNullOrWhiteSpace(c.AvatarUrl) || c.AvatarImage is not null) continue;
-                byte[]? bytes = await AppServices.Backend.DownloadAvatarBytesAsync(c.AvatarUrl);
-                if (bytes is null) continue;
-                var img = await AvatarImageService.BytesToBitmapImageAsync(bytes);
-                if (img is not null)
+                foreach (var c in customers)
                 {
-                    c.AvatarImage = img;
-                    if (_selectedCustomer?.Id == c.Id)
+                    if (ct.IsCancellationRequested) return;
+                    if (string.IsNullOrWhiteSpace(c.AvatarUrl) || c.AvatarImage is not null) continue;
+                    byte[]? bytes = await AppServices.Backend.DownloadAvatarBytesAsync(c.AvatarUrl, ct);
+                    if (bytes is null || ct.IsCancellationRequested) continue;
+                    var img = await AvatarImageService.BytesToBitmapImageAsync(bytes);
+                    if (img is not null && !ct.IsCancellationRequested)
                     {
-                        ApplyProfileAvatarVisual(c);
+                        c.AvatarImage = img;
+                        if (_selectedCustomer?.Id == c.Id)
+                        {
+                            ApplyProfileAvatarVisual(c);
+                        }
                     }
                 }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                AppServices.Logs.Warn("UI", $"加载客户头像异常：{ex.Message}");
             }
         }
 
@@ -129,9 +151,10 @@ namespace Client.Pages
             ProfileStatusBanner.Visibility = Visibility.Collapsed;
             UpdateSelectedCustomerUi();
 
-            if (_selectedCustomer is not null)
+            if (_selectedCustomer is { } selected)
             {
-                await LoadCustomerMessagesAsync(_selectedCustomer);
+                try { await LoadCustomerMessagesAsync(selected); }
+                catch (Exception ex) { AppServices.Logs.Error("UI", $"加载聊天记录异常：{ex.Message}"); }
             }
             else
             {
@@ -182,18 +205,18 @@ namespace Client.Pages
             ProfileHeaderAccountText.Text = $"微信号：{(string.IsNullOrWhiteSpace(c.WechatAccount) ? "-" : c.WechatAccount)}";
             ProfileHeaderRegionText.Text = $"地区：{(string.IsNullOrWhiteSpace(c.Region) ? "-" : c.Region)}";
 
-            // Gender badge in header
+            // Gender badge in header (dynamic Light/Dark theme brushes)
             if (c.Gender == "男")
             {
-                ProfileGenderBadge.Background = new SolidColorBrush(Color.FromArgb(255, 235, 245, 255));
-                ProfileGenderBadgeText.Foreground = new SolidColorBrush(Color.FromArgb(255, 37, 99, 235));
+                ProfileGenderBadge.Background = (Brush)Application.Current.Resources["GenderMaleBgBrush"];
+                ProfileGenderBadgeText.Foreground = (Brush)Application.Current.Resources["GenderMaleTextBrush"];
                 ProfileGenderBadgeText.Text = "♂ 男";
                 ProfileGenderBadge.Visibility = Visibility.Visible;
             }
             else if (c.Gender == "女")
             {
-                ProfileGenderBadge.Background = new SolidColorBrush(Color.FromArgb(255, 253, 242, 248));
-                ProfileGenderBadgeText.Foreground = new SolidColorBrush(Color.FromArgb(255, 219, 39, 119));
+                ProfileGenderBadge.Background = (Brush)Application.Current.Resources["GenderFemaleBgBrush"];
+                ProfileGenderBadgeText.Foreground = (Brush)Application.Current.Resources["GenderFemaleTextBrush"];
                 ProfileGenderBadgeText.Text = "♀ 女";
                 ProfileGenderBadge.Visibility = Visibility.Visible;
             }
@@ -264,16 +287,23 @@ namespace Client.Pages
 
         private async Task EnsureSelectedAvatarLoadedAsync(CustomerDto c)
         {
-            byte[]? bytes = await AppServices.Backend.DownloadAvatarBytesAsync(c.AvatarUrl);
-            if (bytes is null) return;
-            var img = await AvatarImageService.BytesToBitmapImageAsync(bytes);
-            if (img is not null)
+            try
             {
-                c.AvatarImage = img;
-                if (_selectedCustomer?.Id == c.Id)
+                byte[]? bytes = await AppServices.Backend.DownloadAvatarBytesAsync(c.AvatarUrl);
+                if (bytes is null) return;
+                var img = await AvatarImageService.BytesToBitmapImageAsync(bytes);
+                if (img is not null)
                 {
-                    ApplyProfileAvatarVisual(c);
+                    c.AvatarImage = img;
+                    if (_selectedCustomer?.Id == c.Id)
+                    {
+                        ApplyProfileAvatarVisual(c);
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                AppServices.Logs.Warn("UI", $"加载当前客户头像异常：{ex.Message}");
             }
         }
 
@@ -394,16 +424,15 @@ namespace Client.Pages
 
         private async void DeleteCustomerButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_selectedCustomer is null || _dialogOpen) return;
+            if (_selectedCustomer is null || !AppServices.TryBeginModalDialog()) return;
             var target = _selectedCustomer;
 
-            _dialogOpen = true;
             try
             {
                 var confirm = new ContentDialog
                 {
                     XamlRoot = XamlRoot,
-                    RequestedTheme = ElementTheme.Light,
+                    RequestedTheme = AppServices.Settings.CurrentElementTheme,
                     Title = "确认删除客户",
                     Content = $"确定要删除客户「{target.DisplayName}」及其全部聊天记录吗？删除后无法恢复。",
                     PrimaryButtonText = "确认删除",
@@ -430,54 +459,49 @@ namespace Client.Pages
                     ShowProfileStatus($"删除失败：{res.ErrorMessage}", isError: true);
                 }
             }
+            catch (Exception ex)
+            {
+                ShowProfileStatus($"删除异常：{ex.Message}", isError: true);
+            }
             finally
             {
-                _dialogOpen = false;
+                AppServices.EndModalDialog();
             }
         }
 
         private async void AddCustomerButton_Click(object sender, RoutedEventArgs e)
         {
-            await ShowImportDialogAsync(autoPasteClipboard: false);
+            try { await ShowImportDialogAsync(autoPasteClipboard: false); }
+            catch (Exception ex) { ShowProfileStatus($"打开导入窗口失败：{ex.Message}", isError: true); }
         }
 
         private async void BatchTagImportButton_Click(object sender, RoutedEventArgs e)
         {
-            await ShowBatchTagImportDialogAsync();
+            try { await ShowBatchTagImportDialogAsync(); }
+            catch (Exception ex) { ShowProfileStatus($"打开批量导入失败：{ex.Message}", isError: true); }
         }
 
         private async void PasteAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
         {
-            if (_dialogOpen || _isEditing) return;
-            var data = Clipboard.GetContent();
-            if (data is null) return;
-
-            bool hasImage = data.Contains(StandardDataFormats.Bitmap);
-            if (!hasImage && data.Contains(StandardDataFormats.StorageItems))
+            if (AppServices.IsModalDialogOpen || _isEditing) return;
+            if (OcrService.HasClipboardBitmapFast())
             {
-                try
-                {
-                    var items = await data.GetStorageItemsAsync();
-                    hasImage = items.Any(i =>
-                        i.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase));
-                }
-                catch { }
+                args.Handled = true;
+                try { await ShowImportDialogAsync(autoPasteClipboard: true); }
+                catch (Exception ex) { ShowProfileStatus($"快捷导入失败：{ex.Message}", isError: true); }
+                return;
             }
-
-            if (!hasImage) return;
+            if (!await OcrService.HasClipboardImageAsync()) return;
 
             args.Handled = true;
-            await ShowImportDialogAsync(autoPasteClipboard: true);
+            try { await ShowImportDialogAsync(autoPasteClipboard: true); }
+            catch (Exception ex) { ShowProfileStatus($"快捷导入失败：{ex.Message}", isError: true); }
         }
 
         private async Task ShowImportDialogAsync(bool autoPasteClipboard)
         {
-            if (_dialogOpen) return;
+            if (!AppServices.TryBeginModalDialog()) return;
             bool openBatchAfter = false;
-            _dialogOpen = true;
             try
             {
                 var dialog = new ImportCustomerDialog { XamlRoot = XamlRoot };
@@ -501,7 +525,7 @@ namespace Client.Pages
             }
             finally
             {
-                _dialogOpen = false;
+                AppServices.EndModalDialog();
             }
 
             if (openBatchAfter)
@@ -512,8 +536,7 @@ namespace Client.Pages
 
         private async Task ShowBatchTagImportDialogAsync()
         {
-            if (_dialogOpen) return;
-            _dialogOpen = true;
+            if (!AppServices.TryBeginModalDialog()) return;
             try
             {
                 var dialog = new BatchTagImportDialog { XamlRoot = XamlRoot };
@@ -526,13 +549,15 @@ namespace Client.Pages
             }
             finally
             {
-                _dialogOpen = false;
+                AppServices.EndModalDialog();
             }
         }
 
         private async Task LoadCustomerMessagesAsync(CustomerDto customer)
         {
             var res = await AppServices.Backend.ListCustomerMessagesAsync(customer.Id);
+            if (_selectedCustomer?.Id != customer.Id) return;
+
             if (!res.IsSuccess || res.Data is null)
             {
                 EmptyChatTitle.Text = $"加载消息失败：{res.ErrorMessage}";
@@ -567,7 +592,8 @@ namespace Client.Pages
 
         private async void SendMessageButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_selectedCustomer is null) return;
+            var target = _selectedCustomer;
+            if (target is null) return;
             string content = MessageInputBox.Text.Trim();
             if (string.IsNullOrEmpty(content)) return;
 
@@ -575,17 +601,20 @@ namespace Client.Pages
             SendMessageButton.IsEnabled = false;
             try
             {
-                var res = await AppServices.Backend.CreateCustomerMessageAsync(_selectedCustomer.Id, direction, content);
+                var res = await AppServices.Backend.CreateCustomerMessageAsync(target.Id, direction, content);
                 if (res.IsSuccess)
                 {
                     MessageInputBox.Text = string.Empty;
-                    await LoadCustomerMessagesAsync(_selectedCustomer);
-                    await LoadCustomersAsync(_selectedCustomer.Id);
+                    await LoadCustomersAsync(target.Id);
                 }
                 else
                 {
                     ComposerHintText.Text = $"发送失败：{res.ErrorMessage}";
                 }
+            }
+            catch (Exception ex)
+            {
+                ComposerHintText.Text = $"发送异常：{ex.Message}";
             }
             finally
             {
@@ -593,51 +622,10 @@ namespace Client.Pages
             }
         }
 
-        private void ComposerSplitter_PointerPressed(object sender, PointerRoutedEventArgs e)
-        {
-            _isDraggingSplitter = true;
-            _dragStartY = e.GetCurrentPoint(ChatStageGrid).Position.Y;
-            _dragStartHeight = ComposerRow.ActualHeight;
-            ComposerSplitter.CapturePointer(e.Pointer);
-            e.Handled = true;
-        }
-
-        private void ComposerSplitter_PointerMoved(object sender, PointerRoutedEventArgs e)
-        {
-            if (!_isDraggingSplitter) return;
-            double currentY = e.GetCurrentPoint(ChatStageGrid).Position.Y;
-            double delta = _dragStartY - currentY; // Dragging up increases composer height
-            double maxAllowed = Math.Min(440, Math.Max(160, ChatStageGrid.ActualHeight - 240));
-            double nextHeight = Math.Clamp(_dragStartHeight + delta, 120, maxAllowed);
-            ComposerRow.Height = new GridLength(nextHeight);
-        }
-
-        private void ComposerSplitter_PointerReleased(object sender, PointerRoutedEventArgs e)
-        {
-            if (!_isDraggingSplitter) return;
-            _isDraggingSplitter = false;
-            ComposerSplitter.ReleasePointerCapture(e.Pointer);
-        }
-
-        private void ComposerSplitter_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
-        {
-            _isDraggingSplitter = false;
-        }
-
-        private void ChatStageGrid_SizeChanged(object sender, SizeChangedEventArgs e)
-        {
-            double maxAllowed = Math.Min(440, Math.Max(120, ChatStageGrid.ActualHeight - 240));
-            if (ComposerRow.Height.IsAbsolute && ComposerRow.Height.Value > maxAllowed)
-            {
-                ComposerRow.Height = new GridLength(Math.Max(120, maxAllowed));
-            }
-        }
-
         private async void ImportChatScreenshotButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_selectedCustomer is null || _dialogOpen) return;
             var target = _selectedCustomer;
-            _dialogOpen = true;
+            if (target is null || !AppServices.TryBeginModalDialog()) return;
             try
             {
                 var dialog = new ImportChatScreenshotDialog { XamlRoot = XamlRoot };
@@ -651,47 +639,44 @@ namespace Client.Pages
                     if (res.IsSuccess) saved++;
                 }
 
-                await LoadCustomerMessagesAsync(target);
+                if (_selectedCustomer?.Id == target.Id)
+                {
+                    await LoadCustomerMessagesAsync(target);
+                }
                 ComposerHintText.Text = $"已从聊天截图批量导入 {saved} 条消息。";
+            }
+            catch (Exception ex)
+            {
+                ComposerHintText.Text = $"截图导入异常：{ex.Message}";
             }
             finally
             {
-                _dialogOpen = false;
+                AppServices.EndModalDialog();
             }
         }
 
         private async void OcrChatClipboardButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!AppServices.Ocr.RapidEngine.IsAvailable)
-            {
-                ComposerHintText.Text = AppServices.Ocr.RapidEngine.AvailabilityNote;
-                return;
-            }
-
             try
             {
-                var (bmp, _) = await AppServices.Ocr.TryLoadImageFromClipboardAsync();
-                if (bmp is null)
+                ComposerHintText.Text = "正在提取截图文字...";
+                var (ocr, err) = await AppServices.Ocr.TryRecognizeClipboardTextAsync();
+                if (ocr is null)
                 {
-                    ComposerHintText.Text = "剪贴板中没有图片，请先截聊天内容再点击。";
+                    ComposerHintText.Text = err;
                     return;
                 }
 
-                using (bmp)
+                if (!string.IsNullOrWhiteSpace(ocr.FullText))
                 {
-                    ComposerHintText.Text = "正在提取截图文字...";
-                    var ocr = await AppServices.Ocr.RapidEngine.RecognizeAsync(bmp);
-                    if (!string.IsNullOrWhiteSpace(ocr.FullText))
-                    {
-                        MessageInputBox.Text = string.IsNullOrWhiteSpace(MessageInputBox.Text)
-                            ? ocr.FullText
-                            : $"{MessageInputBox.Text}\n{ocr.FullText}";
-                        ComposerHintText.Text = $"已识别 {ocr.Lines.Count} 行聊天文字（{ocr.ElapsedMilliseconds} ms）。";
-                    }
-                    else
-                    {
-                        ComposerHintText.Text = "未从剪贴板图片识别出文字。";
-                    }
+                    MessageInputBox.Text = string.IsNullOrWhiteSpace(MessageInputBox.Text)
+                        ? ocr.FullText
+                        : $"{MessageInputBox.Text}\n{ocr.FullText}";
+                    ComposerHintText.Text = $"已识别 {ocr.Lines.Count} 行聊天文字（{ocr.ElapsedMilliseconds} ms）。";
+                }
+                else
+                {
+                    ComposerHintText.Text = "未从剪贴板图片识别出文字。";
                 }
             }
             catch (Exception ex)
@@ -747,20 +732,31 @@ namespace Client.Pages
 
         private async void ClearAvatar_Click(object sender, RoutedEventArgs e)
         {
-            if (_selectedCustomer is null) return;
             var target = _selectedCustomer;
-            var res = await AppServices.Backend.DeleteCustomerAvatarAsync(target.Id);
-            if (res.IsSuccess)
+            if (target is null) return;
+            try
             {
-                target.AvatarUrl = string.Empty;
-                target.AvatarImage = null;
-                ApplyProfileAvatarVisual(target);
-                await LoadCustomerMessagesAsync(target);
-                ShowProfileStatus("已清除客户头像。");
+                string oldUrl = target.AvatarUrl;
+                var res = await AppServices.Backend.DeleteCustomerAvatarAsync(target.Id, oldUrl);
+                if (res.IsSuccess)
+                {
+                    target.AvatarUrl = string.Empty;
+                    target.AvatarImage = null;
+                    if (_selectedCustomer?.Id == target.Id)
+                    {
+                        ApplyProfileAvatarVisual(target);
+                        await LoadCustomerMessagesAsync(target);
+                    }
+                    ShowProfileStatus("已清除客户头像。");
+                }
+                else
+                {
+                    ShowProfileStatus($"清除头像失败：{res.ErrorMessage}", isError: true);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                ShowProfileStatus($"清除头像失败：{res.ErrorMessage}", isError: true);
+                ShowProfileStatus($"清除头像异常：{ex.Message}", isError: true);
             }
         }
 

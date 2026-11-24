@@ -56,24 +56,6 @@ namespace Client.Services
             }
         }
 
-        public string GetModelDiagnostics()
-        {
-            static string FormatFile(string label, string path)
-            {
-                if (!File.Exists(path)) return $"  [缺失] {label}: {path}";
-                var lenMb = new FileInfo(path).Length / (1024.0 * 1024.0);
-                return $"  [已就绪] {label}: {Path.GetFileName(path)} ({lenMb:F2} MB)";
-            }
-
-            return string.Join(Environment.NewLine, new[]
-            {
-                FormatFile("检测模型 (Det)", _detPath),
-                FormatFile("方向分类 (Cls)", _clsPath),
-                FormatFile("中文识别 (Rec)", _recPath),
-                FormatFile("中文字典 (Dict)", _keysPath)
-            });
-        }
-
         private RapidOcr EnsureInitialized()
         {
             if (_ocr is not null)
@@ -228,34 +210,11 @@ namespace Client.Services
 
         private static SKBitmap ConvertToSkBitmap(SoftwareBitmap source)
         {
-            SoftwareBitmap? converted = null;
-            SoftwareBitmap target = source;
-            if (source.BitmapPixelFormat != BitmapPixelFormat.Bgra8)
-            {
-                converted = SoftwareBitmap.Convert(source, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied);
-                target = converted;
-            }
-
-            try
-            {
-                int width = target.PixelWidth;
-                int height = target.PixelHeight;
-                byte[] pixels = new byte[checked(width * height * 4)];
-                target.CopyToBuffer(pixels.AsBuffer());
-
-                var alpha = target.BitmapAlphaMode == BitmapAlphaMode.Ignore
-                    ? SKAlphaType.Opaque
-                    : SKAlphaType.Premul;
-
-                var info = new SKImageInfo(width, height, SKColorType.Bgra8888, alpha);
-                var skBitmap = new SKBitmap(info);
-                Marshal.Copy(pixels, 0, skBitmap.GetPixels(), pixels.Length);
-                return skBitmap;
-            }
-            finally
-            {
-                converted?.Dispose();
-            }
+            byte[] pixels = AvatarImageService.CopyBgraPixels(source);
+            var info = new SKImageInfo(source.PixelWidth, source.PixelHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+            var skBitmap = new SKBitmap(info);
+            Marshal.Copy(pixels, 0, skBitmap.GetPixels(), pixels.Length);
+            return skBitmap;
         }
 
         public void Dispose()

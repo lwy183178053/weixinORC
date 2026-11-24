@@ -1,3 +1,4 @@
+using Client.Models;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics.Imaging;
 using Windows.Storage;
@@ -6,6 +7,8 @@ namespace Client.Services
 {
     public sealed class OcrService
     {
+        private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".bmp"];
+
         private readonly RapidOcrEngine _rapidEngine;
 
         public OcrService()
@@ -14,8 +17,37 @@ namespace Client.Services
         }
 
         public RapidOcrEngine RapidEngine => _rapidEngine;
-        public IReadOnlyList<IOcrEngine> Engines => new IOcrEngine[] { _rapidEngine };
-        public IOcrEngine GetDefaultEngine() => _rapidEngine;
+
+        public static bool HasClipboardBitmapFast()
+        {
+            try
+            {
+                var data = Clipboard.GetContent();
+                return data is not null && data.Contains(StandardDataFormats.Bitmap);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static async Task<bool> HasClipboardImageAsync()
+        {
+            try
+            {
+                var data = Clipboard.GetContent();
+                if (data is null) return false;
+                if (data.Contains(StandardDataFormats.Bitmap)) return true;
+                if (!data.Contains(StandardDataFormats.StorageItems)) return false;
+
+                var items = await data.GetStorageItemsAsync();
+                return items.Any(i => IsSupportedImageName(i.Name));
+            }
+            catch
+            {
+                return false;
+            }
+        }
 
         public async Task<SoftwareBitmap> LoadImageFileFromPathAsync(string filePath)
         {
@@ -56,11 +88,7 @@ namespace Client.Services
                 var items = await data.GetStorageItemsAsync();
                 foreach (var item in items)
                 {
-                    if (item is StorageFile file &&
-                        (file.FileType.Equals(".png", StringComparison.OrdinalIgnoreCase) ||
-                         file.FileType.Equals(".jpg", StringComparison.OrdinalIgnoreCase) ||
-                         file.FileType.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) ||
-                         file.FileType.Equals(".bmp", StringComparison.OrdinalIgnoreCase)))
+                    if (item is StorageFile file && IsSupportedImageName(file.Name))
                     {
                         var bmp = await LoadImageFileFromPathAsync(file.Path);
                         return (bmp, $"剪贴板图片：{file.Name}");
@@ -70,5 +98,28 @@ namespace Client.Services
 
             return (null, string.Empty);
         }
+
+        public async Task<(OcrRecognitionResult? Result, string ErrorMessage)> TryRecognizeClipboardTextAsync()
+        {
+            if (!_rapidEngine.IsAvailable)
+            {
+                return (null, _rapidEngine.AvailabilityNote);
+            }
+
+            var (bmp, _) = await TryLoadImageFromClipboardAsync();
+            if (bmp is null)
+            {
+                return (null, "剪贴板中没有图片，请先截聊天内容再试。");
+            }
+
+            using (bmp)
+            {
+                var ocr = await _rapidEngine.RecognizeAsync(bmp);
+                return (ocr, string.Empty);
+            }
+        }
+
+        private static bool IsSupportedImageName(string name) =>
+            ImageExtensions.Any(ext => name.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
     }
 }

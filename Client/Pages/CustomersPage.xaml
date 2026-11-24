@@ -7,6 +7,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:models="using:Client.Models"
+    KeyboardAcceleratorPlacementMode="Hidden"
     mc:Ignorable="d">
 
     <Page.KeyboardAccelerators>
@@ -164,7 +165,7 @@
         <controls:VerticalResizeSplitter x:Name="LeftPaneSplitter" Grid.Column="1" />
 
         <!-- Column 2: WeChat-style IM Chat History & Draggable Composer -->
-        <Grid x:Name="ChatStageGrid" Grid.Column="2" Background="{StaticResource AppChatCanvasBgBrush}" SizeChanged="ChatStageGrid_SizeChanged">
+        <Grid x:Name="ChatStageGrid" Grid.Column="2" Background="{StaticResource AppChatCanvasBgBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="56" />
                 <RowDefinition Height="*" MinHeight="160" />
@@ -261,10 +262,6 @@
                 Background="{StaticResource AppChatCanvasBgBrush}"
                 BorderBrush="{StaticResource AppBorderBrush}"
                 BorderThickness="0,1,0,0"
-                PointerCaptureLost="ComposerSplitter_PointerCaptureLost"
-                PointerMoved="ComposerSplitter_PointerMoved"
-                PointerPressed="ComposerSplitter_PointerPressed"
-                PointerReleased="ComposerSplitter_PointerReleased"
                 ToolTipService.ToolTip="上下拖动可调整输入框高度">
                 <Border
                     Width="40"
@@ -432,7 +429,7 @@
                                         HorizontalAlignment="Right"
                                         VerticalAlignment="Bottom"
                                         Background="#EE7C5CFC"
-                                        BorderBrush="#FFFFFF"
+                                        BorderBrush="{StaticResource AppSurfaceBrush}"
                                         BorderThickness="1.5"
                                         CornerRadius="10">
                                         <FontIcon FontSize="9.5" Foreground="#FFFFFF" Glyph="&#xE722;" />
@@ -443,8 +440,8 @@
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
                                 <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                     <TextBlock x:Name="ProfileHeaderNameText" FontSize="15.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="-" TextTrimming="CharacterEllipsis" />
-                                    <Border x:Name="ProfileGenderBadge" Padding="6,1" Background="#EBF5FF" CornerRadius="8" Visibility="Collapsed">
-                                        <TextBlock x:Name="ProfileGenderBadgeText" FontSize="10.5" FontWeight="SemiBold" Foreground="#2563EB" Text="♂ 男" />
+                                    <Border x:Name="ProfileGenderBadge" Padding="6,1" Background="{StaticResource GenderMaleBgBrush}" CornerRadius="8" Visibility="Collapsed">
+                                        <TextBlock x:Name="ProfileGenderBadgeText" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource GenderMaleTextBrush}" Text="♂ 男" />
                                     </Border>
                                     <Border x:Name="ProfileStatusPill" Padding="6,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8" Visibility="Collapsed">
                                         <TextBlock x:Name="ProfileStatusPillText" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="跟进中" />

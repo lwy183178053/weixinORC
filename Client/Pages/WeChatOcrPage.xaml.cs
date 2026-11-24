@@ -24,13 +24,12 @@ namespace Client.Pages
         private string _candidateAddedDate = string.Empty;
         private bool _isBusy;
         private bool _isInitialized;
-
-        private readonly ThreePaneResizeController _paneResizeController;
+        private bool _isUnloaded;
 
         public WeChatOcrPage()
         {
             InitializeComponent();
-            _paneResizeController = ThreePaneResizeController.Attach(
+            _ = ThreePaneResizeController.Attach(
                 RootThreePaneGrid,
                 LeftPaneColumn, LeftPaneSplitter,
                 CenterPaneColumn, RightPaneSplitter,
@@ -41,12 +40,22 @@ namespace Client.Pages
             _isInitialized = true;
             EngineNoteText.Text = AppServices.Ocr.RapidEngine.AvailabilityNote;
             Loaded += WeChatOcrPage_Loaded;
+            Unloaded += (_, _) =>
+            {
+                _isUnloaded = true;
+                if (!_isBusy)
+                {
+                    _currentBitmap?.Dispose();
+                    _currentBitmap = null;
+                }
+            };
         }
 
         private async void WeChatOcrPage_Loaded(object sender, RoutedEventArgs e)
         {
             Loaded -= WeChatOcrPage_Loaded;
-            await RefreshWindowListAsync();
+            try { await RefreshWindowListAsync(); }
+            catch (Exception ex) { AppServices.Logs.Error("WIN", $"枚举窗口异常：{ex.Message}"); }
         }
 
         private WeChatWindowInfo? SelectedWindow => WindowsListView.SelectedItem as WeChatWindowInfo;
@@ -108,6 +117,8 @@ namespace Client.Pages
             ShowWindowButton.IsEnabled = hasSelection;
             HideWindowButton.IsEnabled = hasSelection;
             CaptureAndOcrButton.IsEnabled = hasSelection;
+            PasteClipboardButton.IsEnabled = !_isBusy;
+            LoadImageButton.IsEnabled = !_isBusy;
         }
 
         private async void ShowWindowButton_Click(object sender, RoutedEventArgs e)
@@ -143,7 +154,7 @@ namespace Client.Pages
         private async void CaptureAndOcrButton_Click(object sender, RoutedEventArgs e)
         {
             var target = SelectedWindow;
-            if (target is null) return;
+            if (target is null || _isBusy) return;
             if (!EnsureRapidAvailable()) return;
 
             _isBusy = true;
@@ -156,18 +167,17 @@ namespace Client.Pages
             catch (Exception ex)
             {
                 AppServices.Logs.Error("OCR", $"窗口截取或识别失败：{ex.Message}");
-                ShowBanner($"窗口截取或识别失败：{ex.Message}", BannerKind.Danger);
+                if (!_isUnloaded) ShowBanner($"窗口截取或识别失败：{ex.Message}", BannerKind.Danger);
             }
             finally
             {
-                _isBusy = false;
-                UpdateWindowActionButtons();
+                FinishBusy();
             }
         }
 
         private async void PasteClipboardButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!EnsureRapidAvailable()) return;
+            if (_isBusy || !EnsureRapidAvailable()) return;
 
             _isBusy = true;
             UpdateWindowActionButtons();
@@ -184,18 +194,17 @@ namespace Client.Pages
             catch (Exception ex)
             {
                 AppServices.Logs.Error("OCR", $"读取剪贴板或识别失败：{ex.Message}");
-                ShowBanner($"读取剪贴板或识别失败：{ex.Message}", BannerKind.Danger);
+                if (!_isUnloaded) ShowBanner($"读取剪贴板或识别失败：{ex.Message}", BannerKind.Danger);
             }
             finally
             {
-                _isBusy = false;
-                UpdateWindowActionButtons();
+                FinishBusy();
             }
         }
 
         private async void LoadImageButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!EnsureRapidAvailable()) return;
+            if (_isBusy || !EnsureRapidAvailable()) return;
 
             string? filePath = Win32WindowHelper.PickImageFilePath(AppServices.MainWindowHandle);
             if (string.IsNullOrWhiteSpace(filePath)) return;
@@ -210,11 +219,24 @@ namespace Client.Pages
             catch (Exception ex)
             {
                 AppServices.Logs.Error("OCR", $"加载图片或识别失败：{ex.Message}");
-                ShowBanner($"加载图片或识别失败：{ex.Message}", BannerKind.Danger);
+                if (!_isUnloaded) ShowBanner($"加载图片或识别失败：{ex.Message}", BannerKind.Danger);
             }
             finally
             {
-                _isBusy = false;
+                FinishBusy();
+            }
+        }
+
+        private void FinishBusy()
+        {
+            _isBusy = false;
+            if (_isUnloaded)
+            {
+                _currentBitmap?.Dispose();
+                _currentBitmap = null;
+            }
+            else
+            {
                 UpdateWindowActionButtons();
             }
         }
@@ -384,36 +406,37 @@ namespace Client.Pages
                 };
 
                 // Detect duplicate customer and let user choose Overwrite / Create New / Cancel
-                CustomerDto? dup = null;
-                var listRes = await AppServices.Backend.ListCustomersAsync(100);
-                if (listRes.IsSuccess && listRes.Data is not null)
-                {
-                    if (!string.IsNullOrEmpty(account))
-                        dup = listRes.Data.Items.FirstOrDefault(c => c.WechatAccount.Equals(account, StringComparison.OrdinalIgnoreCase));
-                    if (dup is null && !string.IsNullOrEmpty(name))
-                        dup = listRes.Data.Items.FirstOrDefault(c => c.WechatName.Equals(name, StringComparison.OrdinalIgnoreCase));
-                    if (dup is null && !string.IsNullOrEmpty(remark))
-                        dup = listRes.Data.Items.FirstOrDefault(c => c.WechatRemark.Equals(remark, StringComparison.OrdinalIgnoreCase));
-                }
+                var allCustomers = await AppServices.Backend.ListAllCustomersAsync();
+                CustomerDto? dup = BackendApiClient.FindDuplicateCustomer(allCustomers, account, name, remark);
 
                 ApiResult<CustomerDto> result;
                 bool overwritten = false;
                 if (dup is not null)
                 {
-                    var confirm = new ContentDialog
+                    if (!AppServices.TryBeginModalDialog()) return;
+                    ContentDialogResult choice;
+                    try
                     {
-                        XamlRoot = XamlRoot,
-                        RequestedTheme = ElementTheme.Light,
-                        Title = "检测到重复客户档案",
-                        Content = $"系统中已存在客户「{dup.DisplayName}」{(string.IsNullOrWhiteSpace(dup.WechatAccount) ? "" : $"（微信号：{dup.WechatAccount}）")}。\n请选择覆盖已有档案、仍要新建独立档案，或取消。",
-                        PrimaryButtonText = "覆盖已有客户",
-                        SecondaryButtonText = "仍要新建",
-                        CloseButtonText = "取消",
-                        DefaultButton = ContentDialogButton.Primary,
-                        PrimaryButtonStyle = (Style)Application.Current.Resources["PrimaryVioletButtonStyle"]
-                    };
+                        var confirm = new ContentDialog
+                        {
+                            XamlRoot = XamlRoot,
+                            RequestedTheme = AppServices.Settings.CurrentElementTheme,
+                            Title = "检测到重复客户档案",
+                            Content = $"系统中已存在客户「{dup.DisplayName}」{(string.IsNullOrWhiteSpace(dup.WechatAccount) ? "" : $"（微信号：{dup.WechatAccount}）")}。\n请选择覆盖已有档案、仍要新建独立档案，或取消。",
+                            PrimaryButtonText = "覆盖已有客户",
+                            SecondaryButtonText = "仍要新建",
+                            CloseButtonText = "取消",
+                            DefaultButton = ContentDialogButton.Primary,
+                            PrimaryButtonStyle = (Style)Application.Current.Resources["PrimaryVioletButtonStyle"]
+                        };
 
-                    var choice = await confirm.ShowAsync();
+                        choice = await confirm.ShowAsync();
+                    }
+                    finally
+                    {
+                        AppServices.EndModalDialog();
+                    }
+
                     if (choice == ContentDialogResult.None)
                     {
                         return;
@@ -456,6 +479,10 @@ namespace Client.Pages
                     ShowBanner($"保存失败：{result.ErrorMessage}", BannerKind.Danger);
                 }
             }
+            catch (Exception ex)
+            {
+                ShowBanner($"保存异常：{ex.Message}", BannerKind.Danger);
+            }
             finally
             {
                 SaveCustomerButton.IsEnabled = true;
@@ -469,10 +496,17 @@ namespace Client.Pages
                 ShowBanner("暂无可复制的识别文本。", BannerKind.Info);
                 return;
             }
-            var pkg = new DataPackage();
-            pkg.SetText(_lastOcrResult.FullText);
-            Clipboard.SetContent(pkg);
-            ShowBanner("识别全文已复制到剪贴板。", BannerKind.Success);
+            try
+            {
+                var pkg = new DataPackage();
+                pkg.SetText(_lastOcrResult.FullText);
+                Clipboard.SetContent(pkg);
+                ShowBanner("识别全文已复制到剪贴板。", BannerKind.Success);
+            }
+            catch (Exception ex)
+            {
+                ShowBanner($"复制失败：{ex.Message}", BannerKind.Danger);
+            }
         }
 
         private void CloseBannerButton_Click(object sender, RoutedEventArgs e) => StatusBanner.Visibility = Visibility.Collapsed;

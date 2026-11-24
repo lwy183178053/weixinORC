@@ -204,12 +204,14 @@
                             IsEnabled="False"
                             Style="{StaticResource PrimaryVioletButtonStyle}" />
                         <Button
+                            x:Name="PasteClipboardButton"
                             Height="34"
                             Click="PasteClipboardButton_Click"
                             Content="粘贴截图"
                             FontSize="12.5"
                             Style="{StaticResource SecondaryOutlineButtonStyle}" />
                         <Button
+                            x:Name="LoadImageButton"
                             Height="34"
                             Click="LoadImageButton_Click"
                             Content="导入图片"

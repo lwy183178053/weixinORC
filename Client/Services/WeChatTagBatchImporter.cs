@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text.RegularExpressions;
 using Client.Models;
 using Windows.Graphics.Imaging;
@@ -361,7 +360,7 @@ namespace Client.Services
                             var (avatarPng, detectedGender) = await AvatarImageService.TryExtractProfileAvatarAndGenderAsync(cardBmp, cardOcr);
                             string mergedTags = MergeTagName(parsed.CandidateTags, tag.Name);
 
-                            var existing = FindExistingCustomer(existingCustomers, parsed.CandidateWechatAccount, resolvedName, parsed.CandidateWechatRemark);
+                            var existing = BackendApiClient.FindDuplicateCustomer(existingCustomers, parsed.CandidateWechatAccount, resolvedName, parsed.CandidateWechatRemark);
                             if (existing is not null)
                             {
                                 if (!overwriteExisting)
@@ -472,13 +471,15 @@ namespace Client.Services
                                 var updRes = await AppServices.Backend.UpdateCustomerAsync(existing.Id, patch, ct);
                                 if (updRes.IsSuccess && updRes.Data is not null)
                                 {
+                                    var latest = updRes.Data;
                                     if (avatarPng is not null)
                                     {
-                                        _ = await AppServices.Backend.UploadCustomerAvatarAsync(updRes.Data.Id, avatarPng, ct);
+                                        var avRes = await AppServices.Backend.UploadCustomerAvatarAsync(latest.Id, avatarPng, ct);
+                                        if (avRes.IsSuccess && avRes.Data is not null) latest = avRes.Data;
                                     }
-                                    ReplaceInList(existingCustomers, updRes.Data);
+                                    ReplaceInList(existingCustomers, latest);
                                     updated++;
-                                    Report(tag.Name, $"已覆盖更新「{updRes.Data.DisplayName}」", $"  ↻ 覆盖更新：{updRes.Data.DisplayName} ({updRes.Data.WechatAccount})");
+                                    Report(tag.Name, $"已覆盖更新「{latest.DisplayName}」", $"  ↻ 覆盖更新：{latest.DisplayName} ({latest.WechatAccount})");
                                 }
                                 else
                                 {
@@ -507,13 +508,15 @@ namespace Client.Services
                             var createRes = await AppServices.Backend.CreateCustomerAsync(createReq, ct);
                             if (createRes.IsSuccess && createRes.Data is not null)
                             {
+                                var latest = createRes.Data;
                                 if (avatarPng is not null)
                                 {
-                                    _ = await AppServices.Backend.UploadCustomerAvatarAsync(createRes.Data.Id, avatarPng, ct);
+                                    var avRes = await AppServices.Backend.UploadCustomerAvatarAsync(latest.Id, avatarPng, ct);
+                                    if (avRes.IsSuccess && avRes.Data is not null) latest = avRes.Data;
                                 }
-                                existingCustomers.Add(createRes.Data);
+                                existingCustomers.Add(latest);
                                 created++;
-                                Report(tag.Name, $"已导入「{createRes.Data.DisplayName}」", $"  ✓ 新增入库：{createRes.Data.DisplayName} ({createRes.Data.WechatAccount})");
+                                Report(tag.Name, $"已导入「{latest.DisplayName}」", $"  ✓ 新增入库：{latest.DisplayName} ({latest.WechatAccount})");
                             }
                             else if (createRes.StatusCode == System.Net.HttpStatusCode.Conflict)
                             {
@@ -682,61 +685,48 @@ namespace Client.Services
             scanL = Math.Clamp(scanL, 0, w - 1);
             scanR = Math.Clamp(scanR, scanL, w - 1);
             var centers = new List<int>();
+            byte[] pixels = AvatarImageService.CopyBgraPixels(bmp);
 
-            SoftwareBitmap bgra = bmp.BitmapPixelFormat == BitmapPixelFormat.Bgra8
-                ? bmp
-                : SoftwareBitmap.Convert(bmp, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied);
+            int bgIdx = (Math.Clamp(tableTop + 2, 0, h - 1) * w + Math.Clamp((int)(w * 0.90), 0, w - 1)) * 4;
+            byte bgB = pixels[bgIdx], bgG = pixels[bgIdx + 1], bgR = pixels[bgIdx + 2];
 
-            try
+            int minFgPerRow = Math.Max(8, (int)((scanR - scanL + 1) * 0.30));
+            int runStart = -1, gap = 0;
+
+            for (int y = tableTop; y <= tableBottom; y++)
             {
-                byte[] pixels = new byte[w * h * 4];
-                bgra.CopyToBuffer(pixels.AsBuffer());
-
-                int bgIdx = (Math.Clamp(tableTop + 2, 0, h - 1) * w + Math.Clamp((int)(w * 0.90), 0, w - 1)) * 4;
-                byte bgB = pixels[bgIdx], bgG = pixels[bgIdx + 1], bgR = pixels[bgIdx + 2];
-
-                int minFgPerRow = Math.Max(8, (int)((scanR - scanL + 1) * 0.30));
-                int runStart = -1, gap = 0;
-
-                for (int y = tableTop; y <= tableBottom; y++)
+                int fg = 0;
+                int rowOff = y * w * 4;
+                for (int x = scanL; x <= scanR; x++)
                 {
-                    int fg = 0;
-                    int rowOff = y * w * 4;
-                    for (int x = scanL; x <= scanR; x++)
-                    {
-                        int idx = rowOff + x * 4;
-                        if (Math.Abs(pixels[idx] - bgB) + Math.Abs(pixels[idx + 1] - bgG) + Math.Abs(pixels[idx + 2] - bgR) > 28)
-                            fg++;
-                    }
+                    int idx = rowOff + x * 4;
+                    if (Math.Abs(pixels[idx] - bgB) + Math.Abs(pixels[idx + 1] - bgG) + Math.Abs(pixels[idx + 2] - bgR) > 28)
+                        fg++;
+                }
 
-                    if (fg >= minFgPerRow)
+                if (fg >= minFgPerRow)
+                {
+                    if (runStart < 0) runStart = y;
+                    gap = 0;
+                }
+                else if (runStart >= 0)
+                {
+                    gap++;
+                    if (gap >= 4)
                     {
-                        if (runStart < 0) runStart = y;
+                        int runEnd = y - gap;
+                        int runH = runEnd - runStart + 1;
+                        if (runH >= 18 && runH <= 76) centers.Add((runStart + runEnd) / 2);
+                        runStart = -1;
                         gap = 0;
                     }
-                    else if (runStart >= 0)
-                    {
-                        gap++;
-                        if (gap >= 4)
-                        {
-                            int runEnd = y - gap;
-                            int runH = runEnd - runStart + 1;
-                            if (runH >= 18 && runH <= 76) centers.Add((runStart + runEnd) / 2);
-                            runStart = -1;
-                            gap = 0;
-                        }
-                    }
-                }
-                if (runStart >= 0)
-                {
-                    int runEnd = tableBottom - gap;
-                    int runH = runEnd - runStart + 1;
-                    if (runH >= 18 && runH <= 76) centers.Add((runStart + runEnd) / 2);
                 }
             }
-            finally
+            if (runStart >= 0)
             {
-                if (!ReferenceEquals(bgra, bmp)) bgra.Dispose();
+                int runEnd = tableBottom - gap;
+                int runH = runEnd - runStart + 1;
+                if (runH >= 18 && runH <= 76) centers.Add((runStart + runEnd) / 2);
             }
             return centers;
         }
@@ -1147,32 +1137,6 @@ namespace Client.Services
                 remaining -= step;
                 if (remaining > 0) Thread.Sleep(70);
             }
-        }
-
-        private static CustomerDto? FindExistingCustomer(List<CustomerDto> list, string account, string nickname, string remark)
-        {
-            if (!string.IsNullOrWhiteSpace(account))
-            {
-                var byAcc = list.FirstOrDefault(c =>
-                    !string.IsNullOrWhiteSpace(c.WechatAccount) &&
-                    c.WechatAccount.Equals(account, StringComparison.OrdinalIgnoreCase));
-                if (byAcc is not null) return byAcc;
-            }
-            if (!string.IsNullOrWhiteSpace(nickname))
-            {
-                var byName = list.FirstOrDefault(c =>
-                    !string.IsNullOrWhiteSpace(c.WechatName) &&
-                    c.WechatName.Equals(nickname, StringComparison.OrdinalIgnoreCase));
-                if (byName is not null) return byName;
-            }
-            if (!string.IsNullOrWhiteSpace(remark))
-            {
-                var byRem = list.FirstOrDefault(c =>
-                    !string.IsNullOrWhiteSpace(c.WechatRemark) &&
-                    c.WechatRemark.Equals(remark, StringComparison.OrdinalIgnoreCase));
-                if (byRem is not null) return byRem;
-            }
-            return null;
         }
 
         private static void ReplaceInList(List<CustomerDto> list, CustomerDto updated)

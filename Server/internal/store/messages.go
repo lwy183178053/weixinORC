@@ -21,14 +21,6 @@ type MessageInput struct {
 }
 
 func (s *Store) CreateMessage(ctx context.Context, ownerID string, customerID int64, input MessageInput) (Message, error) {
-	ok, err := s.customerExists(ctx, ownerID, customerID)
-	if err != nil {
-		return Message{}, err
-	}
-	if !ok {
-		return Message{}, ErrNotFound
-	}
-
 	sentAt := input.SentAt.UTC().Format(time.RFC3339Nano)
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
 
@@ -38,6 +30,9 @@ func (s *Store) CreateMessage(ctx context.Context, ownerID string, customerID in
 		ownerID, customerID, input.Direction, input.Content, sentAt, createdAt,
 	)
 	if err != nil {
+		if isForeignKeyViolation(err) {
+			return Message{}, ErrNotFound
+		}
 		return Message{}, err
 	}
 
@@ -65,40 +60,16 @@ func (s *Store) ListMessages(ctx context.Context, ownerID string, customerID, cu
 		return nil, 0, ErrNotFound
 	}
 
-	query := `
-		SELECT id, customer_id, direction, content, sent_at, created_at
-		FROM messages
-		WHERE owner_id = ? AND customer_id = ?`
-	args := []any{ownerID, customerID}
-	if cursor > 0 {
-		query += ` AND id < ?`
-		args = append(args, cursor)
-	}
-	query += ` ORDER BY id DESC LIMIT ?`
-	args = append(args, limit+1)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	items := make([]Message, 0, limit)
-	for rows.Next() {
-		var m Message
-		if err := rows.Scan(&m.ID, &m.CustomerID, &m.Direction, &m.Content, &m.SentAt, &m.CreatedAt); err != nil {
-			return nil, 0, err
-		}
-		items = append(items, m)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
-
-	var nextCursor int64
-	if len(items) > limit {
-		items = items[:limit]
-		nextCursor = items[len(items)-1].ID
-	}
-	return items, nextCursor, nil
+	return listPage(
+		ctx, s.db,
+		`SELECT id, customer_id, direction, content, sent_at, created_at FROM messages WHERE owner_id = ? AND customer_id = ?`,
+		[]any{ownerID, customerID},
+		"id", cursor, limit,
+		func(sc rowScanner) (Message, error) {
+			var m Message
+			err := sc.Scan(&m.ID, &m.CustomerID, &m.Direction, &m.Content, &m.SentAt, &m.CreatedAt)
+			return m, err
+		},
+		func(m Message) int64 { return m.ID },
+	)
 }

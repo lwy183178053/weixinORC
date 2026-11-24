@@ -152,52 +152,44 @@ namespace Client
         public void ShowLoginView()
         {
             _isLoginMode = true;
-            if (AppWindow.Presenter is OverlappedPresenter presenter)
-            {
-                if (presenter.State == OverlappedPresenterState.Maximized)
-                {
-                    presenter.Restore();
-                }
-
-                presenter.PreferredMinimumWidth = null;
-                presenter.PreferredMinimumHeight = null;
-                presenter.IsResizable = true;
-            }
-
-            ResizeAndCenter(LoginLogicalWidth, LoginLogicalHeight);
             ApplyWindowConstraints();
+            ResizeClientAndCenter(LoginLogicalWidth, LoginLogicalHeight);
             RootFrame.Navigate(typeof(LoginPage), null, new EntranceNavigationTransitionInfo());
         }
 
         public void EnterWorkbench()
         {
             _isLoginMode = false;
-            if (AppWindow.Presenter is OverlappedPresenter presenter)
-            {
-                presenter.PreferredMinimumWidth = null;
-                presenter.PreferredMinimumHeight = null;
-                presenter.IsResizable = true;
-                presenter.IsMaximizable = true;
-            }
-
-            ResizeAndCenter(DefaultLogicalWidth, DefaultLogicalHeight);
+            ApplyWindowConstraints();
+            ResizeClientAndCenter(DefaultLogicalWidth, DefaultLogicalHeight);
             RootFrame.Navigate(typeof(WorkbenchPage), null, new DrillInNavigationTransitionInfo());
 
-            // Apply minimum size constraints on the next UI tick after the 1280x720 resize settles,
-            // avoiding OverlappedPresenter snapping the window to PreferredMinimumWidth (1040) on transition.
-            DispatcherQueue.TryEnqueue(() =>
+            // Verify the final client size after navigation & title-bar layout settle;
+            // do NOT re-assign PreferredMinimumWidth after resizing so OverlappedPresenter never snaps back.
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
                 if (_isLoginMode)
                 {
                     return;
                 }
 
-                ResizeAndCenter(DefaultLogicalWidth, DefaultLogicalHeight);
-                ApplyWindowConstraints();
+                var (targetW, targetH) = ComputeTargetClientPixels(DefaultLogicalWidth, DefaultLogicalHeight);
+                var currentClient = AppWindow.ClientSize;
+                if (Math.Abs(currentClient.Width - targetW) > 4 || Math.Abs(currentClient.Height - targetH) > 4)
+                {
+                    ResizeClientAndCenter(DefaultLogicalWidth, DefaultLogicalHeight);
+                }
+
+                uint dpi = Win32WindowHelper.GetDpiForWindow(AppServices.MainWindowHandle);
+                var clientSize = AppWindow.ClientSize;
+                var outerSize = AppWindow.Size;
+                AppServices.Logs.Info(
+                    "SYS",
+                    $"进入工作台：目标 {DefaultLogicalWidth}x{DefaultLogicalHeight} (DPI {dpi})，实际客户区 {clientSize.Width}x{clientSize.Height}，窗口外框 {outerSize.Width}x{outerSize.Height}。");
             });
         }
 
-        private void ResizeAndCenter(int logicalWidth, int logicalHeight)
+        private (int width, int height) ComputeTargetClientPixels(int logicalWidth, int logicalHeight)
         {
             uint dpi = Win32WindowHelper.GetDpiForWindow(AppServices.MainWindowHandle);
             double scale = dpi > 0 ? dpi / 96.0 : 1.0;
@@ -211,14 +203,48 @@ namespace Client
                 var work = displayArea.WorkArea;
                 width = Math.Min(width, Math.Max(540, work.Width - 40));
                 height = Math.Min(height, Math.Max(380, work.Height - 40));
-
-                int x = work.X + Math.Max(0, (work.Width - width) / 2);
-                int y = work.Y + Math.Max(0, (work.Height - height) / 2);
-                AppWindow.MoveAndResize(new RectInt32(x, y, width, height));
             }
-            else
+
+            return (width, height);
+        }
+
+        private void ResizeClientAndCenter(int logicalWidth, int logicalHeight)
+        {
+            var (targetClientW, targetClientH) = ComputeTargetClientPixels(logicalWidth, logicalHeight);
+            AppWindow.ResizeClient(new SizeInt32(targetClientW, targetClientH));
+
+            var currentClient = AppWindow.ClientSize;
+            var currentOuter = AppWindow.Size;
+            int borderW = currentClient.Width > 0 ? Math.Clamp(currentOuter.Width - currentClient.Width, 0, 48) : 0;
+            int borderH = currentClient.Height > 0 ? Math.Clamp(currentOuter.Height - currentClient.Height, 0, 64) : 0;
+
+            int desiredOuterW = targetClientW + borderW;
+            int desiredOuterH = targetClientH + borderH;
+            bool needsOuterFix = currentClient.Width <= 0
+                || Math.Abs(currentClient.Width - targetClientW) > 2
+                || Math.Abs(currentClient.Height - targetClientH) > 2;
+
+            var displayArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary);
+            if (displayArea is not null)
             {
-                AppWindow.Resize(new SizeInt32(width, height));
+                var work = displayArea.WorkArea;
+                int finalOuterW = Math.Min(needsOuterFix ? desiredOuterW : currentOuter.Width, work.Width);
+                int finalOuterH = Math.Min(needsOuterFix ? desiredOuterH : currentOuter.Height, work.Height);
+                int x = work.X + Math.Max(0, (work.Width - finalOuterW) / 2);
+                int y = work.Y + Math.Max(0, (work.Height - finalOuterH) / 2);
+
+                if (needsOuterFix)
+                {
+                    AppWindow.MoveAndResize(new RectInt32(x, y, finalOuterW, finalOuterH));
+                }
+                else
+                {
+                    AppWindow.Move(new PointInt32(x, y));
+                }
+            }
+            else if (needsOuterFix)
+            {
+                AppWindow.Resize(new SizeInt32(desiredOuterW, desiredOuterH));
             }
         }
     }

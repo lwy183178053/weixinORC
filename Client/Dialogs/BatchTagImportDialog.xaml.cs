@@ -16,6 +16,7 @@ namespace Client.Dialogs
         private int _wechatPid;
         private CancellationTokenSource? _cts;
         private bool _isBusy;
+        private bool _isClosed;
 
         public int TotalImportedOrUpdated { get; private set; }
 
@@ -24,7 +25,11 @@ namespace Client.Dialogs
             InitializeComponent();
             RequestedTheme = AppServices.Settings.CurrentElementTheme;
             TagsListView.ItemsSource = _tags;
-            Closed += (_, _) => _cts?.Cancel();
+            Closed += (_, _) =>
+            {
+                _isClosed = true;
+                _cts?.Cancel();
+            };
         }
 
         private void CloseButton_Click(object sender, RoutedEventArgs e)
@@ -51,6 +56,8 @@ namespace Client.Dialogs
         {
             if (_isBusy) return;
             _isBusy = true;
+            _cts = new CancellationTokenSource();
+            var ct = _cts.Token;
             ScanTagsButton.IsEnabled = false;
             ScrollMoreTagsButton.IsEnabled = false;
             StartImportButton.IsEnabled = false;
@@ -60,7 +67,9 @@ namespace Client.Dialogs
 
             try
             {
-                var result = await _importer.LocateAndScanTagsAsync(scrollLeftSidebarDown: scrollDown);
+                var result = await Task.Run(() => _importer.LocateAndScanTagsAsync(scrollLeftSidebarDown: scrollDown, ct: ct), ct);
+                if (_isClosed) return;
+
                 _contactManagerHwnd = result.ContactManagerHwnd;
                 _wechatPid = result.ProcessId;
 
@@ -93,24 +102,40 @@ namespace Client.Dialogs
                 AppendLog(result.Message);
 
                 // Bring our workbench back to front so the user sees the scanned tag list immediately
-                if (AppServices.MainWindowHandle != nint.Zero)
+                if (!_isClosed && AppServices.MainWindowHandle != nint.Zero)
                 {
                     _ = Win32WindowHelper.SetForegroundWindow(AppServices.MainWindowHandle);
                 }
             }
+            catch (OperationCanceledException)
+            {
+                if (!_isClosed)
+                {
+                    FooterStatusText.Text = "扫描已取消。";
+                    AppendLog("扫描已取消。");
+                }
+            }
             catch (Exception ex)
             {
-                ScanStatusTitle.Text = "定位或扫描失败";
-                ScanStatusSubText.Text = ex.Message;
-                FooterStatusText.Text = ex.Message;
-                AppendLog($"✕ {ex.Message}");
+                if (!_isClosed)
+                {
+                    ScanStatusTitle.Text = "定位或扫描失败";
+                    ScanStatusSubText.Text = ex.Message;
+                    FooterStatusText.Text = ex.Message;
+                    AppendLog($"✕ {ex.Message}");
+                }
             }
             finally
             {
                 _isBusy = false;
-                ScanTagsButton.IsEnabled = true;
-                ScrollMoreTagsButton.IsEnabled = _contactManagerHwnd != nint.Zero;
-                StartImportButton.IsEnabled = _contactManagerHwnd != nint.Zero && _tags.Count > 0;
+                _cts?.Dispose();
+                _cts = null;
+                if (!_isClosed)
+                {
+                    ScanTagsButton.IsEnabled = true;
+                    ScrollMoreTagsButton.IsEnabled = _contactManagerHwnd != nint.Zero;
+                    StartImportButton.IsEnabled = _contactManagerHwnd != nint.Zero && _tags.Count > 0;
+                }
             }
         }
 
@@ -170,6 +195,7 @@ namespace Client.Dialogs
 
             var progress = new Progress<BatchTagImportProgress>(p =>
             {
+                if (_isClosed) return;
                 StatProcessedText.Text = p.Processed.ToString();
                 StatCreatedText.Text = p.CreatedCount.ToString();
                 StatUpdatedText.Text = p.UpdatedCount.ToString();
@@ -187,18 +213,23 @@ namespace Client.Dialogs
                 }
             });
 
+            var ct = _cts.Token;
+            var hwnd = _contactManagerHwnd;
+            var pid = _wechatPid;
             try
             {
-                var summary = await _importer.RunBatchImportAsync(
-                    _contactManagerHwnd,
-                    _wechatPid,
+                var summary = await Task.Run(() => _importer.RunBatchImportAsync(
+                    hwnd,
+                    pid,
                     chosen,
                     overwrite,
                     defaultSmartDelayMs,
                     progress,
-                    _cts.Token);
+                    ct));
 
                 TotalImportedOrUpdated += summary.CreatedCount + summary.UpdatedCount;
+                if (_isClosed) return;
+
                 ImportProgressBar.IsIndeterminate = false;
                 if (!summary.WasCancelled) ImportProgressBar.Value = 100;
 
@@ -209,26 +240,32 @@ namespace Client.Dialogs
             }
             catch (Exception ex)
             {
-                FooterStatusText.Text = $"批量导入异常：{ex.Message}";
-                AppendLog($"✕ 异常：{ex.Message}");
+                if (!_isClosed)
+                {
+                    FooterStatusText.Text = $"批量导入异常：{ex.Message}";
+                    AppendLog($"✕ 异常：{ex.Message}");
+                }
             }
             finally
             {
                 _isBusy = false;
                 _cts?.Dispose();
                 _cts = null;
-                ScanTagsButton.IsEnabled = true;
-                ScrollMoreTagsButton.IsEnabled = _contactManagerHwnd != nint.Zero;
-                StartImportButton.Visibility = Visibility.Visible;
-                StartImportButton.IsEnabled = _contactManagerHwnd != nint.Zero && _tags.Count > 0;
-                StopImportButton.Visibility = Visibility.Collapsed;
-                DoneButton.IsEnabled = true;
-                CloseButton.IsEnabled = true;
-
-                // Restore our workbench window to foreground so the user immediately sees the summary
-                if (AppServices.MainWindowHandle != nint.Zero)
+                if (!_isClosed)
                 {
-                    _ = Win32WindowHelper.SetForegroundWindow(AppServices.MainWindowHandle);
+                    ScanTagsButton.IsEnabled = true;
+                    ScrollMoreTagsButton.IsEnabled = _contactManagerHwnd != nint.Zero;
+                    StartImportButton.Visibility = Visibility.Visible;
+                    StartImportButton.IsEnabled = _contactManagerHwnd != nint.Zero && _tags.Count > 0;
+                    StopImportButton.Visibility = Visibility.Collapsed;
+                    DoneButton.IsEnabled = true;
+                    CloseButton.IsEnabled = true;
+
+                    // Restore our workbench window to foreground so the user immediately sees the summary
+                    if (AppServices.MainWindowHandle != nint.Zero)
+                    {
+                        _ = Win32WindowHelper.SetForegroundWindow(AppServices.MainWindowHandle);
+                    }
                 }
             }
         }

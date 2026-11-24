@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text.RegularExpressions;
 using Client.Models;
 using Windows.Graphics.Imaging;
@@ -16,7 +15,6 @@ namespace Client.Services
         public double RightX { get; set; }
 
         public bool IsOutgoing => Direction.Equals("outgoing", StringComparison.OrdinalIgnoreCase);
-        public string DirectionLabel => IsOutgoing ? "我方 (绿)" : "对方 (白)";
     }
 
     public static partial class WeChatChatScreenshotParser
@@ -39,7 +37,7 @@ namespace Client.Services
 
             int width = bitmap.PixelWidth;
             int height = bitmap.PixelHeight;
-            byte[] pixels = CopyBgraPixels(bitmap);
+            byte[] pixels = AvatarImageService.CopyBgraPixels(bitmap);
 
             // Detect optional top header bar (title like "大数据25 刘德康" at y < 48 on far left)
             // and bottom composer area ("发送" button at bottom-right).
@@ -191,27 +189,6 @@ namespace Client.Services
             byte g = bgra[idx + 1];
             byte r = bgra[idx + 2];
             return r >= 225 && g >= 225 && b >= 225;
-        }
-
-        private static byte[] CopyBgraPixels(SoftwareBitmap source)
-        {
-            SoftwareBitmap? converted = null;
-            SoftwareBitmap target = source;
-            if (source.BitmapPixelFormat != BitmapPixelFormat.Bgra8)
-            {
-                converted = SoftwareBitmap.Convert(source, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied);
-                target = converted;
-            }
-            try
-            {
-                byte[] pixels = new byte[checked(target.PixelWidth * target.PixelHeight * 4)];
-                target.CopyToBuffer(pixels.AsBuffer());
-                return pixels;
-            }
-            finally
-            {
-                converted?.Dispose();
-            }
         }
 
         private static bool IsSystemOrTimeNotice(string text)

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -13,12 +15,13 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
-func (s *Server) login(c *gin.Context) {
+func (s *server) login(c *gin.Context) {
 	var req loginRequest
 	if !bindJSON(c, &req) {
 		return
 	}
-	if strings.TrimSpace(req.Account) == "" || req.Password == "" || len(req.Account) > 256 || len(req.Password) > 1024 {
+	req.Account = strings.TrimSpace(req.Account)
+	if req.Account == "" || req.Password == "" || len(req.Account) > 256 || len(req.Password) > 1024 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_credentials_format"})
 		return
 	}
@@ -29,7 +32,12 @@ func (s *Server) login(c *gin.Context) {
 
 	identity, err := s.verifier.Verify(c.Request.Context(), req.Account, req.Password)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_credentials"})
+		if errors.Is(err, auth.ErrInvalidCredentials) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid_credentials"})
+			return
+		}
+		log.Printf("auth verify error for account=%q: %v", req.Account, err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "authentication_unavailable"})
 		return
 	}
 	if identity.EmployeeID == "" {
@@ -52,13 +60,13 @@ func (s *Server) login(c *gin.Context) {
 	})
 }
 
-func (s *Server) logout(c *gin.Context) {
+func (s *server) logout(c *gin.Context) {
 	id := auth.IdentityFromContext(c)
 	_, _ = s.store.CreateAuditLog(c.Request.Context(), id.EmployeeID, "logout", "employee", id.EmployeeID, "account="+id.Account)
 	s.sessions.Revoke(auth.TokenFromContext(c))
 	c.Status(http.StatusNoContent)
 }
 
-func (s *Server) me(c *gin.Context) {
+func (s *server) me(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"employee": auth.IdentityFromContext(c)})
 }

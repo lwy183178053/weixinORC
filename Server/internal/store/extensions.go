@@ -34,12 +34,16 @@ type WeChatAccountPatch struct {
 	Heartbeat bool
 }
 
+const wechatAccountCols = `id, account_type, wechat_id, nickname, status, last_heartbeat_at, created_at, updated_at`
+
+func scanWeChatAccount(sc rowScanner) (WeChatAccount, error) {
+	var a WeChatAccount
+	err := sc.Scan(&a.ID, &a.AccountType, &a.WechatID, &a.Nickname, &a.Status, &a.LastHeartbeatAt, &a.CreatedAt, &a.UpdatedAt)
+	return a, err
+}
+
 func (s *Store) ListWeChatAccounts(ctx context.Context, ownerID string) ([]WeChatAccount, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, account_type, wechat_id, nickname, status, last_heartbeat_at, created_at, updated_at
-		FROM wechat_accounts
-		WHERE owner_id = ?
-		ORDER BY id DESC`, ownerID)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+wechatAccountCols+` FROM wechat_accounts WHERE owner_id = ? ORDER BY id DESC`, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +51,8 @@ func (s *Store) ListWeChatAccounts(ctx context.Context, ownerID string) ([]WeCha
 
 	items := make([]WeChatAccount, 0)
 	for rows.Next() {
-		var a WeChatAccount
-		if err := rows.Scan(&a.ID, &a.AccountType, &a.WechatID, &a.Nickname, &a.Status, &a.LastHeartbeatAt, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		a, err := scanWeChatAccount(rows)
+		if err != nil {
 			return nil, err
 		}
 		items = append(items, a)
@@ -63,7 +67,7 @@ func (s *Store) UpsertWeChatAccount(ctx context.Context, ownerID string, input W
 		status = "online"
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	return scanWeChatAccount(s.db.QueryRowContext(ctx, `
 		INSERT INTO wechat_accounts (owner_id, account_type, wechat_id, nickname, status, last_heartbeat_at, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(owner_id, account_type) DO UPDATE SET
@@ -71,70 +75,38 @@ func (s *Store) UpsertWeChatAccount(ctx context.Context, ownerID string, input W
 			nickname = excluded.nickname,
 			status = excluded.status,
 			last_heartbeat_at = excluded.last_heartbeat_at,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at
+		RETURNING `+wechatAccountCols,
 		ownerID, input.AccountType, input.WechatID, input.Nickname, status, now, now, now,
-	)
-	if err != nil {
-		return WeChatAccount{}, err
-	}
-
-	var a WeChatAccount
-	err = s.db.QueryRowContext(ctx, `
-		SELECT id, account_type, wechat_id, nickname, status, last_heartbeat_at, created_at, updated_at
-		FROM wechat_accounts
-		WHERE owner_id = ? AND account_type = ?`,
-		ownerID, input.AccountType,
-	).Scan(&a.ID, &a.AccountType, &a.WechatID, &a.Nickname, &a.Status, &a.LastHeartbeatAt, &a.CreatedAt, &a.UpdatedAt)
-	return a, err
+	))
 }
 
 func (s *Store) UpdateWeChatAccount(ctx context.Context, ownerID string, id int64, patch WeChatAccountPatch) (WeChatAccount, error) {
-	var a WeChatAccount
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, account_type, wechat_id, nickname, status, last_heartbeat_at, created_at, updated_at
-		FROM wechat_accounts
-		WHERE owner_id = ? AND id = ?`, ownerID, id,
-	).Scan(&a.ID, &a.AccountType, &a.WechatID, &a.Nickname, &a.Status, &a.LastHeartbeatAt, &a.CreatedAt, &a.UpdatedAt)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	var heartbeat *string
+	if patch.Heartbeat {
+		heartbeat = &now
+	}
+
+	a, err := scanWeChatAccount(s.db.QueryRowContext(ctx, `
+		UPDATE wechat_accounts
+		SET wechat_id         = COALESCE(?, wechat_id),
+		    nickname          = COALESCE(?, nickname),
+		    status            = COALESCE(?, status),
+		    last_heartbeat_at = COALESCE(?, last_heartbeat_at),
+		    updated_at        = ?
+		WHERE owner_id = ? AND id = ?
+		RETURNING `+wechatAccountCols,
+		patch.WechatID, patch.Nickname, patch.Status, heartbeat, now, ownerID, id,
+	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return WeChatAccount{}, ErrNotFound
 	}
-	if err != nil {
-		return WeChatAccount{}, err
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if patch.WechatID != nil {
-		a.WechatID = *patch.WechatID
-	}
-	if patch.Nickname != nil {
-		a.Nickname = *patch.Nickname
-	}
-	if patch.Status != nil {
-		a.Status = *patch.Status
-	}
-	if patch.Heartbeat {
-		a.LastHeartbeatAt = now
-	}
-	a.UpdatedAt = now
-
-	_, err = s.db.ExecContext(ctx, `
-		UPDATE wechat_accounts
-		SET wechat_id = ?, nickname = ?, status = ?, last_heartbeat_at = ?, updated_at = ?
-		WHERE owner_id = ? AND id = ?`,
-		a.WechatID, a.Nickname, a.Status, a.LastHeartbeatAt, a.UpdatedAt, ownerID, id,
-	)
 	return a, err
 }
 
 func (s *Store) DeleteWeChatAccount(ctx context.Context, ownerID string, id int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM wechat_accounts WHERE owner_id = ? AND id = ?`, ownerID, id)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return s.deleteOne(ctx, `DELETE FROM wechat_accounts WHERE owner_id = ? AND id = ?`, ownerID, id)
 }
 
 // ---- Group Members ----
@@ -173,6 +145,17 @@ type GroupMemberPatch struct {
 	Note          *string
 }
 
+const groupMemberCols = `id, group_id, local_key, native_id, group_nickname, wechat_name, wechat_account, role, note, created_at, updated_at`
+
+func scanGroupMember(sc rowScanner) (GroupMember, error) {
+	var m GroupMember
+	err := sc.Scan(
+		&m.ID, &m.GroupID, &m.LocalKey, &m.NativeID, &m.GroupNickname,
+		&m.WechatName, &m.WechatAccount, &m.Role, &m.Note, &m.CreatedAt, &m.UpdatedAt,
+	)
+	return m, err
+}
+
 func (s *Store) ListGroupMembers(ctx context.Context, ownerID string, groupID, cursor int64, limit int) ([]GroupMember, int64, error) {
 	ok, err := s.groupExists(ctx, ownerID, groupID)
 	if err != nil {
@@ -182,56 +165,17 @@ func (s *Store) ListGroupMembers(ctx context.Context, ownerID string, groupID, c
 		return nil, 0, ErrNotFound
 	}
 
-	query := `
-		SELECT id, group_id, local_key, native_id, group_nickname, wechat_name, wechat_account, role, note, created_at, updated_at
-		FROM group_members
-		WHERE owner_id = ? AND group_id = ?`
-	args := []any{ownerID, groupID}
-	if cursor > 0 {
-		query += ` AND id < ?`
-		args = append(args, cursor)
-	}
-	query += ` ORDER BY id DESC LIMIT ?`
-	args = append(args, limit+1)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	items := make([]GroupMember, 0, limit)
-	for rows.Next() {
-		var m GroupMember
-		if err := rows.Scan(
-			&m.ID, &m.GroupID, &m.LocalKey, &m.NativeID, &m.GroupNickname,
-			&m.WechatName, &m.WechatAccount, &m.Role, &m.Note, &m.CreatedAt, &m.UpdatedAt,
-		); err != nil {
-			return nil, 0, err
-		}
-		items = append(items, m)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
-
-	var nextCursor int64
-	if len(items) > limit {
-		items = items[:limit]
-		nextCursor = items[len(items)-1].ID
-	}
-	return items, nextCursor, nil
+	return listPage(
+		ctx, s.db,
+		`SELECT `+groupMemberCols+` FROM group_members WHERE owner_id = ? AND group_id = ?`,
+		[]any{ownerID, groupID},
+		"id", cursor, limit,
+		scanGroupMember,
+		func(m GroupMember) int64 { return m.ID },
+	)
 }
 
 func (s *Store) CreateGroupMember(ctx context.Context, ownerID string, groupID int64, input GroupMemberInput) (GroupMember, error) {
-	ok, err := s.groupExists(ctx, ownerID, groupID)
-	if err != nil {
-		return GroupMember{}, err
-	}
-	if !ok {
-		return GroupMember{}, ErrNotFound
-	}
-
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO group_members (owner_id, group_id, local_key, native_id, group_nickname, wechat_name, wechat_account, role, note, created_at, updated_at)
@@ -240,6 +184,9 @@ func (s *Store) CreateGroupMember(ctx context.Context, ownerID string, groupID i
 		input.WechatName, input.WechatAccount, input.Role, input.Note, now, now,
 	)
 	if err != nil {
+		if isForeignKeyViolation(err) {
+			return GroupMember{}, ErrNotFound
+		}
 		return GroupMember{}, err
 	}
 	id, err := res.LastInsertId()
@@ -262,63 +209,29 @@ func (s *Store) CreateGroupMember(ctx context.Context, ownerID string, groupID i
 }
 
 func (s *Store) UpdateGroupMember(ctx context.Context, ownerID string, groupID, memberID int64, patch GroupMemberPatch) (GroupMember, error) {
-	var m GroupMember
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, group_id, local_key, native_id, group_nickname, wechat_name, wechat_account, role, note, created_at, updated_at
-		FROM group_members
-		WHERE owner_id = ? AND group_id = ? AND id = ?`, ownerID, groupID, memberID,
-	).Scan(
-		&m.ID, &m.GroupID, &m.LocalKey, &m.NativeID, &m.GroupNickname,
-		&m.WechatName, &m.WechatAccount, &m.Role, &m.Note, &m.CreatedAt, &m.UpdatedAt,
-	)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	m, err := scanGroupMember(s.db.QueryRowContext(ctx, `
+		UPDATE group_members
+		SET local_key      = COALESCE(?, local_key),
+		    native_id      = COALESCE(?, native_id),
+		    group_nickname = COALESCE(?, group_nickname),
+		    wechat_name    = COALESCE(?, wechat_name),
+		    wechat_account = COALESCE(?, wechat_account),
+		    role           = COALESCE(?, role),
+		    note           = COALESCE(?, note),
+		    updated_at     = ?
+		WHERE owner_id = ? AND group_id = ? AND id = ?
+		RETURNING `+groupMemberCols,
+		patch.LocalKey, patch.NativeID, patch.GroupNickname, patch.WechatName, patch.WechatAccount, patch.Role, patch.Note, now, ownerID, groupID, memberID,
+	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return GroupMember{}, ErrNotFound
 	}
-	if err != nil {
-		return GroupMember{}, err
-	}
-
-	if patch.LocalKey != nil {
-		m.LocalKey = *patch.LocalKey
-	}
-	if patch.NativeID != nil {
-		m.NativeID = *patch.NativeID
-	}
-	if patch.GroupNickname != nil {
-		m.GroupNickname = *patch.GroupNickname
-	}
-	if patch.WechatName != nil {
-		m.WechatName = *patch.WechatName
-	}
-	if patch.WechatAccount != nil {
-		m.WechatAccount = *patch.WechatAccount
-	}
-	if patch.Role != nil {
-		m.Role = *patch.Role
-	}
-	if patch.Note != nil {
-		m.Note = *patch.Note
-	}
-	m.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-
-	_, err = s.db.ExecContext(ctx, `
-		UPDATE group_members
-		SET local_key = ?, native_id = ?, group_nickname = ?, wechat_name = ?, wechat_account = ?, role = ?, note = ?, updated_at = ?
-		WHERE owner_id = ? AND group_id = ? AND id = ?`,
-		m.LocalKey, m.NativeID, m.GroupNickname, m.WechatName, m.WechatAccount, m.Role, m.Note, m.UpdatedAt, ownerID, groupID, memberID,
-	)
 	return m, err
 }
 
 func (s *Store) DeleteGroupMember(ctx context.Context, ownerID string, groupID, memberID int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM group_members WHERE owner_id = ? AND group_id = ? AND id = ?`, ownerID, groupID, memberID)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return s.deleteOne(ctx, `DELETE FROM group_members WHERE owner_id = ? AND group_id = ? AND id = ?`, ownerID, groupID, memberID)
 }
 
 // ---- Audit Logs ----
@@ -357,37 +270,16 @@ func (s *Store) CreateAuditLog(ctx context.Context, ownerID, action, targetType,
 }
 
 func (s *Store) ListAuditLogs(ctx context.Context, ownerID string, cursor int64, limit int) ([]AuditLog, int64, error) {
-	query := `SELECT id, action, target_type, target_id, detail, created_at FROM audit_logs WHERE owner_id = ?`
-	args := []any{ownerID}
-	if cursor > 0 {
-		query += ` AND id < ?`
-		args = append(args, cursor)
-	}
-	query += ` ORDER BY id DESC LIMIT ?`
-	args = append(args, limit+1)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	items := make([]AuditLog, 0, limit)
-	for rows.Next() {
-		var l AuditLog
-		if err := rows.Scan(&l.ID, &l.Action, &l.TargetType, &l.TargetID, &l.Detail, &l.CreatedAt); err != nil {
-			return nil, 0, err
-		}
-		items = append(items, l)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
-
-	var nextCursor int64
-	if len(items) > limit {
-		items = items[:limit]
-		nextCursor = items[len(items)-1].ID
-	}
-	return items, nextCursor, nil
+	return listPage(
+		ctx, s.db,
+		`SELECT id, action, target_type, target_id, detail, created_at FROM audit_logs WHERE owner_id = ?`,
+		[]any{ownerID},
+		"id", cursor, limit,
+		func(sc rowScanner) (AuditLog, error) {
+			var l AuditLog
+			err := sc.Scan(&l.ID, &l.Action, &l.TargetType, &l.TargetID, &l.Detail, &l.CreatedAt)
+			return l, err
+		},
+		func(l AuditLog) int64 { return l.ID },
+	)
 }

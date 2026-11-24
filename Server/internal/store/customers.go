@@ -70,35 +70,30 @@ type CustomerPatch struct {
 	AddedDate     *string
 }
 
-func (s *Store) FindCustomerByWechatAccount(ctx context.Context, ownerID, wechatAccount string) (Customer, bool, error) {
-	if wechatAccount == "" {
-		return Customer{}, false, nil
-	}
-	row := s.db.QueryRowContext(
-		ctx,
-		`SELECT `+customerSelectCols+` FROM customers c WHERE c.owner_id = ? AND c.wechat_account = ? ORDER BY c.id DESC LIMIT 1`,
-		ownerID, wechatAccount,
-	)
-	c, err := scanCustomer(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Customer{}, false, nil
-	}
-	if err != nil {
-		return Customer{}, false, err
-	}
-	return c, true, nil
-}
-
 func (s *Store) CreateCustomer(ctx context.Context, ownerID string, input CustomerInput) (Customer, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Customer{}, err
+	}
+	defer tx.Rollback()
+
 	if !input.AllowDuplicate && input.WechatAccount != "" {
-		if _, exists, err := s.FindCustomerByWechatAccount(ctx, ownerID, input.WechatAccount); err != nil {
-			return Customer{}, err
-		} else if exists {
+		var exists int
+		err := tx.QueryRowContext(
+			ctx,
+			`SELECT 1 FROM customers WHERE owner_id = ? AND wechat_account = ? LIMIT 1`,
+			ownerID, input.WechatAccount,
+		).Scan(&exists)
+		if err == nil {
 			return Customer{}, ErrConflict
 		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Customer{}, err
+		}
 	}
+
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.db.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		INSERT INTO customers (
 			owner_id, wechat_remark, wechat_name, wechat_account,
 			gender, avatar_url, description, tags, follow_status, local_key, native_id,
@@ -111,14 +106,14 @@ func (s *Store) CreateCustomer(ctx context.Context, ownerID string, input Custom
 		now, now,
 	)
 	if err != nil {
-		if isUniqueViolation(err) {
-			return Customer{}, ErrConflict
-		}
 		return Customer{}, err
 	}
 
 	id, err := res.LastInsertId()
 	if err != nil {
+		return Customer{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return Customer{}, err
 	}
 
@@ -153,7 +148,7 @@ const customerSelectCols = `
 	COALESCE((SELECT m.sent_at FROM messages m WHERE m.owner_id = c.owner_id AND m.customer_id = c.id ORDER BY m.id DESC LIMIT 1), ''),
 	c.created_at, c.updated_at`
 
-func scanCustomer(scanner interface{ Scan(dest ...any) error }) (Customer, error) {
+func scanCustomer(scanner rowScanner) (Customer, error) {
 	var c Customer
 	err := scanner.Scan(
 		&c.ID, &c.WechatRemark, &c.WechatName, &c.WechatAccount,
@@ -179,125 +174,125 @@ func (s *Store) GetCustomer(ctx context.Context, ownerID string, id int64) (Cust
 }
 
 func (s *Store) UpdateCustomer(ctx context.Context, ownerID string, id int64, patch CustomerPatch) (Customer, error) {
-	current, err := s.GetCustomer(ctx, ownerID, id)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Customer{}, err
 	}
+	defer tx.Rollback()
 
-	if patch.WechatRemark != nil {
-		current.WechatRemark = *patch.WechatRemark
-	}
-	if patch.WechatName != nil {
-		current.WechatName = *patch.WechatName
-	}
-	if patch.WechatAccount != nil {
-		current.WechatAccount = *patch.WechatAccount
-	}
-	if patch.Gender != nil {
-		current.Gender = *patch.Gender
-	}
-	if patch.AvatarURL != nil {
-		current.AvatarURL = *patch.AvatarURL
-	}
-	if patch.Description != nil {
-		current.Description = *patch.Description
-	}
-	if patch.Tags != nil {
-		current.Tags = *patch.Tags
-	}
-	if patch.FollowStatus != nil {
-		current.FollowStatus = *patch.FollowStatus
-	}
-	if patch.LocalKey != nil {
-		current.LocalKey = *patch.LocalKey
-	}
-	if patch.NativeID != nil {
-		current.NativeID = *patch.NativeID
-	}
-	if patch.Note != nil {
-		current.Note = *patch.Note
-	}
-	if patch.Region != nil {
-		current.Region = *patch.Region
-	}
-	if patch.Phone != nil {
-		current.Phone = *patch.Phone
-	}
-	if patch.Signature != nil {
-		current.Signature = *patch.Signature
-	}
-	if patch.Source != nil {
-		current.Source = *patch.Source
-	}
-	if patch.AddedDate != nil {
-		current.AddedDate = *patch.AddedDate
-	}
-	current.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-
-	_, err = s.db.ExecContext(ctx, `
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := tx.ExecContext(ctx, `
 		UPDATE customers
-		SET wechat_remark = ?, wechat_name = ?, wechat_account = ?,
-		    gender = ?, avatar_url = ?, description = ?, tags = ?, follow_status = ?, local_key = ?, native_id = ?,
-		    note = ?, region = ?, phone = ?, signature = ?, source = ?, added_date = ?,
-		    updated_at = ?
+		SET wechat_remark  = COALESCE(?, wechat_remark),
+		    wechat_name    = COALESCE(?, wechat_name),
+		    wechat_account = COALESCE(?, wechat_account),
+		    gender         = COALESCE(?, gender),
+		    avatar_url     = COALESCE(?, avatar_url),
+		    description    = COALESCE(?, description),
+		    tags           = COALESCE(?, tags),
+		    follow_status  = COALESCE(?, follow_status),
+		    local_key      = COALESCE(?, local_key),
+		    native_id      = COALESCE(?, native_id),
+		    note           = COALESCE(?, note),
+		    region         = COALESCE(?, region),
+		    phone          = COALESCE(?, phone),
+		    signature      = COALESCE(?, signature),
+		    source         = COALESCE(?, source),
+		    added_date     = COALESCE(?, added_date),
+		    updated_at     = ?
 		WHERE owner_id = ? AND id = ?`,
-		current.WechatRemark, current.WechatName, current.WechatAccount,
-		current.Gender, current.AvatarURL, current.Description, current.Tags, current.FollowStatus, current.LocalKey, current.NativeID,
-		current.Note, current.Region, current.Phone, current.Signature, current.Source, current.AddedDate,
-		current.UpdatedAt, ownerID, id,
+		patch.WechatRemark, patch.WechatName, patch.WechatAccount,
+		patch.Gender, patch.AvatarURL, patch.Description, patch.Tags, patch.FollowStatus, patch.LocalKey, patch.NativeID,
+		patch.Note, patch.Region, patch.Phone, patch.Signature, patch.Source, patch.AddedDate,
+		now, ownerID, id,
 	)
 	if err != nil {
-		if isUniqueViolation(err) {
-			return Customer{}, ErrConflict
-		}
 		return Customer{}, err
 	}
-	return current, nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return Customer{}, err
+	}
+	if n == 0 {
+		return Customer{}, ErrNotFound
+	}
+
+	c, err := scanCustomer(tx.QueryRowContext(
+		ctx,
+		`SELECT `+customerSelectCols+` FROM customers c WHERE c.owner_id = ? AND c.id = ?`,
+		ownerID, id,
+	))
+	if err != nil {
+		return Customer{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Customer{}, err
+	}
+	return c, nil
+}
+
+// SetCustomerAvatar atomically replaces avatar_url and returns the previous avatar_url for cleanup.
+func (s *Store) SetCustomerAvatar(ctx context.Context, ownerID string, id int64, newAvatarURL string) (Customer, string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Customer{}, "", err
+	}
+	defer tx.Rollback()
+
+	var prevURL string
+	err = tx.QueryRowContext(ctx, `SELECT avatar_url FROM customers WHERE owner_id = ? AND id = ?`, ownerID, id).Scan(&prevURL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Customer{}, "", ErrNotFound
+	}
+	if err != nil {
+		return Customer{}, "", err
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE customers SET avatar_url = ?, updated_at = ? WHERE owner_id = ? AND id = ?`,
+		newAvatarURL, now, ownerID, id,
+	); err != nil {
+		return Customer{}, "", err
+	}
+
+	c, err := scanCustomer(tx.QueryRowContext(
+		ctx,
+		`SELECT `+customerSelectCols+` FROM customers c WHERE c.owner_id = ? AND c.id = ?`,
+		ownerID, id,
+	))
+	if err != nil {
+		return Customer{}, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return Customer{}, "", err
+	}
+	return c, prevURL, nil
 }
 
 func (s *Store) DeleteCustomer(ctx context.Context, ownerID string, id int64) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM customers WHERE owner_id = ? AND id = ?`, ownerID, id)
-	if err != nil {
-		return err
+	return s.deleteOne(ctx, `DELETE FROM customers WHERE owner_id = ? AND id = ?`, ownerID, id)
+}
+
+func (s *Store) DeleteCustomerReturningMeta(ctx context.Context, ownerID string, id int64) (avatarURL, wechatName string, err error) {
+	err = s.db.QueryRowContext(
+		ctx,
+		`DELETE FROM customers WHERE owner_id = ? AND id = ? RETURNING avatar_url, wechat_name`,
+		ownerID, id,
+	).Scan(&avatarURL, &wechatName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", ErrNotFound
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return avatarURL, wechatName, err
 }
 
 func (s *Store) ListCustomers(ctx context.Context, ownerID string, cursor int64, limit int) ([]Customer, int64, error) {
-	query := `SELECT ` + customerSelectCols + ` FROM customers c WHERE c.owner_id = ?`
-	args := []any{ownerID}
-	if cursor > 0 {
-		query += ` AND c.id < ?`
-		args = append(args, cursor)
-	}
-	query += ` ORDER BY c.id DESC LIMIT ?`
-	args = append(args, limit+1)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	items := make([]Customer, 0, limit)
-	for rows.Next() {
-		c, err := scanCustomer(rows)
-		if err != nil {
-			return nil, 0, err
-		}
-		items = append(items, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
-
-	var nextCursor int64
-	if len(items) > limit {
-		items = items[:limit]
-		nextCursor = items[len(items)-1].ID
-	}
-	return items, nextCursor, nil
+	return listPage(
+		ctx, s.db,
+		`SELECT `+customerSelectCols+` FROM customers c WHERE c.owner_id = ?`,
+		[]any{ownerID},
+		"c.id", cursor, limit,
+		scanCustomer,
+		func(c Customer) int64 { return c.ID },
+	)
 }

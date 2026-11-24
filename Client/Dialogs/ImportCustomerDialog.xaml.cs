@@ -5,7 +5,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics.Imaging;
 
 namespace Client.Dialogs
@@ -18,6 +17,7 @@ namespace Client.Dialogs
         private CreateCustomerRequest? _pendingRequest;
         private bool _isBusyOcr;
         private bool _isSubmitting;
+        private bool _isClosed;
 
         public CustomerDto? CreatedCustomer { get; private set; }
         public bool WasOverwritten { get; private set; }
@@ -29,8 +29,12 @@ namespace Client.Dialogs
             RequestedTheme = AppServices.Settings.CurrentElementTheme;
             Closed += (_, _) =>
             {
-                _bitmap?.Dispose();
-                _bitmap = null;
+                _isClosed = true;
+                if (!_isBusyOcr)
+                {
+                    _bitmap?.Dispose();
+                    _bitmap = null;
+                }
             };
         }
 
@@ -65,25 +69,14 @@ namespace Client.Dialogs
 
         private async void PasteAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
         {
-            var data = Clipboard.GetContent();
-            if (data is null) return;
-
-            bool hasImage = data.Contains(StandardDataFormats.Bitmap);
-            if (!hasImage && data.Contains(StandardDataFormats.StorageItems))
+            if (_isSubmitting || _isBusyOcr) return;
+            if (OcrService.HasClipboardBitmapFast())
             {
-                try
-                {
-                    var items = await data.GetStorageItemsAsync();
-                    hasImage = items.Any(i =>
-                        i.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase));
-                }
-                catch { }
+                args.Handled = true;
+                await ImportFromClipboardAsync();
+                return;
             }
-
-            if (!hasImage) return;
+            if (!await OcrService.HasClipboardImageAsync()) return;
 
             args.Handled = true;
             await ImportFromClipboardAsync();
@@ -93,7 +86,7 @@ namespace Client.Dialogs
 
         private async void UploadButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_isBusyOcr) return;
+            if (_isBusyOcr || _isSubmitting) return;
             string? filePath = Win32WindowHelper.PickImageFilePath(AppServices.MainWindowHandle);
             if (string.IsNullOrWhiteSpace(filePath)) return;
 
@@ -111,7 +104,7 @@ namespace Client.Dialogs
 
         private async Task ImportFromClipboardAsync()
         {
-            if (_isBusyOcr) return;
+            if (_isBusyOcr || _isSubmitting) return;
             try
             {
                 var (bmp, label) = await AppServices.Ocr.TryLoadImageFromClipboardAsync();
@@ -157,8 +150,10 @@ namespace Client.Dialogs
                 EmptyPreviewHint.Visibility = Visibility.Collapsed;
 
                 var ocr = await AppServices.Ocr.RapidEngine.RecognizeAsync(bmp);
+                if (_isClosed) return;
                 var parsed = WeChatOcrAnalyzer.Analyze(null, ocr);
                 var (avatarPng, detectedGender) = await AvatarImageService.TryExtractProfileAvatarAndGenderAsync(bmp, ocr);
+                if (_isClosed) return;
 
                 RemarkBox.Text = parsed.CandidateWechatRemark;
                 NameBox.Text = parsed.CandidateWechatName;
@@ -190,21 +185,29 @@ namespace Client.Dialogs
             catch (Exception ex)
             {
                 AppServices.Logs.Error("OCR", $"客户截图识别失败：{ex.Message}");
-                ShowStatus($"识别失败：{ex.Message}", isError: true);
+                if (!_isClosed) ShowStatus($"识别失败：{ex.Message}", isError: true);
             }
             finally
             {
                 _isBusyOcr = false;
-                OcrSpinner.IsActive = false;
-                OcrSpinner.Visibility = Visibility.Collapsed;
-                PasteButton.IsEnabled = true;
-                UploadButton.IsEnabled = true;
+                if (_isClosed)
+                {
+                    _bitmap?.Dispose();
+                    _bitmap = null;
+                }
+                else
+                {
+                    OcrSpinner.IsActive = false;
+                    OcrSpinner.Visibility = Visibility.Collapsed;
+                    PasteButton.IsEnabled = true;
+                    UploadButton.IsEnabled = true;
+                }
             }
         }
 
         private async void SubmitButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_isSubmitting) return;
+            if (_isSubmitting || _isBusyOcr) return;
 
             string remark = RemarkBox.Text.Trim();
             string name = NameBox.Text.Trim();
@@ -233,30 +236,9 @@ namespace Client.Dialogs
             SetSubmitting(true);
             try
             {
-                // Check for existing duplicate customer (match by wechat_account first, then exact display name / nickname)
-                var listRes = await AppServices.Backend.ListCustomersAsync(100);
-                CustomerDto? dup = null;
-                if (listRes.IsSuccess && listRes.Data is not null)
-                {
-                    if (!string.IsNullOrEmpty(account))
-                    {
-                        dup = listRes.Data.Items.FirstOrDefault(c =>
-                            !string.IsNullOrWhiteSpace(c.WechatAccount) &&
-                            c.WechatAccount.Equals(account, StringComparison.OrdinalIgnoreCase));
-                    }
-                    if (dup is null && !string.IsNullOrEmpty(name))
-                    {
-                        dup = listRes.Data.Items.FirstOrDefault(c =>
-                            !string.IsNullOrWhiteSpace(c.WechatName) &&
-                            c.WechatName.Equals(name, StringComparison.OrdinalIgnoreCase));
-                    }
-                    if (dup is null && !string.IsNullOrEmpty(remark))
-                    {
-                        dup = listRes.Data.Items.FirstOrDefault(c =>
-                            !string.IsNullOrWhiteSpace(c.WechatRemark) &&
-                            c.WechatRemark.Equals(remark, StringComparison.OrdinalIgnoreCase));
-                    }
-                }
+                var allCustomers = await AppServices.Backend.ListAllCustomersAsync();
+                if (_isClosed) return;
+                CustomerDto? dup = BackendApiClient.FindDuplicateCustomer(allCustomers, account, name, remark);
 
                 if (dup is not null)
                 {
@@ -272,37 +254,51 @@ namespace Client.Dialogs
 
                 await ExecuteSaveAsync(overwriteExisting: false, allowDuplicate: false);
             }
+            catch (Exception ex)
+            {
+                if (!_isClosed) ShowStatus($"保存异常：{ex.Message}", isError: true);
+            }
             finally
             {
-                SetSubmitting(false);
+                if (!_isClosed) SetSubmitting(false);
             }
         }
 
         private async void DuplicateOverwriteButton_Click(object sender, RoutedEventArgs e)
         {
+            if (_isSubmitting) return;
             DuplicateOverlay.Visibility = Visibility.Collapsed;
             SetSubmitting(true);
             try
             {
                 await ExecuteSaveAsync(overwriteExisting: true, allowDuplicate: false);
             }
+            catch (Exception ex)
+            {
+                if (!_isClosed) ShowStatus($"保存异常：{ex.Message}", isError: true);
+            }
             finally
             {
-                SetSubmitting(false);
+                if (!_isClosed) SetSubmitting(false);
             }
         }
 
         private async void DuplicateCreateNewButton_Click(object sender, RoutedEventArgs e)
         {
+            if (_isSubmitting) return;
             DuplicateOverlay.Visibility = Visibility.Collapsed;
             SetSubmitting(true);
             try
             {
                 await ExecuteSaveAsync(overwriteExisting: false, allowDuplicate: true);
             }
+            catch (Exception ex)
+            {
+                if (!_isClosed) ShowStatus($"保存异常：{ex.Message}", isError: true);
+            }
             finally
             {
-                SetSubmitting(false);
+                if (!_isClosed) SetSubmitting(false);
             }
         }
 
@@ -339,17 +335,16 @@ namespace Client.Dialogs
                     Note = _duplicateMatch.Note
                 };
                 res = await AppServices.Backend.UpdateCustomerAsync(_duplicateMatch.Id, patch);
-                WasOverwritten = true;
             }
             else
             {
                 _pendingRequest.AllowDuplicate = allowDuplicate;
                 res = await AppServices.Backend.CreateCustomerAsync(_pendingRequest);
-                WasOverwritten = false;
             }
 
             if (res.IsSuccess && res.Data is not null)
             {
+                WasOverwritten = overwriteExisting && _duplicateMatch is not null;
                 var saved = res.Data;
                 if (_extractedAvatarPng is not null)
                 {

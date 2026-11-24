@@ -95,17 +95,14 @@ namespace Client.Services
             public ushort wParamH;
         }
 
-        internal const int SW_HIDE = 0;
         internal const int SW_SHOW = 5;
         internal const int SW_MINIMIZE = 6;
         internal const int SW_RESTORE = 9;
 
         private const uint INPUT_MOUSE = 0;
-        private const uint INPUT_KEYBOARD = 1;
         private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
         private const uint MOUSEEVENTF_LEFTUP = 0x0004;
         private const uint MOUSEEVENTF_WHEEL = 0x0800;
-        private const uint KEYEVENTF_KEYUP = 0x0002;
         private const ushort VK_ESCAPE = 0x1B;
         private const uint SWP_SHOWWINDOW = 0x0040;
         private const int WHEEL_DELTA = 120;
@@ -281,6 +278,18 @@ namespace Client.Services
                 throw new InvalidOperationException("截屏区域尺寸无效。");
             }
 
+            return CaptureDibToSoftwareBitmap(width, height, (screenDc, memDc, bitsPtr, pixels) =>
+            {
+                _ = BitBlt(memDc, 0, 0, width, height, screenDc, left, top, SRCCOPY);
+                Marshal.Copy(bitsPtr, pixels, 0, pixels.Length);
+            });
+        }
+
+        private static SoftwareBitmap CaptureDibToSoftwareBitmap(
+            int width,
+            int height,
+            Action<nint, nint, nint, byte[]> capturePixels)
+        {
             nint screenDc = GetDC(nint.Zero);
             if (screenDc == nint.Zero)
             {
@@ -301,7 +310,7 @@ namespace Client.Services
                     {
                         biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>(),
                         biWidth = width,
-                        biHeight = -height,
+                        biHeight = -height, // Top-down DIB
                         biPlanes = 1,
                         biBitCount = 32,
                         biCompression = BI_RGB
@@ -312,11 +321,11 @@ namespace Client.Services
                 if (dib == nint.Zero || bitsPtr == nint.Zero) throw new InvalidOperationException("无法分配截屏位图缓冲。");
 
                 oldObj = SelectObject(memDc, dib);
-                _ = BitBlt(memDc, 0, 0, width, height, screenDc, left, top, SRCCOPY);
 
-                int byteCount = checked(width * height * 4);
-                byte[] pixels = new byte[byteCount];
-                Marshal.Copy(bitsPtr, pixels, 0, byteCount);
+                byte[] pixels = new byte[checked(width * height * 4)];
+                capturePixels(screenDc, memDc, bitsPtr, pixels);
+
+                // Ensure opaque alpha so WinUI preview and OCR receive clean BGRA8 pixels.
                 for (int i = 3; i < pixels.Length; i += 4)
                 {
                     pixels[i] = 255;
@@ -417,96 +426,21 @@ namespace Client.Services
                 throw new InvalidOperationException("无法获取目标窗口的有效尺寸，请确认窗口已正常显示。");
             }
 
-            int width = rect.Width;
-            int height = rect.Height;
-
-            nint screenDc = GetDC(nint.Zero);
-            if (screenDc == nint.Zero)
+            return CaptureDibToSoftwareBitmap(rect.Width, rect.Height, (screenDc, memDc, bitsPtr, pixels) =>
             {
-                throw new InvalidOperationException("无法获取屏幕设备上下文 (DC)。");
-            }
-
-            nint memDc = nint.Zero;
-            nint dib = nint.Zero;
-            nint oldObj = nint.Zero;
-
-            try
-            {
-                memDc = CreateCompatibleDC(screenDc);
-                if (memDc == nint.Zero)
-                {
-                    throw new InvalidOperationException("无法创建兼容设备上下文。");
-                }
-
-                var bmi = new BITMAPINFO
-                {
-                    bmiHeader = new BITMAPINFOHEADER
-                    {
-                        biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>(),
-                        biWidth = width,
-                        biHeight = -height, // Top-down DIB
-                        biPlanes = 1,
-                        biBitCount = 32,
-                        biCompression = BI_RGB
-                    }
-                };
-
-                dib = CreateDIBSection(memDc, ref bmi, DIB_RGB_COLORS, out nint bitsPtr, nint.Zero, 0);
-                if (dib == nint.Zero || bitsPtr == nint.Zero)
-                {
-                    throw new InvalidOperationException("无法分配窗口截图位图缓冲。");
-                }
-
-                oldObj = SelectObject(memDc, dib);
-
                 bool captured = PrintWindow(hWnd, memDc, PW_RENDERFULLCONTENT);
-                int byteCount = checked(width * height * 4);
-                byte[] pixels = new byte[byteCount];
-
                 if (captured)
                 {
-                    Marshal.Copy(bitsPtr, pixels, 0, byteCount);
+                    Marshal.Copy(bitsPtr, pixels, 0, pixels.Length);
                 }
 
                 // Fallback to screen BitBlt if PrintWindow failed or returned an all-zero buffer.
                 if (!captured || IsAllZero(pixels))
                 {
-                    _ = BitBlt(memDc, 0, 0, width, height, screenDc, rect.Left, rect.Top, SRCCOPY);
-                    Marshal.Copy(bitsPtr, pixels, 0, byteCount);
+                    _ = BitBlt(memDc, 0, 0, rect.Width, rect.Height, screenDc, rect.Left, rect.Top, SRCCOPY);
+                    Marshal.Copy(bitsPtr, pixels, 0, pixels.Length);
                 }
-
-                // Ensure opaque alpha so WinUI preview and OCR receive clean BGRA8 pixels.
-                for (int i = 3; i < pixels.Length; i += 4)
-                {
-                    pixels[i] = 255;
-                }
-
-                return SoftwareBitmap.CreateCopyFromBuffer(
-                    pixels.AsBuffer(),
-                    BitmapPixelFormat.Bgra8,
-                    width,
-                    height,
-                    BitmapAlphaMode.Premultiplied);
-            }
-            finally
-            {
-                if (oldObj != nint.Zero && memDc != nint.Zero)
-                {
-                    _ = SelectObject(memDc, oldObj);
-                }
-
-                if (dib != nint.Zero)
-                {
-                    _ = DeleteObject(dib);
-                }
-
-                if (memDc != nint.Zero)
-                {
-                    _ = DeleteDC(memDc);
-                }
-
-                _ = ReleaseDC(nint.Zero, screenDc);
-            }
+            });
         }
 
         private static bool IsAllZero(byte[] data)

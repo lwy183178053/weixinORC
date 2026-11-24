@@ -122,7 +122,7 @@
                         CornerRadius="14"
                         ToolTipService.ToolTip="点击重新检测后端服务状态">
                         <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                            <Ellipse x:Name="HealthDot" Width="7.5" Height="7.5" Fill="#D97706" />
+                            <Ellipse x:Name="HealthDot" Width="7.5" Height="7.5" Fill="{StaticResource WarningTextBrush}" />
                             <TextBlock
                                 x:Name="HealthBadgeText"
                                 FontSize="11.5"

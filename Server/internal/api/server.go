@@ -3,8 +3,12 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
@@ -14,7 +18,7 @@ import (
 
 const maxBodyBytes = 4 << 20 // 4 MB (supports base64 avatar upload up to 2 MB)
 
-type Server struct {
+type server struct {
 	store    *store.Store
 	verifier auth.Verifier
 	sessions *auth.Sessions
@@ -29,7 +33,7 @@ func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.
 		c.Next()
 	})
 
-	s := &Server{store: db, verifier: verifier, sessions: sessions}
+	s := &server{store: db, verifier: verifier, sessions: sessions}
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -84,6 +88,15 @@ func bindJSON(c *gin.Context, dst any) bool {
 	dec := json.NewDecoder(c.Request.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "payload_too_large"})
+			return false
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
+		return false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_json"})
 		return false
 	}
@@ -93,6 +106,39 @@ func bindJSON(c *gin.Context, dst any) bool {
 func parseID(raw string) (int64, bool) {
 	id, err := strconv.ParseInt(raw, 10, 64)
 	return id, err == nil && id > 0
+}
+
+func parsePathID(c *gin.Context, param, errCode string) (int64, bool) {
+	id, ok := parseID(c.Param(param))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": errCode})
+		return 0, false
+	}
+	return id, true
+}
+
+func trimAndCheck(p **string, max int) bool {
+	if *p == nil {
+		return true
+	}
+	trimmed := strings.TrimSpace(**p)
+	if !validText(trimmed, max) {
+		return false
+	}
+	*p = &trimmed
+	return true
+}
+
+func parseSentAt(c *gin.Context, raw string) (time.Time, bool) {
+	if raw == "" {
+		return time.Now().UTC(), true
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_sent_at"})
+		return time.Time{}, false
+	}
+	return parsed, true
 }
 
 func parsePagination(c *gin.Context) (cursor int64, limit int, ok bool) {
@@ -127,6 +173,7 @@ func writeStoreErr(c *gin.Context, err error) {
 	case errors.Is(err, store.ErrConflict):
 		c.JSON(http.StatusConflict, gin.H{"error": "conflict"})
 	default:
+		log.Printf("store error [%s %s]: %v", c.Request.Method, c.FullPath(), err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal_error"})
 	}
 }

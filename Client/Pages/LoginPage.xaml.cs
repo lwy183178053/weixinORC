@@ -4,7 +4,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.System;
-using Windows.UI;
 
 namespace Client.Pages
 {
@@ -63,18 +62,18 @@ namespace Client.Pages
 
         private async Task CheckBackendHealthAsync()
         {
-            HealthDot.Fill = new SolidColorBrush(Color.FromArgb(255, 217, 119, 6));
+            HealthDot.Fill = (Brush)Application.Current.Resources["WarningTextBrush"];
             HealthBadgeText.Text = "检测中...";
 
             var result = await AppServices.Backend.CheckHealthAsync();
             if (result.IsSuccess)
             {
-                HealthDot.Fill = new SolidColorBrush(Color.FromArgb(255, 23, 163, 74));
+                HealthDot.Fill = (Brush)Application.Current.Resources["SuccessTextBrush"];
                 HealthBadgeText.Text = "服务在线";
             }
             else
             {
-                HealthDot.Fill = new SolidColorBrush(Color.FromArgb(255, 220, 38, 38));
+                HealthDot.Fill = (Brush)Application.Current.Resources["DangerTextBrush"];
                 HealthBadgeText.Text = "服务未连接";
             }
         }

@@ -3,7 +3,6 @@ package api
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"weixinorc/server/internal/auth"
@@ -33,7 +32,7 @@ type createGroupMessageRequest struct {
 	SentAt     string `json:"sent_at"`
 }
 
-func (s *Server) listGroups(c *gin.Context) {
+func (s *server) listGroups(c *gin.Context) {
 	cursor, limit, ok := parsePagination(c)
 	if !ok {
 		return
@@ -47,7 +46,7 @@ func (s *Server) listGroups(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items, "next_cursor": next})
 }
 
-func (s *Server) createGroup(c *gin.Context) {
+func (s *server) createGroup(c *gin.Context) {
 	var req createGroupRequest
 	if !bindJSON(c, &req) {
 		return
@@ -82,10 +81,9 @@ func (s *Server) createGroup(c *gin.Context) {
 	c.JSON(http.StatusCreated, group)
 }
 
-func (s *Server) getGroup(c *gin.Context) {
-	id, ok := parseID(c.Param("id"))
+func (s *server) getGroup(c *gin.Context) {
+	id, ok := parsePathID(c, "id", "invalid_group_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_group_id"})
 		return
 	}
 	ownerID := auth.IdentityFromContext(c).EmployeeID
@@ -97,10 +95,9 @@ func (s *Server) getGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, group)
 }
 
-func (s *Server) updateGroup(c *gin.Context) {
-	id, ok := parseID(c.Param("id"))
+func (s *server) updateGroup(c *gin.Context) {
+	id, ok := parsePathID(c, "id", "invalid_group_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_group_id"})
 		return
 	}
 	var req patchGroupRequest
@@ -111,12 +108,19 @@ func (s *Server) updateGroup(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "empty_patch"})
 		return
 	}
-	if (req.GroupName != nil && !validText(*req.GroupName, 128)) ||
-		(req.GroupKey != nil && !validText(*req.GroupKey, 128)) ||
+	if !trimAndCheck(&req.GroupName, 128) || !trimAndCheck(&req.GroupKey, 128) ||
 		(req.MembersText != nil && !validText(*req.MembersText, 4000)) ||
 		(req.Note != nil && !validText(*req.Note, 2000)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "field_too_long"})
 		return
+	}
+	if req.GroupName != nil && *req.GroupName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "group_name_required"})
+		return
+	}
+	if req.MemberCount != nil && *req.MemberCount < 0 {
+		zero := 0
+		req.MemberCount = &zero
 	}
 
 	ownerID := auth.IdentityFromContext(c).EmployeeID
@@ -134,10 +138,9 @@ func (s *Server) updateGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, group)
 }
 
-func (s *Server) deleteGroup(c *gin.Context) {
-	id, ok := parseID(c.Param("id"))
+func (s *server) deleteGroup(c *gin.Context) {
+	id, ok := parsePathID(c, "id", "invalid_group_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_group_id"})
 		return
 	}
 	ownerID := auth.IdentityFromContext(c).EmployeeID
@@ -148,10 +151,9 @@ func (s *Server) deleteGroup(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func (s *Server) listGroupMessages(c *gin.Context) {
-	groupID, ok := parseID(c.Param("id"))
+func (s *server) listGroupMessages(c *gin.Context) {
+	groupID, ok := parsePathID(c, "id", "invalid_group_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_group_id"})
 		return
 	}
 	cursor, limit, ok := parsePagination(c)
@@ -167,10 +169,9 @@ func (s *Server) listGroupMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items, "next_cursor": next})
 }
 
-func (s *Server) createGroupMessage(c *gin.Context) {
-	groupID, ok := parseID(c.Param("id"))
+func (s *server) createGroupMessage(c *gin.Context) {
+	groupID, ok := parsePathID(c, "id", "invalid_group_id")
 	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_group_id"})
 		return
 	}
 	var req createGroupMessageRequest
@@ -186,14 +187,9 @@ func (s *Server) createGroupMessage(c *gin.Context) {
 		return
 	}
 
-	sentAt := time.Now().UTC()
-	if req.SentAt != "" {
-		parsed, err := time.Parse(time.RFC3339, req.SentAt)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_sent_at"})
-			return
-		}
-		sentAt = parsed
+	sentAt, ok := parseSentAt(c, req.SentAt)
+	if !ok {
+		return
 	}
 
 	ownerID := auth.IdentityFromContext(c).EmployeeID

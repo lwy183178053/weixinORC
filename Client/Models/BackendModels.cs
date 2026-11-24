@@ -39,12 +39,6 @@ namespace Client.Models
         public EmployeeIdentity Employee { get; set; } = new();
     }
 
-    public sealed class MeResponse
-    {
-        [JsonPropertyName("employee")]
-        public EmployeeIdentity Employee { get; set; } = new();
-    }
-
     public sealed class ApiErrorResponse
     {
         [JsonPropertyName("error")]
@@ -408,111 +402,6 @@ namespace Client.Models
         public string Content { get; set; } = string.Empty;
     }
 
-    public sealed class WeChatAccountDto
-    {
-        [JsonPropertyName("id")]
-        public long Id { get; set; }
-
-        [JsonPropertyName("account_type")]
-        public string AccountType { get; set; } = "personal";
-
-        [JsonPropertyName("wechat_id")]
-        public string WechatId { get; set; } = string.Empty;
-
-        [JsonPropertyName("nickname")]
-        public string Nickname { get; set; } = string.Empty;
-
-        [JsonPropertyName("status")]
-        public string Status { get; set; } = "offline";
-
-        [JsonPropertyName("last_heartbeat_at")]
-        public string LastHeartbeatAt { get; set; } = string.Empty;
-    }
-
-    public sealed class WeChatAccountListResponse
-    {
-        [JsonPropertyName("items")]
-        public List<WeChatAccountDto> Items { get; set; } = [];
-    }
-
-    public sealed class UpsertWeChatAccountRequest
-    {
-        [JsonPropertyName("account_type")]
-        public string AccountType { get; set; } = "personal";
-
-        [JsonPropertyName("wechat_id")]
-        public string WechatId { get; set; } = string.Empty;
-
-        [JsonPropertyName("nickname")]
-        public string Nickname { get; set; } = string.Empty;
-
-        [JsonPropertyName("status")]
-        public string Status { get; set; } = "online";
-    }
-
-    public sealed class GroupMemberDto
-    {
-        [JsonPropertyName("id")]
-        public long Id { get; set; }
-
-        [JsonPropertyName("group_id")]
-        public long GroupId { get; set; }
-
-        [JsonPropertyName("local_key")]
-        public string LocalKey { get; set; } = string.Empty;
-
-        [JsonPropertyName("native_id")]
-        public string NativeId { get; set; } = string.Empty;
-
-        [JsonPropertyName("group_nickname")]
-        public string GroupNickname { get; set; } = string.Empty;
-
-        [JsonPropertyName("wechat_name")]
-        public string WechatName { get; set; } = string.Empty;
-
-        [JsonPropertyName("wechat_account")]
-        public string WechatAccount { get; set; } = string.Empty;
-
-        [JsonPropertyName("role")]
-        public string Role { get; set; } = string.Empty;
-
-        [JsonPropertyName("note")]
-        public string Note { get; set; } = string.Empty;
-    }
-
-    public sealed class GroupMemberListResponse
-    {
-        [JsonPropertyName("items")]
-        public List<GroupMemberDto> Items { get; set; } = [];
-
-        [JsonPropertyName("next_cursor")]
-        public long NextCursor { get; set; }
-    }
-
-    public sealed class CreateGroupMemberRequest
-    {
-        [JsonPropertyName("local_key")]
-        public string LocalKey { get; set; } = string.Empty;
-
-        [JsonPropertyName("native_id")]
-        public string NativeId { get; set; } = string.Empty;
-
-        [JsonPropertyName("group_nickname")]
-        public string GroupNickname { get; set; } = string.Empty;
-
-        [JsonPropertyName("wechat_name")]
-        public string WechatName { get; set; } = string.Empty;
-
-        [JsonPropertyName("wechat_account")]
-        public string WechatAccount { get; set; } = string.Empty;
-
-        [JsonPropertyName("role")]
-        public string Role { get; set; } = string.Empty;
-
-        [JsonPropertyName("note")]
-        public string Note { get; set; } = string.Empty;
-    }
-
     public sealed class AuditLogDto
     {
         [JsonPropertyName("id")]
@@ -532,15 +421,6 @@ namespace Client.Models
 
         [JsonPropertyName("created_at")]
         public string CreatedAt { get; set; } = string.Empty;
-    }
-
-    public sealed class AuditLogListResponse
-    {
-        [JsonPropertyName("items")]
-        public List<AuditLogDto> Items { get; set; } = [];
-
-        [JsonPropertyName("next_cursor")]
-        public long NextCursor { get; set; }
     }
 
     public sealed class CreateAuditLogRequest

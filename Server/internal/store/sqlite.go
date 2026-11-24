@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,11 +169,13 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("create avatars directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", absPath)
+	dsn := buildSQLiteDSN(absPath)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	if _, err := db.Exec(schemaSQL); err != nil {
 		db.Close()
@@ -185,6 +188,19 @@ func Open(path string) (*Store, error) {
 	}
 
 	return &Store{db: db, dataDir: dataDir}, nil
+}
+
+func buildSQLiteDSN(absPath string) string {
+	slashPath := filepath.ToSlash(absPath)
+	if !strings.HasPrefix(slashPath, "/") {
+		slashPath = "/" + slashPath
+	}
+	u := url.URL{
+		Scheme:   "file",
+		Path:     slashPath,
+		RawQuery: "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)",
+	}
+	return u.String()
 }
 
 // AvatarDir returns the local directory where uploaded customer avatar files are stored.
@@ -204,14 +220,84 @@ func migrateCustomerColumns(db *sql.DB) error {
 			return err
 		}
 	}
-	// Replace legacy unique index with non-unique index so explicit user-confirmed duplicates are allowed.
-	_, _ = db.Exec(`DROP INDEX IF EXISTS customers_owner_wechat_account`)
-	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS customers_owner_wechat_account_idx ON customers(owner_id, wechat_account) WHERE wechat_account <> ''`)
+	// Replace legacy unique index so explicit user-confirmed duplicates are allowed.
+	if _, err := db.Exec(`DROP INDEX IF EXISTS customers_owner_wechat_account`); err != nil {
+		return err
+	}
 	return nil
 }
 
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func (s *Store) deleteOne(ctx context.Context, query string, args ...any) error {
+	res, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func listPage[T any](
+	ctx context.Context,
+	db *sql.DB,
+	baseQuery string,
+	args []any,
+	idCol string,
+	cursor int64,
+	limit int,
+	scan func(rowScanner) (T, error),
+	getID func(T) int64,
+) ([]T, int64, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := baseQuery
+	qArgs := make([]any, 0, len(args)+2)
+	qArgs = append(qArgs, args...)
+	if cursor > 0 {
+		query += ` AND ` + idCol + ` < ?`
+		qArgs = append(qArgs, cursor)
+	}
+	query += ` ORDER BY ` + idCol + ` DESC LIMIT ?`
+	qArgs = append(qArgs, limit+1)
+
+	rows, err := db.QueryContext(ctx, query, qArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	items := make([]T, 0, limit)
+	for rows.Next() {
+		item, err := scan(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	var nextCursor int64
+	if len(items) > limit {
+		items = items[:limit]
+		nextCursor = getID(items[len(items)-1])
+	}
+	return items, nextCursor, nil
 }
 
 func (s *Store) customerExists(ctx context.Context, ownerID string, customerID int64) (bool, error) {
@@ -240,6 +326,6 @@ func (s *Store) groupExists(ctx context.Context, ownerID string, groupID int64) 
 	return err == nil, err
 }
 
-func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique constraint failed")
+func isForeignKeyViolation(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "foreign key constraint failed")
 }

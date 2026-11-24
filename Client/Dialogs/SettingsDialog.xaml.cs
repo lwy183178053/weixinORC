@@ -138,7 +138,7 @@ namespace Client.Dialogs
             string url = BackendUrlBox.Text.Trim();
             if (string.IsNullOrEmpty(url))
             {
-                ServerPingText.Text = "请输入有效的服务端地址（例如 http://127.0.0.1:28765）。";
+                SetServerPingStatus("请输入有效的服务端地址（例如 http://127.0.0.1:28765）。", "DangerBgBrush", "DangerTextBrush");
                 return;
             }
 
@@ -148,9 +148,7 @@ namespace Client.Dialogs
             }
             catch (Exception ex)
             {
-                ServerPingText.Text = $"✕ {ex.Message}";
-                ServerPingBanner.Background = (Brush)Application.Current.Resources["DangerBgBrush"];
-                ServerPingText.Foreground = (Brush)Application.Current.Resources["DangerTextBrush"];
+                SetServerPingStatus($"✕ {ex.Message}", "DangerBgBrush", "DangerTextBrush");
                 return;
             }
 
@@ -158,7 +156,7 @@ namespace Client.Dialogs
             AppServices.Settings.Save();
 
             TestBackendBtn.IsEnabled = false;
-            ServerPingText.Text = "正在检测后端服务连通性...";
+            SetServerPingStatus("正在检测后端服务连通性...", "AppInputBgBrush", "TextSecondaryBrush");
             var sw = Stopwatch.StartNew();
             try
             {
@@ -166,27 +164,31 @@ namespace Client.Dialogs
                 sw.Stop();
                 if (res.IsSuccess)
                 {
-                    ServerPingText.Text = $"✓ 服务连接正常（{AppServices.Backend.BaseUrl}，耗时 {sw.ElapsedMilliseconds} ms）";
-                    ServerPingBanner.Background = (Brush)Application.Current.Resources["SuccessBgBrush"];
-                    ServerPingText.Foreground = (Brush)Application.Current.Resources["SuccessTextBrush"];
+                    SetServerPingStatus(
+                        $"✓ 服务连接正常（{AppServices.Backend.BaseUrl}，耗时 {sw.ElapsedMilliseconds} ms）",
+                        "SuccessBgBrush",
+                        "SuccessTextBrush");
                 }
                 else
                 {
-                    ServerPingText.Text = $"✕ 连接失败：{res.ErrorMessage}";
-                    ServerPingBanner.Background = (Brush)Application.Current.Resources["DangerBgBrush"];
-                    ServerPingText.Foreground = (Brush)Application.Current.Resources["DangerTextBrush"];
+                    SetServerPingStatus($"✕ 连接失败：{res.ErrorMessage}", "DangerBgBrush", "DangerTextBrush");
                 }
             }
             catch (Exception ex)
             {
-                ServerPingText.Text = $"✕ 连接异常：{ex.Message}";
-                ServerPingBanner.Background = (Brush)Application.Current.Resources["DangerBgBrush"];
-                ServerPingText.Foreground = (Brush)Application.Current.Resources["DangerTextBrush"];
+                SetServerPingStatus($"✕ 连接异常：{ex.Message}", "DangerBgBrush", "DangerTextBrush");
             }
             finally
             {
                 TestBackendBtn.IsEnabled = true;
             }
+        }
+
+        private void SetServerPingStatus(string message, string bgKey, string fgKey)
+        {
+            ServerPingText.Text = message;
+            ServerPingBanner.Background = (Brush)Application.Current.Resources[bgKey];
+            ServerPingText.Foreground = (Brush)Application.Current.Resources[fgKey];
         }
 
         private void OpenLogsSubView_Click(object sender, RoutedEventArgs e)
@@ -219,6 +221,7 @@ namespace Client.Dialogs
         {
             DispatcherQueue.TryEnqueue(() =>
             {
+                if (!_logsSubscribed) return;
                 if (MatchesLogFilter(entry))
                 {
                     var row = new CompactLogRow(entry);
@@ -233,6 +236,7 @@ namespace Client.Dialogs
         {
             DispatcherQueue.TryEnqueue(() =>
             {
+                if (!_logsSubscribed) return;
                 _visibleLogs.Clear();
                 UpdateLogSummary();
             });
@@ -301,29 +305,44 @@ namespace Client.Dialogs
 
         private async void RunSelfCheck_Click(object sender, RoutedEventArgs e)
         {
-            AppServices.Logs.Info("SYS", "开始执行运行环境自检...");
-            if (AppServices.Ocr.RapidEngine.IsAvailable)
+            try
             {
-                AppServices.Logs.Success("OCR", "本地识别组件检查通过，状态正常。");
+                AppServices.Logs.Info("SYS", "开始执行运行环境自检...");
+                if (AppServices.Ocr.RapidEngine.IsAvailable)
+                {
+                    AppServices.Logs.Success("OCR", "本地识别组件检查通过，状态正常。");
+                }
+                else
+                {
+                    AppServices.Logs.Error("OCR", AppServices.Ocr.RapidEngine.AvailabilityNote);
+                }
+                _ = await AppServices.Backend.CheckHealthAsync();
             }
-            else
+            catch (Exception ex)
             {
-                AppServices.Logs.Error("OCR", AppServices.Ocr.RapidEngine.AvailabilityNote);
+                AppServices.Logs.Error("SYS", $"自检异常：{ex.Message}");
             }
-            _ = await AppServices.Backend.CheckHealthAsync();
         }
 
         private void CopyLogs_Click(object sender, RoutedEventArgs e)
         {
             if (_visibleLogs.Count == 0) return;
 
-            var text = string.Join(Environment.NewLine, _visibleLogs.Select(x => x.Entry.FormattedLine));
-            var pkg = new DataPackage();
-            pkg.SetText(text);
-            Clipboard.SetContent(pkg);
+            try
+            {
+                var text = string.Join(Environment.NewLine, _visibleLogs.Select(x => x.Entry.FormattedLine));
+                var pkg = new DataPackage();
+                pkg.SetText(text);
+                Clipboard.SetContent(pkg);
 
-            LogCopyFeedbackText.Text = $"已复制 {_visibleLogs.Count} 条日志";
-            LogCopyFeedbackText.Visibility = Visibility.Visible;
+                LogCopyFeedbackText.Text = $"已复制 {_visibleLogs.Count} 条日志";
+                LogCopyFeedbackText.Visibility = Visibility.Visible;
+            }
+            catch (Exception ex)
+            {
+                LogCopyFeedbackText.Text = $"复制失败：{ex.Message}";
+                LogCopyFeedbackText.Visibility = Visibility.Visible;
+            }
         }
 
         private void ClearLogs_Click(object sender, RoutedEventArgs e)

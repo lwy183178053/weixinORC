@@ -4,9 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics.Imaging;
-using Windows.UI;
 
 namespace Client.Dialogs
 {
@@ -23,6 +21,7 @@ namespace Client.Dialogs
         private readonly List<EditableRow> _rows = [];
         private SoftwareBitmap? _bitmap;
         private bool _isBusy;
+        private bool _isClosed;
 
         public List<ParsedChatMessage> ConfirmedMessages { get; private set; } = [];
 
@@ -32,32 +31,24 @@ namespace Client.Dialogs
             RequestedTheme = AppServices.Settings.CurrentElementTheme;
             Closed += (_, _) =>
             {
-                _bitmap?.Dispose();
-                _bitmap = null;
+                _isClosed = true;
+                if (!_isBusy)
+                {
+                    _bitmap?.Dispose();
+                    _bitmap = null;
+                }
             };
         }
 
-        public async Task TriggerClipboardImportAsync() => await ImportFromClipboardAsync();
-
         private async void PasteAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
         {
-            var data = Clipboard.GetContent();
-            if (data is null) return;
-            bool hasImage = data.Contains(StandardDataFormats.Bitmap);
-            if (!hasImage && data.Contains(StandardDataFormats.StorageItems))
+            if (OcrService.HasClipboardBitmapFast())
             {
-                try
-                {
-                    var items = await data.GetStorageItemsAsync();
-                    hasImage = items.Any(i =>
-                        i.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
-                        i.Name.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase));
-                }
-                catch { }
+                args.Handled = true;
+                await ImportFromClipboardAsync();
+                return;
             }
-            if (!hasImage) return;
+            if (!await OcrService.HasClipboardImageAsync()) return;
 
             args.Handled = true;
             await ImportFromClipboardAsync();
@@ -129,22 +120,32 @@ namespace Client.Dialogs
                 EmptyPreviewHint.Visibility = Visibility.Collapsed;
 
                 var ocr = await AppServices.Ocr.RapidEngine.RecognizeAsync(bmp);
+                if (_isClosed) return;
                 var parsed = await Task.Run(() => WeChatChatScreenshotParser.Parse(bmp, ocr));
+                if (_isClosed) return;
 
                 RenderParsedRows(parsed);
                 ShowStatus($"识别完成（{ocr.ElapsedMilliseconds} ms）：自动解析出 {parsed.Count} 条消息（绿色气泡已标为「我方」，左侧气泡已标为「对方」）。");
             }
             catch (Exception ex)
             {
-                ShowStatus($"识别失败：{ex.Message}", isError: true);
+                if (!_isClosed) ShowStatus($"识别失败：{ex.Message}", isError: true);
             }
             finally
             {
                 _isBusy = false;
-                OcrSpinner.IsActive = false;
-                OcrSpinner.Visibility = Visibility.Collapsed;
-                PasteButton.IsEnabled = true;
-                UploadButton.IsEnabled = true;
+                if (_isClosed)
+                {
+                    _bitmap?.Dispose();
+                    _bitmap = null;
+                }
+                else
+                {
+                    OcrSpinner.IsActive = false;
+                    OcrSpinner.Visibility = Visibility.Collapsed;
+                    PasteButton.IsEnabled = true;
+                    UploadButton.IsEnabled = true;
+                }
             }
         }
 
@@ -244,22 +245,15 @@ namespace Client.Dialogs
 
         private static void ApplyRowVisual(EditableRow row)
         {
+            var res = Application.Current.Resources;
             bool isOut = row.Direction == "outgoing";
             row.DirectionButton.Content = isOut ? "我方 (绿)" : "对方 (白)";
-            row.DirectionButton.Background = new SolidColorBrush(isOut
-                ? Color.FromArgb(255, 149, 236, 105)
-                : Color.FromArgb(255, 255, 255, 255));
-            row.DirectionButton.Foreground = new SolidColorBrush(Color.FromArgb(255, 31, 35, 41));
-            row.DirectionButton.BorderBrush = new SolidColorBrush(isOut
-                ? Color.FromArgb(255, 118, 214, 72)
-                : Color.FromArgb(255, 216, 220, 230));
+            row.DirectionButton.Background = (Brush)res[isOut ? "ChatOutgoingBgBrush" : "ChatIncomingBgBrush"];
+            row.DirectionButton.Foreground = (Brush)res[isOut ? "ChatOutgoingTextBrush" : "TextPrimaryBrush"];
+            row.DirectionButton.BorderBrush = (Brush)res[isOut ? "SuccessTextBrush" : "ChatIncomingBorderBrush"];
 
-            row.Container.Background = new SolidColorBrush(isOut
-                ? Color.FromArgb(255, 245, 253, 240)
-                : Color.FromArgb(255, 250, 251, 253));
-            row.Container.BorderBrush = new SolidColorBrush(isOut
-                ? Color.FromArgb(255, 204, 240, 184)
-                : Color.FromArgb(255, 230, 232, 240));
+            row.Container.Background = (Brush)res[isOut ? "SuccessBgBrush" : "AppSurfaceAltBrush"];
+            row.Container.BorderBrush = (Brush)res[isOut ? "BrandSoftBorderBrush" : "AppBorderBrush"];
         }
 
         private void UpdateCountLabel()

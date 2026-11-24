@@ -9,6 +9,7 @@
     BorderBrush="{StaticResource ContentDialogBorderBrush}"
     BorderThickness="1"
     CornerRadius="12"
+    KeyboardAcceleratorPlacementMode="Hidden"
     mc:Ignorable="d">
 
     <ContentDialog.KeyboardAccelerators>

@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"weixinorc/server/internal/api"
@@ -48,7 +51,7 @@ func loadConfig() (appConfig, error) {
 		cfg.sessionTTL = time.Duration(hours) * time.Hour
 	}
 
-	if cfg.mockAuth {
+	if cfg.authHTTPURL == "" && cfg.mockAuth {
 		if cfg.mockAccount == "" || cfg.mockPassword == "" {
 			return appConfig{}, fmt.Errorf("MOCK_ACCOUNT and MOCK_PASSWORD are required when MOCK_AUTH is enabled")
 		}
@@ -107,6 +110,16 @@ func main() {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
 
 	log.Printf("server listening on %s", cfg.addr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

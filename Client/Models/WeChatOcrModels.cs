@@ -10,7 +10,6 @@ namespace Client.Models
 
     public enum WeChatLoginState
     {
-        NotRunning,
         Unknown,
         LoginPage,
         LoggedIn,
@@ -61,7 +60,6 @@ namespace Client.Models
             WeChatLoginState.LoggedIn => "主界面（已登录）",
             WeChatLoginState.Disconnected => "掉线/已退出",
             WeChatLoginState.HiddenOrMinimized => "已隐藏/最小化",
-            WeChatLoginState.NotRunning => "未运行",
             _ => "待 OCR 识别"
         };
 
@@ -102,7 +100,6 @@ namespace Client.Models
         public string CandidateWechatRemark { get; init; } = string.Empty;
         public string CandidateWechatName { get; init; } = string.Empty;
         public string CandidateWechatAccount { get; init; } = string.Empty;
-        public string CandidateGender { get; init; } = string.Empty;
         public string CandidateTags { get; init; } = string.Empty;
         public string CandidateRegion { get; init; } = string.Empty;
         public string CandidatePhone { get; init; } = string.Empty;

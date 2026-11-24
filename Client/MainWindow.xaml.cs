@@ -11,12 +11,15 @@ namespace Client
 {
     public sealed partial class MainWindow : Window
     {
+        private const int LoginLogicalWidth = 740;
+        private const int LoginLogicalHeight = 450;
         private const int DefaultLogicalWidth = 1280;
         private const int DefaultLogicalHeight = 720;
         private const int MinLogicalWidth = 1040;
         private const int MinLogicalHeight = 640;
 
         private uint _lastAppliedDpi;
+        private bool _isLoginMode = true;
 
         public static MainWindow? Instance { get; private set; }
 
@@ -30,11 +33,9 @@ namespace Client
 
             ConfigureTitleBar();
             AppServices.Settings.ApplyTheme(AppServices.Settings.IsDarkMode, save: false);
-            ApplyMinimumWindowSize();
-            ResizeAndCenter(DefaultLogicalWidth, DefaultLogicalHeight);
             AppWindow.Changed += AppWindow_Changed;
 
-            AppServices.Logs.Info("SYS", $"客户端启动完成，默认窗口尺寸 {DefaultLogicalWidth}x{DefaultLogicalHeight}，最小尺寸 {MinLogicalWidth}x{MinLogicalHeight}。");
+            AppServices.Logs.Info("SYS", $"客户端启动完成，登录窗口 {LoginLogicalWidth}x{LoginLogicalHeight}，工作台默认 {DefaultLogicalWidth}x{DefaultLogicalHeight}。");
             ShowLoginView();
         }
 
@@ -45,12 +46,12 @@ namespace Client
                 uint dpi = Win32WindowHelper.GetDpiForWindow(AppServices.MainWindowHandle);
                 if (dpi > 0 && dpi != _lastAppliedDpi)
                 {
-                    ApplyMinimumWindowSize();
+                    ApplyWindowConstraints();
                 }
             }
         }
 
-        private void ApplyMinimumWindowSize()
+        private void ApplyWindowConstraints()
         {
             if (AppWindow.Presenter is not OverlappedPresenter presenter)
             {
@@ -59,8 +60,24 @@ namespace Client
 
             uint dpi = Win32WindowHelper.GetDpiForWindow(AppServices.MainWindowHandle);
             _lastAppliedDpi = dpi;
-            double scale = dpi > 0 ? dpi / 96.0 : 1.0;
 
+            if (_isLoginMode)
+            {
+                if (presenter.State == OverlappedPresenterState.Maximized)
+                {
+                    presenter.Restore();
+                }
+                presenter.PreferredMinimumWidth = null;
+                presenter.PreferredMinimumHeight = null;
+                presenter.IsMaximizable = false;
+                presenter.IsResizable = false;
+                return;
+            }
+
+            presenter.IsResizable = true;
+            presenter.IsMaximizable = true;
+
+            double scale = dpi > 0 ? dpi / 96.0 : 1.0;
             int minW = (int)Math.Round(MinLogicalWidth * scale);
             int minH = (int)Math.Round(MinLogicalHeight * scale);
 
@@ -134,12 +151,50 @@ namespace Client
 
         public void ShowLoginView()
         {
+            _isLoginMode = true;
+            if (AppWindow.Presenter is OverlappedPresenter presenter)
+            {
+                if (presenter.State == OverlappedPresenterState.Maximized)
+                {
+                    presenter.Restore();
+                }
+
+                presenter.PreferredMinimumWidth = null;
+                presenter.PreferredMinimumHeight = null;
+                presenter.IsResizable = true;
+            }
+
+            ResizeAndCenter(LoginLogicalWidth, LoginLogicalHeight);
+            ApplyWindowConstraints();
             RootFrame.Navigate(typeof(LoginPage), null, new EntranceNavigationTransitionInfo());
         }
 
         public void EnterWorkbench()
         {
+            _isLoginMode = false;
+            if (AppWindow.Presenter is OverlappedPresenter presenter)
+            {
+                presenter.PreferredMinimumWidth = null;
+                presenter.PreferredMinimumHeight = null;
+                presenter.IsResizable = true;
+                presenter.IsMaximizable = true;
+            }
+
+            ResizeAndCenter(DefaultLogicalWidth, DefaultLogicalHeight);
             RootFrame.Navigate(typeof(WorkbenchPage), null, new DrillInNavigationTransitionInfo());
+
+            // Apply minimum size constraints on the next UI tick after the 1280x720 resize settles,
+            // avoiding OverlappedPresenter snapping the window to PreferredMinimumWidth (1040) on transition.
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_isLoginMode)
+                {
+                    return;
+                }
+
+                ResizeAndCenter(DefaultLogicalWidth, DefaultLogicalHeight);
+                ApplyWindowConstraints();
+            });
         }
 
         private void ResizeAndCenter(int logicalWidth, int logicalHeight)
@@ -154,13 +209,12 @@ namespace Client
             if (displayArea is not null)
             {
                 var work = displayArea.WorkArea;
-                width = Math.Min(width, Math.Max(640, work.Width - 40));
-                height = Math.Min(height, Math.Max(480, work.Height - 40));
+                width = Math.Min(width, Math.Max(540, work.Width - 40));
+                height = Math.Min(height, Math.Max(380, work.Height - 40));
 
-                AppWindow.Resize(new SizeInt32(width, height));
                 int x = work.X + Math.Max(0, (work.Width - width) / 2);
                 int y = work.Y + Math.Max(0, (work.Height - height) / 2);
-                AppWindow.Move(new PointInt32(x, y));
+                AppWindow.MoveAndResize(new RectInt32(x, y, width, height));
             }
             else
             {

@@ -7,260 +7,239 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Background="{StaticResource LoginBgBrush}">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="40" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+    <!-- Full-Bleed Compact Login Surface (Zero Wasted Outer Backdrop) -->
+    <Grid Background="{StaticResource AppSurfaceBrush}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="272" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-        <!-- Top Drag Bar + Subtle Theme Switch -->
-        <Grid Grid.Row="0" Padding="14,0,148,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
+        <!-- Left Minimal Brand Panel -->
+        <Grid Grid.Column="0">
+            <Grid.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Offset="0" Color="#4F46E5" />
+                    <GradientStop Offset="0.55" Color="#7C5CFC" />
+                    <GradientStop Offset="1" Color="#9E7BFF" />
+                </LinearGradientBrush>
+            </Grid.Background>
 
+            <!-- Subtle Ambient Circles -->
+            <Canvas IsHitTestVisible="False">
+                <Ellipse Canvas.Left="-52" Canvas.Top="-48" Width="180" Height="180" Fill="#14FFFFFF" />
+                <Ellipse Canvas.Left="150" Canvas.Top="310" Width="190" Height="190" Fill="#12FFFFFF" />
+            </Canvas>
+
+            <!-- Subtle Theme Toggle in Top-Left -->
             <Button
                 x:Name="LoginThemeButton"
-                Grid.Column="0"
+                Margin="12,10,0,0"
                 Height="28"
                 Padding="8,0"
-                VerticalAlignment="Center"
-                Background="Transparent"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="#1EFFFFFF"
                 BorderThickness="0"
                 Click="LoginThemeButton_Click"
-                CornerRadius="6"
+                CornerRadius="7"
                 ToolTipService.ToolTip="切换明亮 / 黑夜模式">
                 <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
-                    <FontIcon x:Name="LoginThemeIcon" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Glyph="&#xE708;" />
-                    <TextBlock x:Name="LoginThemeLabel" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="黑夜" />
+                    <FontIcon x:Name="LoginThemeIcon" FontSize="12" Foreground="#FFFFFF" Glyph="&#xE708;" />
+                    <TextBlock x:Name="LoginThemeLabel" FontSize="11" Foreground="#FFFFFF" Text="黑夜" />
                 </StackPanel>
             </Button>
 
-            <Grid x:Name="LoginTitleDragBar" Grid.Column="1" Background="Transparent" />
-        </Grid>
-
-        <!-- Clean Minimalist Split Login Card -->
-        <Border
-            Grid.Row="1"
-            Width="780"
-            Height="450"
-            Margin="0,-20,0,0"
-            HorizontalAlignment="Center"
-            VerticalAlignment="Center"
-            Background="{StaticResource AppSurfaceBrush}"
-            BorderBrush="{StaticResource AppBorderBrush}"
-            BorderThickness="1"
-            CornerRadius="16">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="296" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-
-                <!-- Left Minimal Brand Panel -->
-                <Border Grid.Column="0" CornerRadius="16,0,0,16">
-                    <Border.Background>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                            <GradientStop Offset="0" Color="#4F46E5" />
-                            <GradientStop Offset="0.55" Color="#7C5CFC" />
-                            <GradientStop Offset="1" Color="#9E7BFF" />
-                        </LinearGradientBrush>
-                    </Border.Background>
-
-                    <Grid>
-                        <!-- Subtle Ambient Circles -->
-                        <Canvas IsHitTestVisible="False">
-                            <Ellipse Canvas.Left="-48" Canvas.Top="-44" Width="180" Height="180" Fill="#14FFFFFF" />
-                            <Ellipse Canvas.Left="170" Canvas.Top="310" Width="190" Height="190" Fill="#12FFFFFF" />
-                        </Canvas>
-
-                        <StackPanel
-                            Padding="36"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Spacing="18">
-                            <Border
-                                Width="56"
-                                Height="56"
-                                HorizontalAlignment="Center"
-                                Background="#28FFFFFF"
-                                BorderBrush="#48FFFFFF"
-                                BorderThickness="1"
-                                CornerRadius="15">
-                                <TextBlock
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    FontSize="26"
-                                    FontWeight="Bold"
-                                    Foreground="#FFFFFF"
-                                    Text="智" />
-                            </Border>
-
-                            <StackPanel HorizontalAlignment="Center" Spacing="6">
-                                <TextBlock
-                                    HorizontalAlignment="Center"
-                                    FontSize="22"
-                                    FontWeight="Bold"
-                                    Foreground="#FFFFFF"
-                                    Text="智美工作台" />
-                                <TextBlock
-                                    HorizontalAlignment="Center"
-                                    FontSize="12.5"
-                                    Foreground="#E4DEFF"
-                                    Text="客户档案 · 智能识别" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Grid>
+            <StackPanel
+                Padding="30"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="16">
+                <Border
+                    Width="64"
+                    Height="64"
+                    Padding="2"
+                    HorizontalAlignment="Center"
+                    Background="#32FFFFFF"
+                    BorderBrush="#5CFFFFFF"
+                    BorderThickness="1"
+                    CornerRadius="17">
+                    <Image
+                        Source="ms-appx:///Assets/AppIcon.png"
+                        Stretch="Uniform" />
                 </Border>
 
-                <!-- Right Clean Login Form -->
-                <Grid Grid.Column="1" Padding="42,36">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
+                <StackPanel HorizontalAlignment="Center" Spacing="5">
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        FontSize="21"
+                        FontWeight="Bold"
+                        Foreground="#FFFFFF"
+                        Text="智美工作台" />
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        FontSize="12"
+                        Foreground="#E4DEFF"
+                        Text="客户档案 · 智能识别" />
+                </StackPanel>
+            </StackPanel>
+        </Grid>
 
-                    <!-- Aligned Title + Live Status Pill -->
-                    <Grid Grid.Row="0" Margin="0,0,0,18">
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            FontSize="21"
-                            FontWeight="Bold"
-                            Foreground="{StaticResource TextPrimaryBrush}"
-                            Text="员工登录" />
+        <!-- Right Clean Login Form -->
+        <Grid Grid.Column="1" Background="{StaticResource AppSurfaceBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="36" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
-                        <Button
-                            x:Name="BackendStatusButton"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Center"
-                            Padding="10,5"
-                            Background="{StaticResource AppInputBgBrush}"
-                            BorderBrush="{StaticResource AppBorderBrush}"
-                            BorderThickness="1"
-                            Click="BackendStatusButton_Click"
-                            CornerRadius="14"
-                            ToolTipService.ToolTip="点击重新检测后端服务状态">
-                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <Ellipse x:Name="HealthDot" Width="7.5" Height="7.5" Fill="#D97706" />
-                                <TextBlock
-                                    x:Name="HealthBadgeText"
-                                    FontSize="11.5"
-                                    Foreground="{StaticResource TextSecondaryBrush}"
-                                    Text="检测中..." />
-                            </StackPanel>
-                        </Button>
-                    </Grid>
+            <!-- Draggable Window Caption Strip -->
+            <Grid x:Name="LoginTitleDragBar" Grid.Row="0" Margin="0,0,96,0" Background="Transparent" />
 
-                    <!-- Centered Form Stack -->
-                    <StackPanel Grid.Row="1" VerticalAlignment="Center" Spacing="15">
-                        <Border
-                            x:Name="ErrorBanner"
-                            Padding="11,8"
-                            Background="{StaticResource DangerBgBrush}"
-                            BorderBrush="{StaticResource DangerBorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8"
-                            Visibility="Collapsed">
+            <!-- Main Form Container -->
+            <Grid Grid.Row="1" Padding="38,8,38,30">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Aligned Title + Live Status Pill -->
+                <Grid Grid.Row="0" Margin="0,0,0,18">
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="20"
+                        FontWeight="Bold"
+                        Foreground="{StaticResource TextPrimaryBrush}"
+                        Text="员工登录" />
+
+                    <Button
+                        x:Name="BackendStatusButton"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Padding="10,4"
+                        Background="{StaticResource AppInputBgBrush}"
+                        BorderBrush="{StaticResource AppBorderBrush}"
+                        BorderThickness="1"
+                        Click="BackendStatusButton_Click"
+                        CornerRadius="14"
+                        ToolTipService.ToolTip="点击重新检测后端服务状态">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <Ellipse x:Name="HealthDot" Width="7.5" Height="7.5" Fill="#D97706" />
                             <TextBlock
-                                x:Name="ErrorMessageText"
-                                FontSize="12"
-                                Foreground="{StaticResource DangerTextBrush}"
-                                TextWrapping="Wrap" />
-                        </Border>
-
-                        <StackPanel Spacing="6">
-                            <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="账号" />
-                            <TextBox
-                                x:Name="AccountBox"
-                                Height="40"
-                                KeyDown="Input_KeyDown"
-                                PlaceholderText="请输入员工账号"
-                                Style="{StaticResource SoftTextBoxStyle}" />
+                                x:Name="HealthBadgeText"
+                                FontSize="11.5"
+                                Foreground="{StaticResource TextSecondaryBrush}"
+                                Text="检测中..." />
                         </StackPanel>
-
-                        <StackPanel Spacing="6">
-                            <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="密码" />
-                            <PasswordBox
-                                x:Name="PasswordBox"
-                                Height="40"
-                                KeyDown="Input_KeyDown"
-                                PlaceholderText="请输入登录密码"
-                                Style="{StaticResource SoftPasswordBoxStyle}" />
-                        </StackPanel>
-
-                        <!-- Collapsible Server URL + Test Account Row -->
-                        <StackPanel Spacing="8">
-                            <Grid>
-                                <Button
-                                    HorizontalAlignment="Left"
-                                    VerticalAlignment="Center"
-                                    Padding="0"
-                                    Background="Transparent"
-                                    BorderThickness="0"
-                                    Click="ToggleServerConfigButton_Click"
-                                    Foreground="{StaticResource BrandPrimaryBrush}">
-                                    <TextBlock x:Name="ServerConfigToggleText" FontSize="12" Text="▸ 服务地址" />
-                                </Button>
-
-                                <Button
-                                    HorizontalAlignment="Right"
-                                    VerticalAlignment="Center"
-                                    Padding="0"
-                                    Background="Transparent"
-                                    BorderThickness="0"
-                                    Click="FillDemoButton_Click"
-                                    Foreground="{StaticResource TextMutedBrush}">
-                                    <TextBlock FontSize="12" Text="填入测试账号" />
-                                </Button>
-                            </Grid>
-
-                            <Grid x:Name="ServerConfigPanel" ColumnSpacing="8" Visibility="Collapsed">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBox
-                                    x:Name="ServerUrlBox"
-                                    Height="34"
-                                    Padding="10,5"
-                                    FontSize="12.5"
-                                    PlaceholderText="http://127.0.0.1:28765"
-                                    Style="{StaticResource SoftTextBoxStyle}"
-                                    Text="http://127.0.0.1:28765" />
-                                <Button
-                                    Grid.Column="1"
-                                    Height="34"
-                                    Padding="12,0"
-                                    Click="BackendStatusButton_Click"
-                                    Content="测连通"
-                                    FontSize="12"
-                                    Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                            </Grid>
-                        </StackPanel>
-
-                        <Button
-                            x:Name="LoginButton"
-                            Height="42"
-                            Margin="0,6,0,0"
-                            HorizontalAlignment="Stretch"
-                            Click="LoginButton_Click"
-                            CornerRadius="8"
-                            Style="{StaticResource PrimaryVioletButtonStyle}">
-                            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <ProgressRing
-                                    x:Name="LoginSpinner"
-                                    Width="15"
-                                    Height="15"
-                                    Foreground="#FFFFFF"
-                                    IsActive="False"
-                                    Visibility="Collapsed" />
-                                <TextBlock x:Name="LoginButtonText" FontSize="14" FontWeight="SemiBold" Text="登录" />
-                            </StackPanel>
-                        </Button>
-                    </StackPanel>
+                    </Button>
                 </Grid>
+
+                <!-- Vertically Centered Form Stack -->
+                <StackPanel Grid.Row="1" VerticalAlignment="Center" Spacing="14">
+                    <Border
+                        x:Name="ErrorBanner"
+                        Padding="11,8"
+                        Background="{StaticResource DangerBgBrush}"
+                        BorderBrush="{StaticResource DangerBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="ErrorMessageText"
+                            FontSize="12"
+                            Foreground="{StaticResource DangerTextBrush}"
+                            TextWrapping="Wrap" />
+                    </Border>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="账号" />
+                        <TextBox
+                            x:Name="AccountBox"
+                            Height="38"
+                            KeyDown="Input_KeyDown"
+                            PlaceholderText="请输入员工账号"
+                            Style="{StaticResource SoftTextBoxStyle}" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="5">
+                        <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="密码" />
+                        <PasswordBox
+                            x:Name="PasswordBox"
+                            Height="38"
+                            KeyDown="Input_KeyDown"
+                            PlaceholderText="请输入登录密码"
+                            Style="{StaticResource SoftPasswordBoxStyle}" />
+                    </StackPanel>
+
+                    <!-- Collapsible Server URL + Test Account Row -->
+                    <StackPanel Spacing="8">
+                        <Grid>
+                            <Button
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Click="ToggleServerConfigButton_Click"
+                                Foreground="{StaticResource BrandPrimaryBrush}">
+                                <TextBlock x:Name="ServerConfigToggleText" FontSize="12" Text="▸ 服务地址" />
+                            </Button>
+
+                            <Button
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Click="FillDemoButton_Click"
+                                Foreground="{StaticResource TextMutedBrush}">
+                                <TextBlock FontSize="12" Text="填入测试账号" />
+                            </Button>
+                        </Grid>
+
+                        <Grid x:Name="ServerConfigPanel" ColumnSpacing="8" Visibility="Collapsed">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox
+                                x:Name="ServerUrlBox"
+                                Height="34"
+                                Padding="10,5"
+                                FontSize="12.5"
+                                PlaceholderText="http://127.0.0.1:28765"
+                                Style="{StaticResource SoftTextBoxStyle}"
+                                Text="http://127.0.0.1:28765" />
+                            <Button
+                                Grid.Column="1"
+                                Height="34"
+                                Padding="12,0"
+                                Click="BackendStatusButton_Click"
+                                Content="测连通"
+                                FontSize="12"
+                                Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                        </Grid>
+                    </StackPanel>
+
+                    <Button
+                        x:Name="LoginButton"
+                        Height="40"
+                        Margin="0,4,0,0"
+                        HorizontalAlignment="Stretch"
+                        Click="LoginButton_Click"
+                        CornerRadius="8"
+                        Style="{StaticResource PrimaryVioletButtonStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <ProgressRing
+                                x:Name="LoginSpinner"
+                                Width="15"
+                                Height="15"
+                                Foreground="#FFFFFF"
+                                IsActive="False"
+                                Visibility="Collapsed" />
+                            <TextBlock x:Name="LoginButtonText" FontSize="14" FontWeight="SemiBold" Text="登录" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
             </Grid>
-        </Border>
+        </Grid>
     </Grid>
 </Page>

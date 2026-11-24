@@ -33,7 +33,7 @@ namespace Client.Services
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         }
 
-        public string BaseUrl { get; private set; } = "http://127.0.0.1:8080";
+        public string BaseUrl { get; private set; } = "http://127.0.0.1:28765";
         public string? AccessToken { get; private set; }
         public DateTimeOffset? TokenExpiresAt { get; private set; }
         public EmployeeIdentity? CurrentEmployee { get; private set; }

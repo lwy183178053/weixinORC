@@ -52,6 +52,9 @@ namespace Client.Models
         [JsonPropertyName("id")]
         public long Id { get; set; }
 
+        [JsonPropertyName("wechat_remark")]
+        public string WechatRemark { get; set; } = string.Empty;
+
         [JsonPropertyName("wechat_name")]
         public string WechatName { get; set; } = string.Empty;
 
@@ -88,19 +91,23 @@ namespace Client.Models
         [JsonPropertyName("updated_at")]
         public string UpdatedAt { get; set; } = string.Empty;
 
-        public string DisplayName => !string.IsNullOrWhiteSpace(WechatName)
-            ? WechatName
-            : !string.IsNullOrWhiteSpace(WechatAccount) ? WechatAccount : $"客户 #{Id}";
+        public string DisplayName => !string.IsNullOrWhiteSpace(WechatRemark)
+            ? WechatRemark
+            : !string.IsNullOrWhiteSpace(WechatName)
+                ? WechatName
+                : !string.IsNullOrWhiteSpace(WechatAccount) ? WechatAccount : $"客户 #{Id}";
 
         public string AvatarInitial => DisplayName.Length > 0 ? DisplayName[..1].ToUpperInvariant() : "客";
 
         public string PreviewLine => !string.IsNullOrWhiteSpace(LastMessage)
             ? LastMessage
             : !string.IsNullOrWhiteSpace(Note)
-                ? $"备注：{Note}"
-                : !string.IsNullOrWhiteSpace(WechatAccount)
-                    ? $"微信号：{WechatAccount}"
-                    : "点击查看详情与聊天记录";
+                ? $"跟进：{Note}"
+                : !string.IsNullOrWhiteSpace(WechatRemark) && !string.IsNullOrWhiteSpace(WechatName)
+                    ? $"昵称：{WechatName}"
+                    : !string.IsNullOrWhiteSpace(WechatAccount)
+                        ? $"微信号：{WechatAccount}"
+                        : "点击查看详情与聊天记录";
 
         public string TimeShort => FormatShortTime(string.IsNullOrWhiteSpace(LastMessageAt) ? UpdatedAt : LastMessageAt);
 
@@ -126,6 +133,9 @@ namespace Client.Models
 
     public sealed class CreateCustomerRequest
     {
+        [JsonPropertyName("wechat_remark")]
+        public string WechatRemark { get; set; } = string.Empty;
+
         [JsonPropertyName("wechat_name")]
         public string WechatName { get; set; } = string.Empty;
 

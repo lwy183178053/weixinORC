@@ -273,7 +273,6 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="56" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <Border Grid.Row="0" Padding="16,0" Background="#FFFFFF" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,0,1">
@@ -388,29 +387,6 @@
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
-
-                <!-- Bottom Action Bar -->
-                <Border x:Name="DetailFooterBar" Grid.Row="2" Padding="14,10" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,1,0,0" Visibility="Collapsed">
-                    <Grid>
-                        <Grid x:Name="FooterViewButtons" ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" Height="34" HorizontalAlignment="Stretch" Click="EditGroupButton_Click" Content="编辑群信息与备注" FontSize="12.5" Style="{StaticResource PrimaryVioletButtonStyle}" />
-                            <Button Grid.Column="1" Height="34" Padding="14,0" Click="DeleteGroupButton_Click" Content="删除群组" FontSize="12.5" Style="{StaticResource DangerOutlineButtonStyle}" />
-                        </Grid>
-
-                        <Grid x:Name="FooterEditButtons" ColumnSpacing="8" Visibility="Collapsed">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <Button x:Name="FooterSaveButton" Grid.Column="0" Height="34" HorizontalAlignment="Stretch" Click="SaveGroupButton_Click" Content="保存修改" FontSize="12.5" Style="{StaticResource PrimaryVioletButtonStyle}" />
-                            <Button Grid.Column="1" Height="34" Padding="16,0" Click="CancelEditButton_Click" Content="取消" FontSize="12.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                        </Grid>
-                    </Grid>
-                </Border>
             </Grid>
         </Border>
     </Grid>

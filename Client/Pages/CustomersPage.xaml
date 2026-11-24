@@ -279,7 +279,6 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="56" />
                     <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <!-- Top Profile Header + Edit/Save/Delete Controls -->
@@ -351,6 +350,24 @@
                                     <ColumnDefinition Width="64" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="12.5" Foreground="{StaticResource TextMutedBrush}" Text="微信备注" />
+                                <TextBlock x:Name="ViewRemarkText" Grid.Column="1" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" IsTextSelectionEnabled="True" Text="-" TextWrapping="Wrap" />
+                            </Grid>
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="12.5" Foreground="{StaticResource TextMutedBrush}" Text="微信昵称" />
+                                <TextBlock x:Name="ViewNicknameText" Grid.Column="1" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" IsTextSelectionEnabled="True" Text="-" TextWrapping="Wrap" />
+                            </Grid>
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" FontSize="12.5" Foreground="{StaticResource TextMutedBrush}" Text="电话" />
                                 <TextBlock x:Name="ViewPhoneText" Grid.Column="1" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" IsTextSelectionEnabled="True" Text="-" />
                             </Grid>
@@ -407,9 +424,16 @@
 
                         <!-- EDIT MODE: Full Editable Fields + Bottom Employee Notes Input -->
                         <StackPanel x:Name="ProfileEditModePanel" Spacing="9" Visibility="Collapsed">
-                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="正在编辑客户资料与备注" />
+                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="正在编辑客户资料与员工备注" />
 
-                            <TextBox x:Name="EditNameBox" Header="微信昵称" Style="{StaticResource SoftTextBoxStyle}" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="EditRemarkBox" Grid.Column="0" Header="微信备注" Style="{StaticResource SoftTextBoxStyle}" />
+                                <TextBox x:Name="EditNameBox" Grid.Column="1" Header="微信昵称" Style="{StaticResource SoftTextBoxStyle}" />
+                            </Grid>
                             <TextBox x:Name="EditAccountBox" Header="微信号" Style="{StaticResource SoftTextBoxStyle}" />
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
@@ -451,38 +475,6 @@
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
-
-                <!-- Bottom Convenience Action Footer -->
-                <Border
-                    x:Name="ProfileFooterBar"
-                    Grid.Row="2"
-                    Padding="14,10"
-                    Background="{StaticResource AppCanvasBgBrush}"
-                    BorderBrush="{StaticResource AppBorderSubtleBrush}"
-                    BorderThickness="0,1,0,0"
-                    Visibility="Collapsed">
-                    <Grid>
-                        <!-- View Footer -->
-                        <Grid x:Name="FooterViewButtons" ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" Height="34" HorizontalAlignment="Stretch" Click="EditProfileButton_Click" Content="编辑资料与备注" FontSize="12.5" Style="{StaticResource PrimaryVioletButtonStyle}" />
-                            <Button Grid.Column="1" Height="34" Padding="14,0" Click="DeleteCustomerButton_Click" Content="删除客户" FontSize="12.5" Style="{StaticResource DangerOutlineButtonStyle}" />
-                        </Grid>
-
-                        <!-- Edit Footer -->
-                        <Grid x:Name="FooterEditButtons" ColumnSpacing="8" Visibility="Collapsed">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <Button x:Name="FooterSaveButton" Grid.Column="0" Height="34" HorizontalAlignment="Stretch" Click="SaveProfileButton_Click" Content="保存修改" FontSize="12.5" Style="{StaticResource PrimaryVioletButtonStyle}" />
-                            <Button Grid.Column="1" Height="34" Padding="16,0" Click="CancelEditButton_Click" Content="取消" FontSize="12.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                        </Grid>
-                    </Grid>
-                </Border>
             </Grid>
         </Border>
     </Grid>

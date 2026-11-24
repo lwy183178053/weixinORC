@@ -64,7 +64,7 @@
                 TextWrapping="Wrap" />
         </Border>
 
-        <!-- Row 2: Two-Column Body (Left Preview Card & Right Form Bottom-Aligned) -->
+        <!-- Row 2: Two-Column Body (Left Preview Card & Right WeChat Profile Form Bottom-Aligned) -->
         <Grid Grid.Row="2" ColumnSpacing="20">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="272" />
@@ -171,7 +171,7 @@
                 </Grid>
             </Border>
 
-            <!-- Right: Editable Customer Profile Form (Stretched to Align Bottom with Left Card) -->
+            <!-- Right: Pure WeChat Profile Fields (Employee Notes are edited later in the right profile panel) -->
             <Grid Grid.Column="1" VerticalAlignment="Stretch" RowSpacing="10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -187,16 +187,16 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <TextBox
-                        x:Name="NameBox"
+                        x:Name="RemarkBox"
                         Grid.Column="0"
-                        Header="微信昵称"
-                        PlaceholderText="自动提取或手填"
+                        Header="微信备注（名称）"
+                        PlaceholderText="微信里的备注名，无则留空"
                         Style="{StaticResource SoftTextBoxStyle}" />
                     <TextBox
-                        x:Name="AccountBox"
+                        x:Name="NameBox"
                         Grid.Column="1"
-                        Header="微信号"
-                        PlaceholderText="如 w341884"
+                        Header="微信昵称"
+                        PlaceholderText="好友微信昵称"
                         Style="{StaticResource SoftTextBoxStyle}" />
                 </Grid>
 
@@ -206,39 +206,29 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <TextBox
-                        x:Name="RegionBox"
+                        x:Name="AccountBox"
                         Grid.Column="0"
-                        Header="地区"
-                        PlaceholderText="如 江苏 南京"
+                        Header="微信号"
+                        PlaceholderText="如 x15288732909"
                         Style="{StaticResource SoftTextBoxStyle}" />
                     <TextBox
-                        x:Name="PhoneBox"
+                        x:Name="RegionBox"
                         Grid.Column="1"
-                        Header="电话"
-                        PlaceholderText="手机号"
+                        Header="地区"
+                        PlaceholderText="如 山东 聊城"
                         Style="{StaticResource SoftTextBoxStyle}" />
                 </Grid>
 
-                <TextBox
-                    x:Name="SignatureBox"
-                    Grid.Row="2"
-                    Header="个性签名"
-                    MaxHeight="68"
-                    PlaceholderText="自动识别（支持多行）"
-                    ScrollViewer.VerticalScrollBarVisibility="Auto"
-                    Style="{StaticResource SoftTextBoxStyle}"
-                    TextWrapping="Wrap" />
-
-                <Grid Grid.Row="3" ColumnSpacing="12">
+                <Grid Grid.Row="2" ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="136" />
+                        <ColumnDefinition Width="156" />
                     </Grid.ColumnDefinitions>
                     <TextBox
-                        x:Name="SourceBox"
+                        x:Name="PhoneBox"
                         Grid.Column="0"
-                        Header="来源"
-                        PlaceholderText="如 通过搜索微信号添加"
+                        Header="电话"
+                        PlaceholderText="手机号"
                         Style="{StaticResource SoftTextBoxStyle}" />
                     <TextBox
                         x:Name="AddedDateBox"
@@ -248,7 +238,14 @@
                         Style="{StaticResource SoftTextBoxStyle}" />
                 </Grid>
 
-                <!-- Follow-up Note stretches cleanly to align bottom with left screenshot panel -->
+                <TextBox
+                    x:Name="SourceBox"
+                    Grid.Row="3"
+                    Header="来源"
+                    PlaceholderText="如 通过搜索微信号添加"
+                    Style="{StaticResource SoftTextBoxStyle}" />
+
+                <!-- Signature stretches cleanly to align bottom with left screenshot card -->
                 <Grid Grid.Row="4" RowSpacing="6">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -258,16 +255,16 @@
                         Grid.Row="0"
                         FontSize="13"
                         Foreground="{StaticResource TextPrimaryBrush}"
-                        Text="员工跟进备注（仅本员工可见）" />
+                        Text="个性签名" />
                     <TextBox
-                        x:Name="NoteBox"
+                        x:Name="SignatureBox"
                         Grid.Row="1"
-                        MinHeight="96"
+                        MinHeight="88"
                         VerticalAlignment="Stretch"
                         VerticalContentAlignment="Top"
                         AcceptsReturn="True"
                         Padding="10,9"
-                        PlaceholderText="记录客户意向、标签、跟进计划等..."
+                        PlaceholderText="自动识别（支持多行）"
                         ScrollViewer.VerticalScrollBarVisibility="Auto"
                         Style="{StaticResource SoftTextBoxStyle}"
                         TextWrapping="Wrap" />
@@ -286,7 +283,7 @@
                     VerticalAlignment="Center"
                     FontSize="12"
                     Foreground="{StaticResource TextMutedBrush}"
-                    Text="提示：支持直接按 Ctrl+V 粘贴截图，按 Esc 关闭窗口" />
+                    Text="提示：员工跟进备注可在导入后点击客户，于右侧客户信息栏编辑" />
 
                 <Button
                     x:Name="SubmitButton"

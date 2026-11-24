@@ -246,13 +246,14 @@ namespace Client.Pages
             ApplyStateBadge(analysis.InferredState);
             InferredReasonText.Text = analysis.StateReason;
 
+            CandidateRemarkBox.Text = analysis.CandidateWechatRemark;
             CandidateNameBox.Text = analysis.CandidateWechatName;
             CandidateAccountBox.Text = analysis.CandidateWechatAccount;
             CandidateRegionBox.Text = analysis.CandidateRegion;
             CandidatePhoneBox.Text = analysis.CandidatePhone;
             CandidateSignatureBox.Text = analysis.CandidateSignature;
             CandidateSourceBox.Text = analysis.CandidateSource;
-            CandidateNoteBox.Text = analysis.CandidateNote;
+            CandidateNoteBox.Text = string.Empty;
             _candidateAddedDate = analysis.CandidateAddedDate;
 
             RenderOverlayBoxes();
@@ -337,11 +338,12 @@ namespace Client.Pages
 
         private async void SaveCustomerButton_Click(object sender, RoutedEventArgs e)
         {
+            string remark = CandidateRemarkBox.Text.Trim();
             string name = CandidateNameBox.Text.Trim();
             string account = CandidateAccountBox.Text.Trim();
-            if (string.IsNullOrEmpty(name) && string.IsNullOrEmpty(account))
+            if (string.IsNullOrEmpty(remark) && string.IsNullOrEmpty(name) && string.IsNullOrEmpty(account))
             {
-                ShowBanner("请至少填写微信昵称或微信号后再保存。", BannerKind.Warning);
+                ShowBanner("请至少填写微信备注、微信昵称或微信号后再保存。", BannerKind.Warning);
                 return;
             }
 
@@ -350,6 +352,7 @@ namespace Client.Pages
             {
                 var result = await AppServices.Backend.CreateCustomerAsync(new CreateCustomerRequest
                 {
+                    WechatRemark = remark,
                     WechatName = name,
                     WechatAccount = account,
                     Region = CandidateRegionBox.Text.Trim(),

@@ -10,6 +10,7 @@ import (
 )
 
 type createCustomerRequest struct {
+	WechatRemark  string `json:"wechat_remark"`
 	WechatName    string `json:"wechat_name"`
 	WechatAccount string `json:"wechat_account"`
 	Note          string `json:"note"`
@@ -21,6 +22,7 @@ type createCustomerRequest struct {
 }
 
 type patchCustomerRequest struct {
+	WechatRemark  *string `json:"wechat_remark"`
 	WechatName    *string `json:"wechat_name"`
 	WechatAccount *string `json:"wechat_account"`
 	Note          *string `json:"note"`
@@ -50,6 +52,7 @@ func (s *Server) createCustomer(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
+	req.WechatRemark = strings.TrimSpace(req.WechatRemark)
 	req.WechatName = strings.TrimSpace(req.WechatName)
 	req.WechatAccount = strings.TrimSpace(req.WechatAccount)
 	req.Region = strings.TrimSpace(req.Region)
@@ -58,7 +61,7 @@ func (s *Server) createCustomer(c *gin.Context) {
 	req.Source = strings.TrimSpace(req.Source)
 	req.AddedDate = strings.TrimSpace(req.AddedDate)
 
-	if !validText(req.WechatName, 128) || !validText(req.WechatAccount, 128) ||
+	if !validText(req.WechatRemark, 128) || !validText(req.WechatName, 128) || !validText(req.WechatAccount, 128) ||
 		!validText(req.Note, 2000) || !validText(req.Region, 128) ||
 		!validText(req.Phone, 64) || !validText(req.Signature, 500) ||
 		!validText(req.Source, 128) || !validText(req.AddedDate, 64) {
@@ -68,6 +71,7 @@ func (s *Server) createCustomer(c *gin.Context) {
 
 	ownerID := auth.IdentityFromContext(c).EmployeeID
 	customer, err := s.store.CreateCustomer(c.Request.Context(), ownerID, store.CustomerInput{
+		WechatRemark:  req.WechatRemark,
 		WechatName:    req.WechatName,
 		WechatAccount: req.WechatAccount,
 		Note:          req.Note,
@@ -110,7 +114,7 @@ func (s *Server) updateCustomer(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	if req.WechatName == nil && req.WechatAccount == nil && req.Note == nil &&
+	if req.WechatRemark == nil && req.WechatName == nil && req.WechatAccount == nil && req.Note == nil &&
 		req.Region == nil && req.Phone == nil && req.Signature == nil &&
 		req.Source == nil && req.AddedDate == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "empty_patch"})
@@ -129,7 +133,7 @@ func (s *Server) updateCustomer(c *gin.Context) {
 		return true
 	}
 
-	if !trimAndCheck(&req.WechatName, 128) || !trimAndCheck(&req.WechatAccount, 128) ||
+	if !trimAndCheck(&req.WechatRemark, 128) || !trimAndCheck(&req.WechatName, 128) || !trimAndCheck(&req.WechatAccount, 128) ||
 		!trimAndCheck(&req.Region, 128) || !trimAndCheck(&req.Phone, 64) ||
 		!trimAndCheck(&req.Signature, 500) || !trimAndCheck(&req.Source, 128) ||
 		!trimAndCheck(&req.AddedDate, 64) || (req.Note != nil && !validText(*req.Note, 2000)) {
@@ -139,6 +143,7 @@ func (s *Server) updateCustomer(c *gin.Context) {
 
 	ownerID := auth.IdentityFromContext(c).EmployeeID
 	customer, err := s.store.UpdateCustomer(c.Request.Context(), ownerID, id, store.CustomerPatch{
+		WechatRemark:  req.WechatRemark,
 		WechatName:    req.WechatName,
 		WechatAccount: req.WechatAccount,
 		Note:          req.Note,

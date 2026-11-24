@@ -27,7 +27,7 @@ type appConfig struct {
 
 func loadConfig() (appConfig, error) {
 	cfg := appConfig{
-		addr:         envOr("SERVER_ADDR", "127.0.0.1:8080"),
+		addr:         envOr("SERVER_ADDR", "127.0.0.1:28765"),
 		dbPath:       envOr("DATABASE_PATH", "data/weixinorc.db"),
 		sessionTTL:   7 * 24 * time.Hour,
 		mockAuth:     strings.EqualFold(os.Getenv("MOCK_AUTH"), "1") || strings.EqualFold(os.Getenv("MOCK_AUTH"), "true"),

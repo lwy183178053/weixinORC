@@ -239,7 +239,7 @@
                                     BorderThickness="0"
                                     Click="ToggleServerConfigButton_Click"
                                     Foreground="{StaticResource BrandPrimaryBrush}">
-                                    <TextBlock x:Name="ServerConfigToggleText" FontSize="12" Text="▸ 服务地址配置 (127.0.0.1:8080)" />
+                                    <TextBlock x:Name="ServerConfigToggleText" FontSize="12" Text="▸ 服务地址配置 (127.0.0.1:28765)" />
                                 </Button>
 
                                 <Button
@@ -261,9 +261,9 @@
                                 <TextBox
                                     x:Name="ServerUrlBox"
                                     Height="36"
-                                    PlaceholderText="http://127.0.0.1:8080"
+                                    PlaceholderText="http://127.0.0.1:28765"
                                     Style="{StaticResource SoftTextBoxStyle}"
-                                    Text="http://127.0.0.1:8080" />
+                                    Text="http://127.0.0.1:28765" />
                                 <Button
                                     Grid.Column="1"
                                     Height="36"

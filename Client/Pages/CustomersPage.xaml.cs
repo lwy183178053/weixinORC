@@ -59,6 +59,7 @@ namespace Client.Pages
             var filtered = string.IsNullOrEmpty(q)
                 ? _allCustomers
                 : _allCustomers.Where(c =>
+                    c.WechatRemark.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     c.WechatName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     c.WechatAccount.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     c.Note.Contains(q, StringComparison.OrdinalIgnoreCase) ||
@@ -111,7 +112,6 @@ namespace Client.Pages
             DeleteCustomerButton.IsEnabled = hasCustomer;
             EmptyProfileHint.Visibility = hasCustomer ? Visibility.Collapsed : Visibility.Visible;
             ProfileContentScroll.Visibility = hasCustomer ? Visibility.Visible : Visibility.Collapsed;
-            ProfileFooterBar.Visibility = hasCustomer ? Visibility.Visible : Visibility.Collapsed;
 
             if (c is null)
             {
@@ -123,6 +123,7 @@ namespace Client.Pages
             ActiveCustomerTitle.Text = c.DisplayName;
             var metaParts = new[]
             {
+                string.IsNullOrWhiteSpace(c.WechatRemark) || string.IsNullOrWhiteSpace(c.WechatName) ? "" : $"昵称: {c.WechatName}",
                 string.IsNullOrWhiteSpace(c.WechatAccount) ? "" : $"微信号: {c.WechatAccount}",
                 string.IsNullOrWhiteSpace(c.Region) ? "" : $"地区: {c.Region}",
                 string.IsNullOrWhiteSpace(c.Phone) ? "" : $"电话: {c.Phone}"
@@ -134,6 +135,8 @@ namespace Client.Pages
             ProfileHeaderAccountText.Text = $"微信号：{(string.IsNullOrWhiteSpace(c.WechatAccount) ? "-" : c.WechatAccount)}";
             ProfileHeaderRegionText.Text = $"地区：{(string.IsNullOrWhiteSpace(c.Region) ? "-" : c.Region)}";
 
+            ViewRemarkText.Text = string.IsNullOrWhiteSpace(c.WechatRemark) ? "-" : c.WechatRemark;
+            ViewNicknameText.Text = string.IsNullOrWhiteSpace(c.WechatName) ? "-" : c.WechatName;
             ViewPhoneText.Text = string.IsNullOrWhiteSpace(c.Phone) ? "-" : c.Phone;
             ViewSignatureText.Text = string.IsNullOrWhiteSpace(c.Signature) ? "-" : c.Signature;
             ViewSourceText.Text = string.IsNullOrWhiteSpace(c.Source) ? "-" : c.Source;
@@ -155,6 +158,7 @@ namespace Client.Pages
 
         private void PopulateEditBoxes(CustomerDto c)
         {
+            EditRemarkBox.Text = c.WechatRemark;
             EditNameBox.Text = c.WechatName;
             EditAccountBox.Text = c.WechatAccount;
             EditRegionBox.Text = c.Region;
@@ -172,8 +176,6 @@ namespace Client.Pages
             EditActionsBar.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
             ProfileViewModePanel.Visibility = editing ? Visibility.Collapsed : Visibility.Visible;
             ProfileEditModePanel.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
-            FooterViewButtons.Visibility = editing ? Visibility.Collapsed : Visibility.Visible;
-            FooterEditButtons.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void EditProfileButton_Click(object sender, RoutedEventArgs e)
@@ -197,20 +199,21 @@ namespace Client.Pages
         {
             if (_selectedCustomer is null) return;
 
+            string remark = EditRemarkBox.Text.Trim();
             string name = EditNameBox.Text.Trim();
             string account = EditAccountBox.Text.Trim();
-            if (string.IsNullOrEmpty(name) && string.IsNullOrEmpty(account))
+            if (string.IsNullOrEmpty(remark) && string.IsNullOrEmpty(name) && string.IsNullOrEmpty(account))
             {
-                ShowProfileStatus("微信昵称和微信号不能同时为空。", isError: true);
+                ShowProfileStatus("微信备注、微信昵称和微信号不能同时为空。", isError: true);
                 return;
             }
 
             SaveProfileButton.IsEnabled = false;
-            FooterSaveButton.IsEnabled = false;
             try
             {
                 var res = await AppServices.Backend.UpdateCustomerAsync(_selectedCustomer.Id, new CreateCustomerRequest
                 {
+                    WechatRemark = remark,
                     WechatName = name,
                     WechatAccount = account,
                     Region = EditRegionBox.Text.Trim(),
@@ -236,7 +239,6 @@ namespace Client.Pages
             finally
             {
                 SaveProfileButton.IsEnabled = true;
-                FooterSaveButton.IsEnabled = true;
             }
         }
 

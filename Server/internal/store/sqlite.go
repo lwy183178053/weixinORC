@@ -24,6 +24,7 @@ PRAGMA busy_timeout = 5000;
 CREATE TABLE IF NOT EXISTS customers (
 	id             INTEGER PRIMARY KEY AUTOINCREMENT,
 	owner_id       TEXT NOT NULL,
+	wechat_remark  TEXT NOT NULL DEFAULT '',
 	wechat_name    TEXT NOT NULL DEFAULT '',
 	wechat_account TEXT NOT NULL DEFAULT '',
 	note           TEXT NOT NULL DEFAULT '',
@@ -128,7 +129,7 @@ func Open(path string) (*Store, error) {
 
 // migrateCustomerColumns safely adds new profile columns to pre-existing SQLite databases.
 func migrateCustomerColumns(db *sql.DB) error {
-	extraCols := []string{"region", "phone", "signature", "source", "added_date"}
+	extraCols := []string{"wechat_remark", "region", "phone", "signature", "source", "added_date"}
 	for _, col := range extraCols {
 		_, err := db.Exec(fmt.Sprintf(`ALTER TABLE customers ADD COLUMN %s TEXT NOT NULL DEFAULT ''`, col))
 		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {

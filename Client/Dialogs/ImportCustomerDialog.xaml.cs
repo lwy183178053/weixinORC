@@ -146,6 +146,7 @@ namespace Client.Dialogs
                 var ocr = await AppServices.Ocr.RapidEngine.RecognizeAsync(bmp);
                 var parsed = WeChatOcrAnalyzer.Analyze(null, ocr);
 
+                RemarkBox.Text = parsed.CandidateWechatRemark;
                 NameBox.Text = parsed.CandidateWechatName;
                 AccountBox.Text = parsed.CandidateWechatAccount;
                 RegionBox.Text = parsed.CandidateRegion;
@@ -153,10 +154,6 @@ namespace Client.Dialogs
                 SignatureBox.Text = parsed.CandidateSignature;
                 SourceBox.Text = parsed.CandidateSource;
                 AddedDateBox.Text = parsed.CandidateAddedDate;
-                if (!string.IsNullOrWhiteSpace(parsed.CandidateNote))
-                {
-                    NoteBox.Text = parsed.CandidateNote;
-                }
 
                 ShowStatus($"识别完成（{ocr.ElapsedMilliseconds} ms，共 {ocr.Lines.Count} 行），请核对右侧信息后点击导入。");
             }
@@ -179,11 +176,12 @@ namespace Client.Dialogs
         {
             if (_isSubmitting) return;
 
+            string remark = RemarkBox.Text.Trim();
             string name = NameBox.Text.Trim();
             string account = AccountBox.Text.Trim();
-            if (string.IsNullOrEmpty(name) && string.IsNullOrEmpty(account))
+            if (string.IsNullOrEmpty(remark) && string.IsNullOrEmpty(name) && string.IsNullOrEmpty(account))
             {
-                ShowStatus("微信昵称和微信号不能同时为空。", isError: true);
+                ShowStatus("微信备注、微信昵称和微信号不能同时为空。", isError: true);
                 return;
             }
 
@@ -196,6 +194,7 @@ namespace Client.Dialogs
             {
                 var res = await AppServices.Backend.CreateCustomerAsync(new CreateCustomerRequest
                 {
+                    WechatRemark = remark,
                     WechatName = name,
                     WechatAccount = account,
                     Region = RegionBox.Text.Trim(),
@@ -203,7 +202,7 @@ namespace Client.Dialogs
                     Signature = SignatureBox.Text.Trim(),
                     Source = SourceBox.Text.Trim(),
                     AddedDate = AddedDateBox.Text.Trim(),
-                    Note = NoteBox.Text.Trim()
+                    Note = string.Empty
                 });
 
                 if (res.IsSuccess && res.Data is not null)

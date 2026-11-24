@@ -41,9 +41,9 @@ namespace Client.Services
             {
                 InferredState = state,
                 StateReason = reason,
+                CandidateWechatRemark = profile.Remark,
                 CandidateWechatName = profile.Name,
                 CandidateWechatAccount = profile.Account,
-                CandidateNote = profile.Note,
                 CandidateRegion = profile.Region,
                 CandidatePhone = profile.Phone,
                 CandidateSignature = profile.Signature,
@@ -141,18 +141,19 @@ namespace Client.Services
                 .ToList();
         }
 
-        private static (string Name, string Account, string Note, string Region, string Phone, string Signature, string Source, string AddedDate)
+        private static (string Remark, string Name, string Account, string Region, string Phone, string Signature, string Source, string AddedDate)
             ExtractProfileFromRows(List<List<OcrLineResult>> rows)
         {
-            string name = string.Empty;
+            string remarkFromTable = string.Empty;
+            string explicitNickname = string.Empty;
             string account = string.Empty;
-            string note = string.Empty;
             string region = string.Empty;
             string phone = string.Empty;
             string signature = string.Empty;
             string source = string.Empty;
             string addedDate = string.Empty;
 
+            int nicknameRowIndex = -1;
             int accountRowIndex = -1;
             double signatureValueX = -1;
             int signatureRowIndex = -1;
@@ -166,7 +167,7 @@ namespace Client.Services
                     continue;
                 }
 
-                // Inline key:value matching (e.g. "微信号: w341884", "地区: 江苏 常州")
+                // Inline key:value matching (e.g. "微信号: x15288732909", "昵称: 果奶", "地区: 山东 聊城")
                 if (string.IsNullOrEmpty(account))
                 {
                     var m = WechatIdRegex().Match(fullRow);
@@ -188,12 +189,13 @@ namespace Client.Services
                     }
                 }
 
-                if (string.IsNullOrEmpty(name))
+                if (string.IsNullOrEmpty(explicitNickname))
                 {
                     var m = NicknameRegex().Match(fullRow);
                     if (m.Success)
                     {
-                        name = m.Groups[1].Value.Trim();
+                        explicitNickname = m.Groups[1].Value.Trim();
+                        nicknameRowIndex = i;
                         continue;
                     }
                 }
@@ -208,7 +210,7 @@ namespace Client.Services
                 {
                     if (!string.IsNullOrEmpty(rightValue) && !PlaceholderRemarks.Contains(rightValue))
                     {
-                        note = rightValue;
+                        remarkFromTable = rightValue;
                     }
                     continue;
                 }
@@ -251,7 +253,7 @@ namespace Client.Services
                     continue;
                 }
 
-                // Handle multi-line wrapped signature right below the "个性签名" row (like WeChat 4.x cards!)
+                // Handle multi-line wrapped signature right below the "个性签名" row
                 if (signatureRowIndex >= 0 && i == signatureRowIndex + 1 &&
                     row.Count == 1 &&
                     !KnownSectionLabels.Contains(label) &&
@@ -263,22 +265,58 @@ namespace Client.Services
                 }
             }
 
-            // If no explicit "昵称:" label, use the clean headline right above "微信号:" (standard WeChat 4.x card layout)
-            if (string.IsNullOrEmpty(name) && accountRowIndex > 0)
+            // Extract the top bold headline displayed next to the WeChat avatar (above 昵称: or 微信号:)
+            int anchorRow = nicknameRowIndex >= 0 ? nicknameRowIndex : accountRowIndex;
+            string topHeadline = string.Empty;
+            if (anchorRow > 0)
             {
-                for (int j = accountRowIndex - 1; j >= 0; j--)
+                for (int j = anchorRow - 1; j >= 0; j--)
                 {
-                    string candidate = string.Join(" ", rows[j].Select(x => x.Text.Trim())).Trim();
-                    candidate = candidate.TrimEnd('·', '.', ' ', '…');
+                    string candidate = CleanHeadlineRow(rows[j]);
                     if (!string.IsNullOrEmpty(candidate) && candidate.Length <= 40 && !KnownSectionLabels.Contains(candidate))
                     {
-                        name = candidate;
+                        topHeadline = candidate;
                         break;
                     }
                 }
             }
 
-            return (name, account, note, region, phone, signature, source, addedDate);
+            string wechatRemark;
+            string wechatName;
+
+            if (!string.IsNullOrEmpty(explicitNickname))
+            {
+                // When WeChat shows an explicit "昵称:" row, the top bold headline is the WeChat remark name.
+                wechatName = explicitNickname;
+                wechatRemark = !string.IsNullOrEmpty(topHeadline) ? topHeadline : remarkFromTable;
+            }
+            else if (!string.IsNullOrEmpty(remarkFromTable))
+            {
+                // No explicit "昵称:" row detected, but "备注" table row has a real remark.
+                wechatRemark = remarkFromTable;
+                wechatName = !string.IsNullOrEmpty(topHeadline) && !topHeadline.Equals(remarkFromTable, StringComparison.OrdinalIgnoreCase)
+                    ? topHeadline
+                    : string.Empty;
+            }
+            else
+            {
+                // No WeChat remark set: the top bold headline IS the friend's WeChat nickname.
+                wechatRemark = string.Empty;
+                wechatName = topHeadline;
+            }
+
+            return (wechatRemark, wechatName, account, region, phone, signature, source, addedDate);
+        }
+
+        private static string CleanHeadlineRow(List<OcrLineResult> row)
+        {
+            var parts = row
+                .Select(x => x.Text.Trim())
+                .Where(t => !string.IsNullOrEmpty(t) && !t.All(ch => ch is '.' or '·' or '…' or '•'))
+                .ToList();
+
+            string joined = string.Join(" ", parts).Trim();
+            return joined.TrimEnd('·', '.', ' ', '…', '•');
         }
 
         private static (WeChatLoginState State, string Reason) InferLoginState(
@@ -319,13 +357,13 @@ namespace Client.Services
             return (WeChatLoginState.Unknown, "未命中明确的登录/主界面/掉线特征词");
         }
 
-        [GeneratedRegex(@"微信号\s*[:：]\s*([A-Za-z0-9_\-]+)")]
+        [GeneratedRegex(@"微信号\s*(?:[:：]\s*|\s+)([A-Za-z0-9_\-]+)")]
         private static partial Regex WechatIdRegex();
 
-        [GeneratedRegex(@"昵称\s*[:：]\s*(.+)")]
+        [GeneratedRegex(@"昵称\s*(?:[:：]\s*|\s+)(.+)")]
         private static partial Regex NicknameRegex();
 
-        [GeneratedRegex(@"地区\s*[:：]\s*(.+)")]
+        [GeneratedRegex(@"地区\s*(?:[:：]\s*|\s+)(.+)")]
         private static partial Regex RegionRegex();
 
         [GeneratedRegex(@"^(.+?)\s*[\(（]\s*(\d{1,4})\s*[\)）]$")]

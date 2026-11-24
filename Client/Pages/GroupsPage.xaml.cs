@@ -110,7 +110,6 @@ namespace Client.Pages
             DeleteGroupButton.IsEnabled = hasGroup;
             EmptyDetailHint.Visibility = hasGroup ? Visibility.Collapsed : Visibility.Visible;
             DetailContentScroll.Visibility = hasGroup ? Visibility.Visible : Visibility.Collapsed;
-            DetailFooterBar.Visibility = hasGroup ? Visibility.Visible : Visibility.Collapsed;
 
             if (g is null)
             {
@@ -160,8 +159,6 @@ namespace Client.Pages
             EditActionsBar.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
             DetailViewModePanel.Visibility = editing ? Visibility.Collapsed : Visibility.Visible;
             DetailEditModePanel.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
-            FooterViewButtons.Visibility = editing ? Visibility.Collapsed : Visibility.Visible;
-            FooterEditButtons.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void EditGroupButton_Click(object sender, RoutedEventArgs e)
@@ -193,7 +190,6 @@ namespace Client.Pages
 
             _ = int.TryParse(EditMemberCountBox.Text.Trim(), out int count);
             SaveGroupButton.IsEnabled = false;
-            FooterSaveButton.IsEnabled = false;
             try
             {
                 var res = await AppServices.Backend.UpdateGroupAsync(_selectedGroup.Id, new CreateGroupRequest
@@ -220,7 +216,6 @@ namespace Client.Pages
             finally
             {
                 SaveGroupButton.IsEnabled = true;
-                FooterSaveButton.IsEnabled = true;
             }
         }
 

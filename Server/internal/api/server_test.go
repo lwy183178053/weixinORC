@@ -117,15 +117,21 @@ func TestCustomerMessageFlowsAndOwnerIsolation(t *testing.T) {
 	alice := app.login(t, "alice")
 	bob := app.login(t, "bob")
 
-	created := app.request(t, http.MethodPost, "/api/v1/customers", alice, map[string]string{"wechat_name": "Customer", "wechat_account": "wx-1", "note": "initial"})
+	created := app.request(t, http.MethodPost, "/api/v1/customers", alice, map[string]string{"wechat_remark": "RemarkName", "wechat_name": "Customer", "wechat_account": "wx-1", "note": "initial"})
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create customer: got %d %s", created.Code, created.Body.String())
 	}
 	var customer struct {
-		ID int64 `json:"id"`
+		ID           int64  `json:"id"`
+		WechatRemark string `json:"wechat_remark"`
+		WechatName   string `json:"wechat_name"`
+		Note         string `json:"note"`
 	}
 	if err := json.Unmarshal(created.Body.Bytes(), &customer); err != nil {
 		t.Fatal(err)
+	}
+	if customer.WechatRemark != "RemarkName" || customer.WechatName != "Customer" || customer.Note != "initial" {
+		t.Fatalf("unexpected customer fields: %+v", customer)
 	}
 	path := fmt.Sprintf("/api/v1/customers/%d", customer.ID)
 

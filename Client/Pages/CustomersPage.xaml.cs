@@ -161,9 +161,10 @@ namespace Client.Pages
             }
 
             ActiveCustomerTitle.Text = c.DisplayName;
+            string singleLineRemark = c.WechatRemark.Replace("\r", " ").Replace("\n", " ").Trim();
             var metaParts = new[]
             {
-                string.IsNullOrWhiteSpace(c.WechatRemark) || string.IsNullOrWhiteSpace(c.WechatName) ? "" : $"昵称: {c.WechatName}",
+                string.IsNullOrWhiteSpace(singleLineRemark) || string.IsNullOrWhiteSpace(c.WechatName) ? "" : $"备注: {singleLineRemark}",
                 string.IsNullOrWhiteSpace(c.WechatAccount) ? "" : $"微信号: {c.WechatAccount}",
                 string.IsNullOrWhiteSpace(c.Region) ? "" : $"地区: {c.Region}",
                 string.IsNullOrWhiteSpace(c.Phone) ? "" : $"电话: {c.Phone}"
@@ -440,6 +441,11 @@ namespace Client.Pages
             await ShowImportDialogAsync(autoPasteClipboard: false);
         }
 
+        private async void BatchTagImportButton_Click(object sender, RoutedEventArgs e)
+        {
+            await ShowBatchTagImportDialogAsync();
+        }
+
         private async void PasteAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
         {
             if (_dialogOpen || _isEditing) return;
@@ -470,6 +476,7 @@ namespace Client.Pages
         private async Task ShowImportDialogAsync(bool autoPasteClipboard)
         {
             if (_dialogOpen) return;
+            bool openBatchAfter = false;
             _dialogOpen = true;
             try
             {
@@ -480,12 +487,41 @@ namespace Client.Pages
                 }
 
                 await dialog.ShowAsync();
-                if (dialog.CreatedCustomer is { } created)
+                if (dialog.RequestedBatchTagImport)
+                {
+                    openBatchAfter = true;
+                }
+                else if (dialog.CreatedCustomer is { } created)
                 {
                     await LoadCustomersAsync(created.Id);
                     ShowProfileStatus(dialog.WasOverwritten
                         ? $"✓ 已覆盖更新客户「{created.DisplayName}」。"
                         : $"✓ 已成功导入新客户「{created.DisplayName}」。");
+                }
+            }
+            finally
+            {
+                _dialogOpen = false;
+            }
+
+            if (openBatchAfter)
+            {
+                await ShowBatchTagImportDialogAsync();
+            }
+        }
+
+        private async Task ShowBatchTagImportDialogAsync()
+        {
+            if (_dialogOpen) return;
+            _dialogOpen = true;
+            try
+            {
+                var dialog = new BatchTagImportDialog { XamlRoot = XamlRoot };
+                await dialog.ShowAsync();
+                if (dialog.TotalImportedOrUpdated > 0)
+                {
+                    await LoadCustomersAsync(_selectedCustomer?.Id);
+                    ShowProfileStatus($"✓ 微信标签批量导入完成，共新增/更新 {dialog.TotalImportedOrUpdated} 位客户。");
                 }
             }
             finally

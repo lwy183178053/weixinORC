@@ -157,6 +157,8 @@ namespace Client.Services
 
             int nicknameRowIndex = -1;
             int accountRowIndex = -1;
+            double remarkValueX = -1;
+            int remarkRowIndex = -1;
             double signatureValueX = -1;
             int signatureRowIndex = -1;
 
@@ -213,6 +215,8 @@ namespace Client.Services
                     if (!string.IsNullOrEmpty(rightValue) && !PlaceholderRemarks.Contains(rightValue))
                     {
                         remarkFromTable = rightValue;
+                        remarkRowIndex = i;
+                        remarkValueX = row.Count > 1 ? row[1].Bounds.X : -1;
                     }
                     continue;
                 }
@@ -264,6 +268,18 @@ namespace Client.Services
                     continue;
                 }
 
+                // Handle multi-line wrapped remark right below the "备注" row in 朋友资料
+                if (remarkRowIndex >= 0 && i == remarkRowIndex + 1 &&
+                    row.Count == 1 &&
+                    !KnownSectionLabels.Contains(label) &&
+                    remarkValueX >= 0 &&
+                    Math.Abs(row[0].Bounds.X - remarkValueX) < 60)
+                {
+                    remarkFromTable = $"{remarkFromTable}\n{row[0].Text.Trim()}".Trim();
+                    remarkRowIndex = i;
+                    continue;
+                }
+
                 // Handle multi-line wrapped signature right below the "个性签名" row
                 if (signatureRowIndex >= 0 && i == signatureRowIndex + 1 &&
                     row.Count == 1 &&
@@ -276,42 +292,44 @@ namespace Client.Services
                 }
             }
 
-            // Extract the top bold headline displayed next to the WeChat avatar (above 昵称: or 微信号:)
-            int anchorRow = nicknameRowIndex >= 0 ? nicknameRowIndex : accountRowIndex;
-            string topHeadline = string.Empty;
-            if (anchorRow > 0)
-            {
-                for (int j = anchorRow - 1; j >= 0; j--)
-                {
-                    string candidate = CleanHeadlineRow(rows[j]);
-                    if (!string.IsNullOrEmpty(candidate) && candidate.Length <= 40 && !KnownSectionLabels.Contains(candidate))
-                    {
-                        topHeadline = candidate;
-                        break;
-                    }
-                }
-            }
-
             string wechatRemark;
             string wechatName;
 
             if (!string.IsNullOrEmpty(explicitNickname))
             {
-                // When WeChat shows an explicit "昵称:" row, the top bold headline is the WeChat remark name.
+                // When WeChat shows an explicit "昵称:" row, the bold text above it is merely a duplicate display
+                // of the remark (which may wrap across multiple lines). Ignore topHeadline completely and take
+                // the clean remark solely from the "备注" row in 朋友资料!
                 wechatName = explicitNickname;
-                wechatRemark = !string.IsNullOrEmpty(topHeadline) ? topHeadline : remarkFromTable;
+                wechatRemark = remarkFromTable;
             }
             else if (!string.IsNullOrEmpty(remarkFromTable))
             {
-                // No explicit "昵称:" row detected, but "备注" table row has a real remark.
+                // Friend has a real remark in 朋友资料, but "昵称:" row wasn't recognized (e.g. emoji-only nickname).
+                // Do not copy the top bold remark text into nickname.
                 wechatRemark = remarkFromTable;
-                wechatName = !string.IsNullOrEmpty(topHeadline) && !topHeadline.Equals(remarkFromTable, StringComparison.OrdinalIgnoreCase)
-                    ? topHeadline
-                    : string.Empty;
+                wechatName = string.Empty;
             }
             else
             {
-                // No WeChat remark set: the top bold headline IS the friend's WeChat nickname.
+                // No WeChat remark set: the bold headline directly above "微信号:" IS the friend's WeChat nickname.
+                string topHeadline = string.Empty;
+                if (accountRowIndex > 0)
+                {
+                    double anchorX = rows[accountRowIndex].Count > 0 ? rows[accountRowIndex][0].Bounds.X : -1;
+                    for (int j = accountRowIndex - 1; j >= 0; j--)
+                    {
+                        var alignedTokens = anchorX >= 0
+                            ? rows[j].Where(t => Math.Abs(t.Bounds.X - anchorX) < 90).ToList()
+                            : rows[j];
+                        string candidate = CleanHeadlineRow(alignedTokens);
+                        if (!string.IsNullOrEmpty(candidate) && candidate.Length <= 40 && !KnownSectionLabels.Contains(candidate))
+                        {
+                            topHeadline = candidate;
+                            break;
+                        }
+                    }
+                }
                 wechatRemark = string.Empty;
                 wechatName = topHeadline;
             }
@@ -323,11 +341,11 @@ namespace Client.Services
         {
             var parts = row
                 .Select(x => x.Text.Trim())
-                .Where(t => !string.IsNullOrEmpty(t) && !t.All(ch => ch is '.' or '·' or '…' or '•'))
+                .Where(t => !string.IsNullOrEmpty(t) && !t.All(ch => ch is '.' or '·' or '…' or '•' or '▲' or '△' or '●' or '○'))
                 .ToList();
 
             string joined = string.Join(" ", parts).Trim();
-            return joined.TrimEnd('·', '.', ' ', '…', '•');
+            return joined.TrimEnd('·', '.', ' ', '…', '•', '▲', '△', '●', '○', '♂', '♀');
         }
 
         private static (WeChatLoginState State, string Reason) InferLoginState(

@@ -390,10 +390,10 @@ namespace Client.Pages
                 {
                     if (!string.IsNullOrEmpty(account))
                         dup = listRes.Data.Items.FirstOrDefault(c => c.WechatAccount.Equals(account, StringComparison.OrdinalIgnoreCase));
-                    if (dup is null && !string.IsNullOrEmpty(remark))
-                        dup = listRes.Data.Items.FirstOrDefault(c => c.WechatRemark.Equals(remark, StringComparison.OrdinalIgnoreCase));
                     if (dup is null && !string.IsNullOrEmpty(name))
                         dup = listRes.Data.Items.FirstOrDefault(c => c.WechatName.Equals(name, StringComparison.OrdinalIgnoreCase));
+                    if (dup is null && !string.IsNullOrEmpty(remark))
+                        dup = listRes.Data.Items.FirstOrDefault(c => c.WechatRemark.Equals(remark, StringComparison.OrdinalIgnoreCase));
                 }
 
                 ApiResult<CustomerDto> result;

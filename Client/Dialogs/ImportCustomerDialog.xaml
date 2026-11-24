@@ -40,14 +40,25 @@
                     Text="粘贴或上传微信资料页截图，自动提取信息并核对入库" />
             </StackPanel>
 
-            <Button
-                HorizontalAlignment="Right"
-                VerticalAlignment="Top"
-                Click="CloseButton_Click"
-                Style="{StaticResource DialogCloseButtonStyle}"
-                ToolTipService.ToolTip="关闭 (Esc)">
-                <FontIcon FontSize="12" Glyph="&#xE8BB;" />
-            </Button>
+            <StackPanel HorizontalAlignment="Right" VerticalAlignment="Top" Orientation="Horizontal" Spacing="8">
+                <Button
+                    Height="30"
+                    Padding="10,0"
+                    Click="BatchTagImportButton_Click"
+                    Style="{StaticResource SecondaryOutlineButtonStyle}"
+                    ToolTipService.ToolTip="切换到微信「通讯录管理」按标签批量自动导入">
+                    <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                        <FontIcon FontSize="12" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8EC;" />
+                        <TextBlock FontSize="12" Text="微信标签批量导入" />
+                    </StackPanel>
+                </Button>
+                <Button
+                    Click="CloseButton_Click"
+                    Style="{StaticResource DialogCloseButtonStyle}"
+                    ToolTipService.ToolTip="关闭 (Esc)">
+                    <FontIcon FontSize="12" Glyph="&#xE8BB;" />
+                </Button>
+            </StackPanel>
         </Grid>
 
         <!-- Row 1: Inline Status / Error Banner -->

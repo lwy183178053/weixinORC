@@ -137,8 +137,11 @@ namespace Client.Services
 
         // ---- Customers ----
 
-        public Task<ApiResult<CustomerListResponse>> ListCustomersAsync(int limit = 100, CancellationToken ct = default) =>
-            SendAuthedAsync<CustomerListResponse>(HttpMethod.Get, $"/api/v1/customers?limit={limit}", null, ct);
+        public Task<ApiResult<CustomerListResponse>> ListCustomersAsync(int limit = 100, long cursor = 0, CancellationToken ct = default)
+        {
+            string qs = cursor > 0 ? $"?limit={limit}&cursor={cursor}" : $"?limit={limit}";
+            return SendAuthedAsync<CustomerListResponse>(HttpMethod.Get, $"/api/v1/customers{qs}", null, ct);
+        }
 
         public Task<ApiResult<CustomerDto>> CreateCustomerAsync(CreateCustomerRequest payload, CancellationToken ct = default) =>
             SendAuthedAsync<CustomerDto>(HttpMethod.Post, "/api/v1/customers", payload, ct);

@@ -21,6 +21,7 @@ namespace Client.Dialogs
 
         public CustomerDto? CreatedCustomer { get; private set; }
         public bool WasOverwritten { get; private set; }
+        public bool RequestedBatchTagImport { get; private set; }
 
         public ImportCustomerDialog()
         {
@@ -35,6 +36,13 @@ namespace Client.Dialogs
         public async Task TriggerClipboardImportAsync()
         {
             await ImportFromClipboardAsync();
+        }
+
+        private void BatchTagImportButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_isSubmitting) return;
+            RequestedBatchTagImport = true;
+            Hide();
         }
 
         private void CloseButton_Click(object sender, RoutedEventArgs e)
@@ -235,17 +243,17 @@ namespace Client.Dialogs
                             !string.IsNullOrWhiteSpace(c.WechatAccount) &&
                             c.WechatAccount.Equals(account, StringComparison.OrdinalIgnoreCase));
                     }
-                    if (dup is null && !string.IsNullOrEmpty(remark))
-                    {
-                        dup = listRes.Data.Items.FirstOrDefault(c =>
-                            !string.IsNullOrWhiteSpace(c.WechatRemark) &&
-                            c.WechatRemark.Equals(remark, StringComparison.OrdinalIgnoreCase));
-                    }
                     if (dup is null && !string.IsNullOrEmpty(name))
                     {
                         dup = listRes.Data.Items.FirstOrDefault(c =>
                             !string.IsNullOrWhiteSpace(c.WechatName) &&
                             c.WechatName.Equals(name, StringComparison.OrdinalIgnoreCase));
+                    }
+                    if (dup is null && !string.IsNullOrEmpty(remark))
+                    {
+                        dup = listRes.Data.Items.FirstOrDefault(c =>
+                            !string.IsNullOrWhiteSpace(c.WechatRemark) &&
+                            c.WechatRemark.Equals(remark, StringComparison.OrdinalIgnoreCase));
                     }
                 }
 

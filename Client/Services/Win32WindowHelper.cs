@@ -44,10 +44,72 @@ namespace Client.Services
             public uint bmiColors;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct POINT
+        {
+            public int X;
+            public int Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct INPUT
+        {
+            public uint type;
+            public InputUnion u;
+        }
+
+        [StructLayout(LayoutKind.Explicit)]
+        private struct InputUnion
+        {
+            [FieldOffset(0)] public MOUSEINPUT mi;
+            [FieldOffset(0)] public KEYBDINPUT ki;
+            [FieldOffset(0)] public HARDWAREINPUT hi;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MOUSEINPUT
+        {
+            public int dx;
+            public int dy;
+            public uint mouseData;
+            public uint dwFlags;
+            public uint time;
+            public nuint dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct KEYBDINPUT
+        {
+            public ushort wVk;
+            public ushort wScan;
+            public uint dwFlags;
+            public uint time;
+            public nuint dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct HARDWAREINPUT
+        {
+            public uint uMsg;
+            public ushort wParamL;
+            public ushort wParamH;
+        }
+
         internal const int SW_HIDE = 0;
         internal const int SW_SHOW = 5;
         internal const int SW_MINIMIZE = 6;
         internal const int SW_RESTORE = 9;
+
+        private const uint INPUT_MOUSE = 0;
+        private const uint INPUT_KEYBOARD = 1;
+        private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+        private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+        private const uint MOUSEEVENTF_WHEEL = 0x0800;
+        private const uint KEYEVENTF_KEYUP = 0x0002;
+        private const ushort VK_ESCAPE = 0x1B;
+        private const uint SWP_SHOWWINDOW = 0x0040;
+        private const int WHEEL_DELTA = 120;
+        private const uint WM_CLOSE = 0x0010;
 
         private const uint PW_RENDERFULLCONTENT = 0x00000002;
         private const uint BI_RGB = 0;
@@ -151,6 +213,141 @@ namespace Client.Services
 
         [DllImport("user32.dll")]
         internal static extern bool SetForegroundWindow(nint hWnd);
+
+        [DllImport("user32.dll")]
+        internal static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+        [DllImport("user32.dll")]
+        internal static extern bool GetCursorPos(out POINT lpPoint);
+
+        [DllImport("user32.dll")]
+        internal static extern bool SetCursorPos(int x, int y);
+
+        [DllImport("user32.dll")]
+        private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int vKey);
+
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(nint hWnd, uint msg, nuint wParam, nint lParam);
+
+        internal static void CloseWindowGracefully(nint hWnd)
+        {
+            if (IsWindow(hWnd))
+            {
+                _ = PostMessage(hWnd, WM_CLOSE, 0, 0);
+            }
+        }
+
+        internal static bool IsEscapePressed() => (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+
+        internal static bool MoveAndResizeWindow(nint hWnd, int x, int y, int width, int height)
+        {
+            if (!IsWindow(hWnd)) return false;
+            _ = ShowWindow(hWnd, SW_RESTORE);
+            bool ok = SetWindowPos(hWnd, nint.Zero, x, y, width, height, SWP_SHOWWINDOW);
+            _ = SetForegroundWindow(hWnd);
+            return ok;
+        }
+
+        internal static void LeftClickAt(int screenX, int screenY)
+        {
+            _ = SetCursorPos(screenX, screenY);
+            Thread.Sleep(45);
+            var inputs = new INPUT[2];
+            inputs[0].type = INPUT_MOUSE;
+            inputs[0].u.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+            inputs[1].type = INPUT_MOUSE;
+            inputs[1].u.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+            _ = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        }
+
+        internal static void ScrollWheelAt(int screenX, int screenY, int notches)
+        {
+            _ = SetCursorPos(screenX, screenY);
+            Thread.Sleep(35);
+            var inputs = new INPUT[1];
+            inputs[0].type = INPUT_MOUSE;
+            inputs[0].u.mi.dwFlags = MOUSEEVENTF_WHEEL;
+            inputs[0].u.mi.mouseData = unchecked((uint)(notches * WHEEL_DELTA));
+            _ = SendInput(1, inputs, Marshal.SizeOf<INPUT>());
+        }
+
+        internal static void SendEscapeKey()
+        {
+            var inputs = new INPUT[2];
+            inputs[0].type = INPUT_KEYBOARD;
+            inputs[0].u.ki.wVk = VK_ESCAPE;
+            inputs[1].type = INPUT_KEYBOARD;
+            inputs[1].u.ki.wVk = VK_ESCAPE;
+            inputs[1].u.ki.dwFlags = KEYEVENTF_KEYUP;
+            _ = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        }
+
+        internal static SoftwareBitmap CaptureScreenRectToSoftwareBitmap(int left, int top, int width, int height)
+        {
+            if (width <= 0 || height <= 0)
+            {
+                throw new InvalidOperationException("截屏区域尺寸无效。");
+            }
+
+            nint screenDc = GetDC(nint.Zero);
+            if (screenDc == nint.Zero)
+            {
+                throw new InvalidOperationException("无法获取屏幕设备上下文 (DC)。");
+            }
+
+            nint memDc = nint.Zero;
+            nint dib = nint.Zero;
+            nint oldObj = nint.Zero;
+            try
+            {
+                memDc = CreateCompatibleDC(screenDc);
+                if (memDc == nint.Zero) throw new InvalidOperationException("无法创建兼容设备上下文。");
+
+                var bmi = new BITMAPINFO
+                {
+                    bmiHeader = new BITMAPINFOHEADER
+                    {
+                        biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>(),
+                        biWidth = width,
+                        biHeight = -height,
+                        biPlanes = 1,
+                        biBitCount = 32,
+                        biCompression = BI_RGB
+                    }
+                };
+
+                dib = CreateDIBSection(memDc, ref bmi, DIB_RGB_COLORS, out nint bitsPtr, nint.Zero, 0);
+                if (dib == nint.Zero || bitsPtr == nint.Zero) throw new InvalidOperationException("无法分配截屏位图缓冲。");
+
+                oldObj = SelectObject(memDc, dib);
+                _ = BitBlt(memDc, 0, 0, width, height, screenDc, left, top, SRCCOPY);
+
+                int byteCount = checked(width * height * 4);
+                byte[] pixels = new byte[byteCount];
+                Marshal.Copy(bitsPtr, pixels, 0, byteCount);
+                for (int i = 3; i < pixels.Length; i += 4)
+                {
+                    pixels[i] = 255;
+                }
+
+                return SoftwareBitmap.CreateCopyFromBuffer(
+                    pixels.AsBuffer(),
+                    BitmapPixelFormat.Bgra8,
+                    width,
+                    height,
+                    BitmapAlphaMode.Premultiplied);
+            }
+            finally
+            {
+                if (oldObj != nint.Zero && memDc != nint.Zero) _ = SelectObject(memDc, oldObj);
+                if (dib != nint.Zero) _ = DeleteObject(dib);
+                if (memDc != nint.Zero) _ = DeleteDC(memDc);
+                _ = ReleaseDC(nint.Zero, screenDc);
+            }
+        }
 
         [DllImport("user32.dll")]
         private static extern bool PrintWindow(nint hwnd, nint hdcBlt, uint nFlags);

@@ -146,32 +146,20 @@ namespace Client.Services
                 return (null, string.Empty);
             }
 
-            // Find the bold display name line directly above the anchor line (same column alignment).
-            var headlineLine = ocr.Lines
+            // Find ALL aligned header lines directly above anchor (handles 1-line or multi-line wrapped remark above 昵称:)
+            var headerLinesAbove = ocr.Lines
                 .Where(l =>
                     l.Bounds.Y < anchorLine.Bounds.Y - 2 &&
-                    l.Bounds.Y >= anchorLine.Bounds.Y - Math.Max(90, anchorLine.Bounds.Height * 5) &&
+                    l.Bounds.Y >= anchorLine.Bounds.Y - Math.Max(110, anchorLine.Bounds.Height * 6) &&
                     Math.Abs(l.Bounds.X - anchorLine.Bounds.X) < 64)
-                .OrderByDescending(l => l.Bounds.Y)
-                .FirstOrDefault();
+                .OrderBy(l => l.Bounds.Y)
+                .ToList();
 
-            // Check if there is an explicit "昵称:" row between headline and 微信号; if so, step one line higher for the bold headline.
-            if (headlineLine is not null && headlineLine.Text.Contains("昵称", StringComparison.OrdinalIgnoreCase))
-            {
-                var aboveNickname = ocr.Lines
-                    .Where(l =>
-                        l.Bounds.Y < headlineLine.Bounds.Y - 2 &&
-                        l.Bounds.Y >= headlineLine.Bounds.Y - Math.Max(70, headlineLine.Bounds.Height * 4) &&
-                        Math.Abs(l.Bounds.X - headlineLine.Bounds.X) < 64)
-                    .OrderByDescending(l => l.Bounds.Y)
-                    .FirstOrDefault();
-                if (aboveNickname is not null)
-                {
-                    headlineLine = aboveNickname;
-                }
-            }
-
-            var topRef = headlineLine ?? anchorLine;
+            var topRef = headerLinesAbove.FirstOrDefault() ?? anchorLine;
+            // Gender icon sits at the end of the non-"昵称:" headline lines above 昵称:/微信号:
+            var genderCandidates = headerLinesAbove
+                .Where(l => !l.Text.TrimStart().StartsWith("昵称", StringComparison.OrdinalIgnoreCase))
+                .ToList();
             int w = source.PixelWidth;
             int h = source.PixelHeight;
 
@@ -184,8 +172,13 @@ namespace Client.Services
                 byte[] pixels = new byte[w * h * 4];
                 bgra.CopyToBuffer(pixels.AsBuffer());
 
-                // 1. Detect gender icon right next to the bold headline
-                string gender = DetectGenderIcon(pixels, w, h, headlineLine);
+                // 1. Detect gender icon right next to the headline (checks all wrapped headline lines)
+                string gender = string.Empty;
+                foreach (var cand in genderCandidates)
+                {
+                    gender = DetectGenderIcon(pixels, w, h, cand);
+                    if (!string.IsNullOrEmpty(gender)) break;
+                }
 
                 // 2. Sample card background color directly to the left of the anchor text (works on full-window screenshots too)
                 int bgX = Math.Clamp((int)Math.Floor(anchorLine.Bounds.X) - 5, 0, w - 1);
@@ -269,64 +262,123 @@ namespace Client.Services
                     }
                 }
 
-                if (avatarRight <= avatarLeft)
-                {
-                    return (null, gender);
-                }
-
-                int boxW = avatarRight - avatarLeft + 1;
-                if (boxW < 28 || boxW > 240)
-                {
-                    return (null, gender);
-                }
-
-                // 4. Scan vertically within [avatarLeft..avatarRight] to get exact top & bottom edges
-                int vStart = Math.Max(0, bandTop - 16);
-                int vEnd = Math.Min(h - 1, bandBottom + 16);
-                int minRowForeground = Math.Max(8, (int)(boxW * 0.24));
-
+                // 4. Scan vertically within [avatarLeft..avatarRight] and pick the real avatar vertical run (ignore thin card border shadows)
+                int avatarLeftFound = avatarLeft;
+                int avatarRightFound = avatarRight;
                 int avatarTop = -1;
                 int avatarBottom = -1;
-                for (int py = vStart; py <= vEnd; py++)
-                {
-                    int fg = 0;
-                    int rowOff = py * w * 4;
-                    for (int px = avatarLeft; px <= avatarRight; px++)
-                    {
-                        int idx = rowOff + px * 4;
-                        int diff = Math.Abs(pixels[idx] - bgB) + Math.Abs(pixels[idx + 1] - bgG) + Math.Abs(pixels[idx + 2] - bgR);
-                        if (diff > 28) fg++;
-                    }
 
-                    if (fg >= minRowForeground)
+                if (avatarRightFound > avatarLeftFound)
+                {
+                    int boxW = avatarRightFound - avatarLeftFound + 1;
+                    if (boxW >= 24 && boxW <= 240)
                     {
-                        if (avatarTop < 0) avatarTop = py;
-                        avatarBottom = py;
-                    }
-                    else if (avatarTop >= 0 && (py - avatarBottom) >= 4)
-                    {
-                        break;
+                        int vStart = Math.Max(0, bandTop - 12);
+                        int vEnd = Math.Min(h - 1, bandBottom + 16);
+                        int minRowForeground = Math.Max(6, (int)(boxW * 0.18));
+
+                        var vRuns = new List<(int Top, int Bottom)>();
+                        int curTop = -1;
+                        int curBottom = -1;
+                        for (int py = vStart; py <= vEnd; py++)
+                        {
+                            int fg = 0;
+                            int rowOff = py * w * 4;
+                            for (int px = avatarLeftFound; px <= avatarRightFound; px++)
+                            {
+                                int idx = rowOff + px * 4;
+                                int diff = Math.Abs(pixels[idx] - bgB) + Math.Abs(pixels[idx + 1] - bgG) + Math.Abs(pixels[idx + 2] - bgR);
+                                if (diff > 28) fg++;
+                            }
+
+                            if (fg >= minRowForeground)
+                            {
+                                if (curTop < 0) curTop = py;
+                                curBottom = py;
+                            }
+                            else if (curTop >= 0 && (py - curBottom) >= 4)
+                            {
+                                vRuns.Add((curTop, curBottom));
+                                curTop = -1;
+                                curBottom = -1;
+                            }
+                        }
+                        if (curTop >= 0)
+                        {
+                            vRuns.Add((curTop, curBottom));
+                        }
+
+                        var bestRun = vRuns
+                            .OrderByDescending(r => r.Bottom - r.Top + 1)
+                            .FirstOrDefault();
+
+                        if (bestRun.Bottom > bestRun.Top)
+                        {
+                            avatarTop = bestRun.Top;
+                            avatarBottom = bestRun.Bottom;
+                        }
                     }
                 }
 
-                if (avatarBottom <= avatarTop)
+                // Expected WeChat 4.x square avatar size based on header text block height (~56..86px)
+                int expectedSide = regionLine is not null
+                    ? Math.Clamp((int)Math.Round((regionLine.Bounds.Y + regionLine.Bounds.Height) - topRef.Bounds.Y), 54, 92)
+                    : Math.Clamp((int)Math.Round(anchorLine.Bounds.Height * 3.1), 54, 84);
+
+                int finalLeft, finalTop, finalW, finalH;
+
+                bool pixelBoxValid = avatarRightFound > avatarLeftFound && avatarBottom > avatarTop;
+                if (pixelBoxValid)
                 {
-                    return (null, gender);
+                    int bw = avatarRightFound - avatarLeftFound + 1;
+                    int bh = avatarBottom - avatarTop + 1;
+                    double ratio = bw / (double)bh;
+                    // Check if the pixel box is a clean full square (photo/colorful avatar)
+                    if (bw >= expectedSide * 0.72 && bh >= expectedSide * 0.72 && ratio >= 0.78 && ratio <= 1.28)
+                    {
+                        int inset = Math.Min(bw, bh) >= 40 ? 1 : 0;
+                        finalLeft = avatarLeftFound + inset;
+                        finalTop = avatarTop + inset;
+                        finalW = bw - inset * 2;
+                        finalH = bh - inset * 2;
+                    }
+                    else
+                    {
+                        // White-background / line-art avatar (e.g. anime sketch / white cat): center a standard square around the detected foreground core!
+                        int coreCenterX = (avatarLeftFound + avatarRightFound) / 2;
+                        int coreCenterY = (avatarTop + avatarBottom) / 2;
+                        int geoRight = Math.Clamp((int)Math.Floor(Math.Min(topRef.Bounds.X, anchorLine.Bounds.X)) - Math.Max(12, (int)(expectedSide * 0.22)), expectedSide, w - 1);
+                        int geoLeft = Math.Max(0, geoRight - expectedSide);
+                        int geoTop = Math.Clamp((int)Math.Round(topRef.Bounds.Y) + 2, 0, Math.Max(0, h - expectedSide));
+
+                        // Blend geometric position with foreground core center while staying left of text
+                        finalLeft = Math.Clamp(coreCenterX - expectedSide / 2, Math.Max(0, geoLeft - 8), Math.Max(0, geoRight - expectedSide));
+                        finalTop = Math.Clamp(coreCenterY - expectedSide / 2, Math.Max(0, geoTop - 8), Math.Max(0, h - expectedSide));
+                        finalW = Math.Min(expectedSide, w - finalLeft);
+                        finalH = Math.Min(expectedSide, h - finalTop);
+                    }
+                }
+                else
+                {
+                    // Pure white-background avatar with very sparse lines: use exact WeChat 4.x geometric avatar square left of header text
+                    int gap = Math.Max(12, (int)Math.Round(expectedSide * 0.24));
+                    int textLeft = (int)Math.Floor(Math.Min(topRef.Bounds.X, anchorLine.Bounds.X));
+                    int geoRight = textLeft - gap;
+                    int geoLeft = geoRight - expectedSide;
+                    int geoTop = (int)Math.Round(topRef.Bounds.Y) + 2;
+                    if (geoLeft < 0 || geoTop < 0 || geoRight <= geoLeft || geoTop + expectedSide > h)
+                    {
+                        return (null, gender);
+                    }
+                    finalLeft = geoLeft;
+                    finalTop = geoTop;
+                    finalW = expectedSide;
+                    finalH = expectedSide;
                 }
 
-                int boxH = avatarBottom - avatarTop + 1;
-                double ratio = boxW / (double)boxH;
-                if (boxH >= 28 && ratio >= 0.72 && ratio <= 1.38)
+                if (finalW >= 28 && finalH >= 28)
                 {
-                    // Trim 1px outer anti-aliased edge when avatar is large enough
-                    int inset = Math.Min(boxW, boxH) >= 40 ? 1 : 0;
-                    byte[] png = await CropAndEncodePngAsync(
-                        bgra,
-                        avatarLeft + inset,
-                        avatarTop + inset,
-                        boxW - inset * 2,
-                        boxH - inset * 2,
-                        256);
+                    byte[] png = await CropAndEncodePngAsync(bgra, finalLeft, finalTop, finalW, finalH, 256);
                     return (png, gender);
                 }
 

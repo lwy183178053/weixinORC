@@ -137,23 +137,141 @@
 
             <!-- Panel Body -->
             <Grid Grid.Row="1" Padding="24,4,24,18">
-                <!-- 1. GENERAL PANEL -->
+                <!-- 1. GENERAL PANEL (Appearance Mode + Light Mode Accent Palette) -->
                 <ScrollViewer x:Name="GeneralPanel">
-                    <Border
-                        Padding="22,30"
-                        VerticalAlignment="Top"
-                        Background="{StaticResource AppSurfaceBrush}"
-                        BorderBrush="{StaticResource AppBorderBrush}"
-                        BorderThickness="1"
-                        CornerRadius="10">
-                        <StackPanel HorizontalAlignment="Center" Spacing="8">
-                            <Border Width="42" Height="42" HorizontalAlignment="Center" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="11">
-                                <FontIcon FontSize="18" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE713;" />
-                            </Border>
-                            <TextBlock HorizontalAlignment="Center" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="暂无可配置的通用项" />
-                            <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="后续新增的工作台通用选项将集中在此展示。" TextAlignment="Center" TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
+                    <StackPanel Spacing="14">
+                        <!-- Appearance Mode Card -->
+                        <Border
+                            Padding="16"
+                            Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="3">
+                                    <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="外观模式" />
+                                    <TextBlock FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="在明亮模式与黑夜模式之间自由切换" />
+                                </StackPanel>
+
+                                <Border
+                                    Grid.Column="1"
+                                    Padding="3"
+                                    VerticalAlignment="Center"
+                                    Background="{StaticResource AppInputBgBrush}"
+                                    BorderBrush="{StaticResource AppBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8">
+                                    <StackPanel Orientation="Horizontal" Spacing="3">
+                                        <Button
+                                            x:Name="LightModeBtn"
+                                            Height="28"
+                                            Padding="12,0"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Click="ThemeModeBtn_Click"
+                                            CornerRadius="6"
+                                            Tag="light">
+                                            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                                <FontIcon x:Name="LightModeIcon" FontSize="12" Glyph="&#xE706;" />
+                                                <TextBlock x:Name="LightModeText" FontSize="12" Text="明亮" />
+                                            </StackPanel>
+                                        </Button>
+                                        <Button
+                                            x:Name="DarkModeBtn"
+                                            Height="28"
+                                            Padding="12,0"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Click="ThemeModeBtn_Click"
+                                            CornerRadius="6"
+                                            Tag="dark">
+                                            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                                <FontIcon x:Name="DarkModeIcon" FontSize="12" Glyph="&#xE708;" />
+                                                <TextBlock x:Name="DarkModeText" FontSize="12" Text="黑夜" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!-- Light Mode Color Palette Card -->
+                        <Border
+                            Padding="16"
+                            Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10">
+                            <StackPanel Spacing="12">
+                                <Grid>
+                                    <StackPanel Spacing="3">
+                                        <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="颜色偏好" />
+                                        <TextBlock x:Name="PaletteHintText" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="选择工作台主色调（仅在明亮模式下生效）" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid x:Name="PaletteSwatchGrid" ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Button x:Name="PaletteVioletBtn" Grid.Column="0" Padding="6,9" HorizontalAlignment="Stretch" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1.5" Click="PaletteSwatch_Click" CornerRadius="9" Tag="violet">
+                                        <StackPanel HorizontalAlignment="Center" Spacing="6">
+                                            <Border Width="24" Height="24" HorizontalAlignment="Center" Background="#7C5CFC" CornerRadius="12">
+                                                <FontIcon x:Name="PaletteVioletCheck" FontSize="11" Foreground="#FFFFFF" Glyph="&#xE73E;" Visibility="Collapsed" />
+                                            </Border>
+                                            <TextBlock HorizontalAlignment="Center" FontSize="11.5" Foreground="{StaticResource TextPrimaryBrush}" Text="暮紫" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button x:Name="PalettePeachBtn" Grid.Column="1" Padding="6,9" HorizontalAlignment="Stretch" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1.5" Click="PaletteSwatch_Click" CornerRadius="9" Tag="peach">
+                                        <StackPanel HorizontalAlignment="Center" Spacing="6">
+                                            <Border Width="24" Height="24" HorizontalAlignment="Center" Background="#D97A54" CornerRadius="12">
+                                                <FontIcon x:Name="PalettePeachCheck" FontSize="11" Foreground="#FFFFFF" Glyph="&#xE73E;" Visibility="Collapsed" />
+                                            </Border>
+                                            <TextBlock HorizontalAlignment="Center" FontSize="11.5" Foreground="{StaticResource TextPrimaryBrush}" Text="柔杏" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button x:Name="PaletteBlueBtn" Grid.Column="2" Padding="6,9" HorizontalAlignment="Stretch" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1.5" Click="PaletteSwatch_Click" CornerRadius="9" Tag="blue">
+                                        <StackPanel HorizontalAlignment="Center" Spacing="6">
+                                            <Border Width="24" Height="24" HorizontalAlignment="Center" Background="#3B82F6" CornerRadius="12">
+                                                <FontIcon x:Name="PaletteBlueCheck" FontSize="11" Foreground="#FFFFFF" Glyph="&#xE73E;" Visibility="Collapsed" />
+                                            </Border>
+                                            <TextBlock HorizontalAlignment="Center" FontSize="11.5" Foreground="{StaticResource TextPrimaryBrush}" Text="晴蓝" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button x:Name="PaletteAmberBtn" Grid.Column="3" Padding="6,9" HorizontalAlignment="Stretch" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1.5" Click="PaletteSwatch_Click" CornerRadius="9" Tag="amber">
+                                        <StackPanel HorizontalAlignment="Center" Spacing="6">
+                                            <Border Width="24" Height="24" HorizontalAlignment="Center" Background="#D99116" CornerRadius="12">
+                                                <FontIcon x:Name="PaletteAmberCheck" FontSize="11" Foreground="#FFFFFF" Glyph="&#xE73E;" Visibility="Collapsed" />
+                                            </Border>
+                                            <TextBlock HorizontalAlignment="Center" FontSize="11.5" Foreground="{StaticResource TextPrimaryBrush}" Text="暖黄" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button x:Name="PaletteSageBtn" Grid.Column="4" Padding="6,9" HorizontalAlignment="Stretch" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1.5" Click="PaletteSwatch_Click" CornerRadius="9" Tag="sage">
+                                        <StackPanel HorizontalAlignment="Center" Spacing="6">
+                                            <Border Width="24" Height="24" HorizontalAlignment="Center" Background="#2E9E6B" CornerRadius="12">
+                                                <FontIcon x:Name="PaletteSageCheck" FontSize="11" Foreground="#FFFFFF" Glyph="&#xE73E;" Visibility="Collapsed" />
+                                            </Border>
+                                            <TextBlock HorizontalAlignment="Center" FontSize="11.5" Foreground="{StaticResource TextPrimaryBrush}" Text="竹绿" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
                 </ScrollViewer>
 
                 <!-- 2. ACCOUNT PANEL -->

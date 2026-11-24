@@ -13,8 +13,8 @@ namespace Client
     {
         private const int LoginLogicalWidth = 740;
         private const int LoginLogicalHeight = 450;
-        private const int DefaultLogicalWidth = 1280;
-        private const int DefaultLogicalHeight = 720;
+        private const int DefaultLogicalWidth = 1440;
+        private const int DefaultLogicalHeight = 900;
         private const int MinLogicalWidth = 1040;
         private const int MinLogicalHeight = 640;
 

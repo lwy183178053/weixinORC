@@ -1,12 +1,19 @@
+using System.Collections.ObjectModel;
+using System.Text;
 using Client.Controls;
 using Client.Dialogs;
 using Client.Models;
 using Client.Services;
+using Microsoft.UI;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.System;
+using Windows.UI.Core;
 
 namespace Client.Pages
 {
@@ -14,12 +21,22 @@ namespace Client.Pages
     {
         private List<CustomerDto> _allCustomers = [];
         private CustomerDto? _selectedCustomer;
+        private readonly ObservableCollection<ChatBubbleItem> _currentMessages = [];
+        private readonly ObservableCollection<AiChatMessageItem> _aiChatMessages = [];
+        private readonly HashSet<long> _locallyDeletedMessageIds = [];
+        private CustomerAiWorkspaceData? _currentAiWorkspace;
         private CancellationTokenSource? _avatarHydrationCts;
+        private string _activeRightTab = "profile";
+        private bool _isMultiSelectMode;
+        private bool _isAiSummaryBusy;
+        private bool _isAiChatBusy;
         private bool _isEditing;
 
         public CustomersPage()
         {
             InitializeComponent();
+            MessagesListView.ItemsSource = _currentMessages;
+            AiChatListView.ItemsSource = _aiChatMessages;
             _ = ThreePaneResizeController.Attach(
                 RootThreePaneGrid,
                 LeftPaneColumn, LeftPaneSplitter,
@@ -29,12 +46,27 @@ namespace Client.Pages
                 centerMin: 450,
                 rightDefault: 356, rightMin: 290, rightMax: 520);
             _ = ComposerResizeController.Attach(ChatStageGrid, ComposerRow, ComposerSplitter, minHeight: 120);
-            Unloaded += (_, _) =>
-            {
-                _avatarHydrationCts?.Cancel();
-                _avatarHydrationCts?.Dispose();
-                _avatarHydrationCts = null;
-            };
+            Loaded += CustomersPage_Loaded;
+            Unloaded += CustomersPage_Unloaded;
+        }
+
+        private void CustomersPage_Loaded(object sender, RoutedEventArgs e)
+        {
+            AppServices.Settings.ThemeChanged += OnSettingsThemeChanged;
+            UpdateRightTabVisuals();
+        }
+
+        private void CustomersPage_Unloaded(object sender, RoutedEventArgs e)
+        {
+            AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
+            _avatarHydrationCts?.Cancel();
+            _avatarHydrationCts?.Dispose();
+            _avatarHydrationCts = null;
+        }
+
+        private void OnSettingsThemeChanged(bool _)
+        {
+            UpdateRightTabVisuals();
         }
 
         protected override async void OnNavigatedTo(NavigationEventArgs e)
@@ -147,18 +179,24 @@ namespace Client.Pages
         private async void CustomersListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             _selectedCustomer = CustomersListView.SelectedItem as CustomerDto;
+            SetMultiSelectMode(false);
             SetEditMode(false);
             ProfileStatusBanner.Visibility = Visibility.Collapsed;
             UpdateSelectedCustomerUi();
 
             if (_selectedCustomer is { } selected)
             {
+                LoadCustomerAiWorkspace(selected);
                 try { await LoadCustomerMessagesAsync(selected); }
                 catch (Exception ex) { AppServices.Logs.Error("UI", $"加载聊天记录异常：{ex.Message}"); }
+                UpdateAiContextLabels();
             }
             else
             {
-                MessagesListView.ItemsSource = null;
+                _currentMessages.Clear();
+                _aiChatMessages.Clear();
+                _currentAiWorkspace = null;
+                MultiSelectMessagesButton.IsEnabled = false;
                 EmptyChatTitle.Text = "暂无聊天记录";
                 EmptyChatHint.Visibility = Visibility.Visible;
             }
@@ -174,7 +212,7 @@ namespace Client.Pages
             EditProfileButton.IsEnabled = hasCustomer;
             DeleteCustomerButton.IsEnabled = hasCustomer;
             EmptyProfileHint.Visibility = hasCustomer ? Visibility.Collapsed : Visibility.Visible;
-            ProfileContentScroll.Visibility = hasCustomer ? Visibility.Visible : Visibility.Collapsed;
+            UpdateRightTabVisibility();
 
             if (c is null)
             {
@@ -558,18 +596,21 @@ namespace Client.Pages
             var res = await AppServices.Backend.ListCustomerMessagesAsync(customer.Id);
             if (_selectedCustomer?.Id != customer.Id) return;
 
+            _currentMessages.Clear();
+            SetMultiSelectMode(false);
+
             if (!res.IsSuccess || res.Data is null)
             {
                 EmptyChatTitle.Text = $"加载消息失败：{res.ErrorMessage}";
                 EmptyChatHint.Visibility = Visibility.Visible;
-                MessagesListView.ItemsSource = null;
+                MultiSelectMessagesButton.IsEnabled = false;
                 return;
             }
 
-            var bubbles = res.Data.Items
-                .AsEnumerable()
-                .Reverse()
-                .Select(m => new ChatBubbleItem
+            foreach (var m in res.Data.Items.AsEnumerable().Reverse())
+            {
+                if (_locallyDeletedMessageIds.Contains(m.Id)) continue;
+                _currentMessages.Add(new ChatBubbleItem
                 {
                     Id = m.Id,
                     SenderInitial = customer.AvatarInitial,
@@ -577,17 +618,383 @@ namespace Client.Pages
                     Content = m.Content,
                     TimeLabel = m.TimeLabel,
                     IsOutgoing = m.IsOutgoing
-                })
-                .ToList();
-
-            MessagesListView.ItemsSource = bubbles;
-            EmptyChatTitle.Text = $"与「{customer.DisplayName}」暂无聊天记录";
-            EmptyChatHint.Visibility = bubbles.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
-            if (bubbles.Count > 0)
-            {
-                MessagesListView.ScrollIntoView(bubbles[^1]);
+                });
             }
+
+            RefreshMessageListEmptyState(customer.DisplayName);
+            if (_currentMessages.Count > 0)
+            {
+                MessagesListView.ScrollIntoView(_currentMessages[^1]);
+            }
+        }
+
+        // ---- Chat Bubble Right-Click & Multi-Select Delete ----
+
+        private void RefreshMessageListEmptyState(string customerName)
+        {
+            bool hasMessages = _currentMessages.Count > 0;
+            EmptyChatTitle.Text = $"与「{customerName}」暂无聊天记录";
+            EmptyChatHint.Visibility = hasMessages ? Visibility.Collapsed : Visibility.Visible;
+            MultiSelectMessagesButton.IsEnabled = hasMessages;
+            if (!hasMessages && _isMultiSelectMode)
+            {
+                SetMultiSelectMode(false);
+            }
+            UpdateAiContextLabels();
+        }
+
+        private void SetMultiSelectMode(bool enabled)
+        {
+            _isMultiSelectMode = enabled;
+            MessageMultiSelectBar.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+            MultiSelectMessagesButton.Content = enabled ? "取消多选" : "多选";
+            foreach (var item in _currentMessages)
+            {
+                item.IsSelectionMode = enabled;
+                if (!enabled) item.IsSelected = false;
+            }
+            UpdateMultiSelectSummary();
+        }
+
+        private void UpdateMultiSelectSummary()
+        {
+            int selectedCount = _currentMessages.Count(m => m.IsSelected);
+            SelectedMessagesCountText.Text = $"已选 {selectedCount} 条消息";
+            DeleteSelectedMessagesButton.IsEnabled = selectedCount > 0;
+            DeleteSelectedMessagesButton.Content = selectedCount > 0 ? $"删除所选 ({selectedCount})" : "删除所选";
+            SelectAllMessagesButton.Content = _currentMessages.Count > 0 && selectedCount == _currentMessages.Count ? "取消全选" : "全选";
+        }
+
+        private void MultiSelectMessagesButton_Click(object sender, RoutedEventArgs e) =>
+            SetMultiSelectMode(!_isMultiSelectMode);
+
+        private void ExitMultiSelectButton_Click(object sender, RoutedEventArgs e) =>
+            SetMultiSelectMode(false);
+
+        private void SelectAllMessagesButton_Click(object sender, RoutedEventArgs e)
+        {
+            bool selectAll = _currentMessages.Any(m => !m.IsSelected);
+            foreach (var item in _currentMessages) item.IsSelected = selectAll;
+            UpdateMultiSelectSummary();
+        }
+
+        private void BubbleCheckBox_Click(object sender, RoutedEventArgs e) =>
+            UpdateMultiSelectSummary();
+
+        private void MessagesListView_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (!_isMultiSelectMode || e.ClickedItem is not ChatBubbleItem item) return;
+            item.IsSelected = !item.IsSelected;
+            UpdateMultiSelectSummary();
+        }
+
+        private void CopyBubbleMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
+            try
+            {
+                var pkg = new DataPackage();
+                pkg.SetText(item.Content);
+                Clipboard.SetContent(pkg);
+                ComposerHintText.Text = "已复制该条消息内容。";
+            }
+            catch (Exception ex)
+            {
+                ComposerHintText.Text = $"复制失败：{ex.Message}";
+            }
+        }
+
+        private void MultiSelectFromBubbleMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
+            if (!_isMultiSelectMode) SetMultiSelectMode(true);
+            item.IsSelected = true;
+            UpdateMultiSelectSummary();
+        }
+
+        private void DeleteBubbleMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
+            RemoveBubblesFromUi([item]);
+        }
+
+        private void DeleteSelectedMessagesButton_Click(object sender, RoutedEventArgs e)
+        {
+            var targets = _currentMessages.Where(m => m.IsSelected).ToList();
+            if (targets.Count == 0) return;
+            RemoveBubblesFromUi(targets);
+            SetMultiSelectMode(false);
+        }
+
+        private void RemoveBubblesFromUi(List<ChatBubbleItem> targets)
+        {
+            foreach (var item in targets)
+            {
+                if (item.Id > 0) _locallyDeletedMessageIds.Add(item.Id);
+                _currentMessages.Remove(item);
+            }
+            RefreshMessageListEmptyState(_selectedCustomer?.DisplayName ?? string.Empty);
+            ComposerHintText.Text = $"已移除 {targets.Count} 条聊天记录（待接入服务端删除接口后同步持久化）。";
+        }
+
+        // ---- Right Panel Tabs: 基本资料 / AI 总结 / AI 对话 ----
+
+        private void RightTab_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string tab)
+            {
+                _activeRightTab = tab;
+                UpdateRightTabVisuals();
+                UpdateRightTabVisibility();
+            }
+        }
+
+        private void UpdateRightTabVisibility()
+        {
+            bool hasCustomer = _selectedCustomer is not null;
+            ProfileTabContainer.Visibility = hasCustomer && _activeRightTab == "profile" ? Visibility.Visible : Visibility.Collapsed;
+            AiSummaryTabContainer.Visibility = hasCustomer && _activeRightTab == "summary" ? Visibility.Visible : Visibility.Collapsed;
+            AiChatTabContainer.Visibility = hasCustomer && _activeRightTab == "aichat" ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void UpdateRightTabVisuals()
+        {
+            var activeFg = (Brush)Application.Current.Resources["BrandPrimaryBrush"];
+            var inactiveFg = (Brush)Application.Current.Resources["TextSecondaryBrush"];
+            var transparent = new SolidColorBrush(Colors.Transparent);
+
+            ApplyTabVisual(RightTabProfileIcon, RightTabProfileText, RightTabProfileLine, _activeRightTab == "profile", activeFg, inactiveFg, transparent);
+            ApplyTabVisual(RightTabSummaryIcon, RightTabSummaryText, RightTabSummaryLine, _activeRightTab == "summary", activeFg, inactiveFg, transparent);
+            ApplyTabVisual(RightTabChatIcon, RightTabChatText, RightTabChatLine, _activeRightTab == "aichat", activeFg, inactiveFg, transparent);
+        }
+
+        private static void ApplyTabVisual(FontIcon icon, TextBlock text, Border line, bool active, Brush activeFg, Brush inactiveFg, Brush transparent)
+        {
+            icon.Foreground = active ? activeFg : inactiveFg;
+            text.Foreground = active ? activeFg : inactiveFg;
+            text.FontWeight = active ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+            line.Background = active ? activeFg : transparent;
+        }
+
+        private void LoadCustomerAiWorkspace(CustomerDto customer)
+        {
+            _currentAiWorkspace = AppServices.AiWorkspace.Load(customer.Id);
+            RenderAiSummaryState();
+
+            _aiChatMessages.Clear();
+            foreach (var msg in _currentAiWorkspace.Messages)
+            {
+                _aiChatMessages.Add(msg);
+            }
+            UpdateAiChatEmptyState();
+            UpdateAiContextLabels();
+        }
+
+        private void UpdateAiContextLabels()
+        {
+            if (_selectedCustomer is null) return;
+            int msgCount = _currentMessages.Count;
+            AiSummaryContextText.Text = $"基于：基本资料 · 备注 · {msgCount} 条聊天记录";
+            AiChatContextTitle.Text = $"围绕「{_selectedCustomer.DisplayName}」讨论（含 {msgCount} 条对话）";
+        }
+
+        private void RenderAiSummaryState()
+        {
+            bool hasSummary = _currentAiWorkspace is not null && !string.IsNullOrWhiteSpace(_currentAiWorkspace.SummaryText);
+            AiSummaryLoadingPanel.Visibility = Visibility.Collapsed;
+            AiSummarySpinner.IsActive = false;
+            AiSummaryEmptyPanel.Visibility = hasSummary ? Visibility.Collapsed : Visibility.Visible;
+            AiSummaryResultScroll.Visibility = hasSummary ? Visibility.Visible : Visibility.Collapsed;
+            AiSummaryFooterBar.Visibility = hasSummary ? Visibility.Visible : Visibility.Collapsed;
+            RegenerateSummaryTopButton.Visibility = hasSummary ? Visibility.Visible : Visibility.Collapsed;
+
+            if (hasSummary && _currentAiWorkspace is not null)
+            {
+                AiSummaryContentText.Text = _currentAiWorkspace.SummaryText;
+                AiSummaryTimeText.Text = string.IsNullOrWhiteSpace(_currentAiWorkspace.SummaryUpdatedAt)
+                    ? string.Empty
+                    : $"更新于 {_currentAiWorkspace.SummaryUpdatedAt}";
+            }
+        }
+
+        private async void GenerateAiSummaryButton_Click(object sender, RoutedEventArgs e)
+        {
+            var customer = _selectedCustomer;
+            if (customer is null || _isAiSummaryBusy) return;
+
+            _isAiSummaryBusy = true;
+            AiSummaryEmptyPanel.Visibility = Visibility.Collapsed;
+            AiSummaryResultScroll.Visibility = Visibility.Collapsed;
+            AiSummaryFooterBar.Visibility = Visibility.Collapsed;
+            RegenerateSummaryTopButton.Visibility = Visibility.Collapsed;
+            AiSummaryLoadingPanel.Visibility = Visibility.Visible;
+            AiSummarySpinner.IsActive = true;
+
+            try
+            {
+                // UI-only local preview placeholder until backend OpenAI-compatible AI endpoint is wired.
+                await Task.Delay(320);
+                if (_selectedCustomer?.Id != customer.Id) return;
+
+                string summary = BuildLocalPreviewSummary(customer, _currentMessages);
+                string timestamp = DateTime.Now.ToString("MM-dd HH:mm");
+
+                _currentAiWorkspace ??= new CustomerAiWorkspaceData { CustomerId = customer.Id };
+                _currentAiWorkspace.SummaryText = summary;
+                _currentAiWorkspace.SummaryUpdatedAt = timestamp;
+                _currentAiWorkspace.SummaryContextMeta = $"基本资料 + {_currentMessages.Count} 条消息";
+                AppServices.AiWorkspace.Save(_currentAiWorkspace);
+            }
+            finally
+            {
+                _isAiSummaryBusy = false;
+                if (_selectedCustomer?.Id == customer.Id)
+                {
+                    RenderAiSummaryState();
+                }
+            }
+        }
+
+        private static string BuildLocalPreviewSummary(CustomerDto c, IReadOnlyCollection<ChatBubbleItem> messages)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("【核心画像】");
+            sb.AppendLine($"• 客户：{c.DisplayName}{(string.IsNullOrWhiteSpace(c.WechatAccount) ? "" : $"（微信号：{c.WechatAccount}）")}");
+            if (!string.IsNullOrWhiteSpace(c.Region) || !string.IsNullOrWhiteSpace(c.Gender))
+                sb.AppendLine($"• 属性：{(string.IsNullOrWhiteSpace(c.Gender) ? "性别未知" : c.Gender)} · {(string.IsNullOrWhiteSpace(c.Region) ? "地区未填" : c.Region)}");
+            if (!string.IsNullOrWhiteSpace(c.FollowStatus) || !string.IsNullOrWhiteSpace(c.Tags))
+                sb.AppendLine($"• 阶段/标签：{(string.IsNullOrWhiteSpace(c.FollowStatus) ? "未设置" : c.FollowStatus)} / {(string.IsNullOrWhiteSpace(c.Tags) ? "无标签" : c.Tags)}");
+            if (!string.IsNullOrWhiteSpace(c.Note))
+                sb.AppendLine($"• 员工备注：{c.Note.Trim()}");
+
+            sb.AppendLine();
+            sb.AppendLine("【沟通概况】");
+            if (messages.Count == 0)
+            {
+                sb.AppendLine("• 当前暂无已录入聊天记录，可通过中间栏“截图导入对话”补充上下文。");
+            }
+            else
+            {
+                int incoming = messages.Count(m => !m.IsOutgoing);
+                int outgoing = messages.Count - incoming;
+                var latest = messages.Last();
+                string snippet = latest.Content.Replace("\r", " ").Replace("\n", " ");
+                if (snippet.Length > 48) snippet = snippet[..48] + "...";
+                sb.AppendLine($"• 已收录 {messages.Count} 条对话（客户 {incoming} 条 / 我方 {outgoing} 条）。");
+                sb.AppendLine($"• 最近一条（{(latest.IsOutgoing ? "我方" : "客户")}）：{snippet}");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("【后续跟进建议】");
+            sb.Append("• 接入服务端 OpenAI 标准接口后，此处将自动基于上述完整上下文生成深度意向评估与跟进话术建议。");
+            return sb.ToString();
+        }
+
+        private void CopyAiSummaryButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_currentAiWorkspace is null || string.IsNullOrWhiteSpace(_currentAiWorkspace.SummaryText)) return;
+            try
+            {
+                var pkg = new DataPackage();
+                pkg.SetText(_currentAiWorkspace.SummaryText);
+                Clipboard.SetContent(pkg);
+                AiSummaryNoticeText.Text = "✓ 已复制总结内容到剪贴板。";
+            }
+            catch (Exception ex)
+            {
+                AiSummaryNoticeText.Text = $"复制失败：{ex.Message}";
+            }
+        }
+
+        private void UpdateAiChatEmptyState()
+        {
+            bool hasMsgs = _aiChatMessages.Count > 0;
+            AiChatEmptyPanel.Visibility = hasMsgs ? Visibility.Collapsed : Visibility.Visible;
+            AiChatListView.Visibility = hasMsgs ? Visibility.Visible : Visibility.Collapsed;
+            ClearAiChatButton.IsEnabled = hasMsgs;
+        }
+
+        private async void AiQuickPrompt_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Content is string prompt)
+            {
+                await SendAiChatMessageAsync(prompt);
+            }
+        }
+
+        private async void AiChatSendButton_Click(object sender, RoutedEventArgs e)
+        {
+            await SendAiChatMessageAsync(AiChatInputBox.Text);
+        }
+
+        private async void AiChatInputBox_KeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            if (e.Key != VirtualKey.Enter) return;
+            var shiftState = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift);
+            if ((shiftState & CoreVirtualKeyStates.Down) == CoreVirtualKeyStates.Down) return;
+
+            e.Handled = true;
+            await SendAiChatMessageAsync(AiChatInputBox.Text);
+        }
+
+        private async Task SendAiChatMessageAsync(string rawText)
+        {
+            var customer = _selectedCustomer;
+            string prompt = rawText.Trim();
+            if (customer is null || string.IsNullOrEmpty(prompt) || _isAiChatBusy) return;
+
+            _isAiChatBusy = true;
+            AiChatSendButton.IsEnabled = false;
+            AiChatInputBox.Text = string.Empty;
+
+            try
+            {
+                _currentAiWorkspace ??= new CustomerAiWorkspaceData { CustomerId = customer.Id };
+                var userMsg = new AiChatMessageItem
+                {
+                    Role = "user",
+                    Content = prompt,
+                    Timestamp = DateTime.Now.ToString("HH:mm")
+                };
+                _currentAiWorkspace.Messages.Add(userMsg);
+                _aiChatMessages.Add(userMsg);
+                UpdateAiChatEmptyState();
+                AiChatListView.ScrollIntoView(userMsg);
+                AppServices.AiWorkspace.Save(_currentAiWorkspace);
+
+                // UI-only local placeholder reply until backend AI service is enabled.
+                await Task.Delay(260);
+                if (_selectedCustomer?.Id != customer.Id) return;
+
+                var reply = new AiChatMessageItem
+                {
+                    Role = "assistant",
+                    Content = $"已载入客户「{customer.DisplayName}」完整上下文（基础资料 + 员工备注 + {_currentMessages.Count} 条聊天记录），收到你的问题：「{prompt}」。\n\n当前服务端 AI 接口尚未接入，确认后端方案后即可直连 OpenAI 标准接口进行真实回复。",
+                    Timestamp = DateTime.Now.ToString("HH:mm")
+                };
+                _currentAiWorkspace.Messages.Add(reply);
+                _aiChatMessages.Add(reply);
+                AiChatListView.ScrollIntoView(reply);
+                AppServices.AiWorkspace.Save(_currentAiWorkspace);
+            }
+            catch (Exception ex)
+            {
+                AppServices.Logs.Error("AI", $"本地 AI 对话 UI 异常：{ex.Message}");
+            }
+            finally
+            {
+                _isAiChatBusy = false;
+                AiChatSendButton.IsEnabled = true;
+            }
+        }
+
+        private void ClearAiChatButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedCustomer is null || _currentAiWorkspace is null) return;
+            _currentAiWorkspace.Messages.Clear();
+            _aiChatMessages.Clear();
+            AppServices.AiWorkspace.Save(_currentAiWorkspace);
+            UpdateAiChatEmptyState();
         }
 
         private async void SendMessageButton_Click(object sender, RoutedEventArgs e)

@@ -9,6 +9,7 @@ namespace Client.Services
         public static AppLogService Logs { get; } = new();
         public static BackendApiClient Backend { get; } = new();
         public static WeChatWindowService WeChatWindows { get; } = new();
+        public static LocalAiWorkspaceStore AiWorkspace { get; } = new();
         public static OcrService Ocr => LazyOcr.Value;
         public static nint MainWindowHandle { get; set; }
 

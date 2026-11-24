@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using Client.Controls;
 using Client.Dialogs;
 using Client.Models;
@@ -7,6 +8,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace Client.Pages
 {
@@ -14,11 +16,15 @@ namespace Client.Pages
     {
         private List<GroupDto> _allGroups = [];
         private GroupDto? _selectedGroup;
+        private readonly ObservableCollection<ChatBubbleItem> _currentMessages = [];
+        private readonly HashSet<long> _locallyDeletedMessageIds = [];
+        private bool _isMultiSelectMode;
         private bool _isEditing;
 
         public GroupsPage()
         {
             InitializeComponent();
+            MessagesListView.ItemsSource = _currentMessages;
             _ = ThreePaneResizeController.Attach(
                 RootThreePaneGrid,
                 LeftPaneColumn, LeftPaneSplitter,
@@ -94,6 +100,7 @@ namespace Client.Pages
         private async void GroupsListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             _selectedGroup = GroupsListView.SelectedItem as GroupDto;
+            SetMultiSelectMode(false);
             SetEditMode(false);
             DetailStatusBanner.Visibility = Visibility.Collapsed;
             UpdateSelectedGroupUi();
@@ -105,7 +112,8 @@ namespace Client.Pages
             }
             else
             {
-                MessagesListView.ItemsSource = null;
+                _currentMessages.Clear();
+                MultiSelectMessagesButton.IsEnabled = false;
                 EmptyChatTitle.Text = "暂无群聊记录";
                 EmptyChatHint.Visibility = Visibility.Visible;
             }
@@ -330,40 +338,143 @@ namespace Client.Pages
             var res = await AppServices.Backend.ListGroupMessagesAsync(group.Id);
             if (_selectedGroup?.Id != group.Id) return;
 
+            _currentMessages.Clear();
+            SetMultiSelectMode(false);
+
             if (!res.IsSuccess || res.Data is null)
             {
                 EmptyChatTitle.Text = $"加载群消息失败：{res.ErrorMessage}";
                 EmptyChatHint.Visibility = Visibility.Visible;
-                MessagesListView.ItemsSource = null;
+                MultiSelectMessagesButton.IsEnabled = false;
                 return;
             }
 
-            var bubbles = res.Data.Items
-                .AsEnumerable()
-                .Reverse()
-                .Select(m =>
-                {
-                    string sender = string.IsNullOrWhiteSpace(m.SenderName) ? "群成员" : m.SenderName;
-                    return new ChatBubbleItem
-                    {
-                        Id = m.Id,
-                        SenderName = sender,
-                        SenderInitial = sender[..1].ToUpperInvariant(),
-                        Content = m.Content,
-                        TimeLabel = m.TimeLabel,
-                        IsOutgoing = m.IsOutgoing
-                    };
-                })
-                .ToList();
-
-            MessagesListView.ItemsSource = bubbles;
-            EmptyChatTitle.Text = $"「{group.DisplayName}」暂无群聊记录";
-            EmptyChatHint.Visibility = bubbles.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
-            if (bubbles.Count > 0)
+            foreach (var m in res.Data.Items.AsEnumerable().Reverse())
             {
-                MessagesListView.ScrollIntoView(bubbles[^1]);
+                if (_locallyDeletedMessageIds.Contains(m.Id)) continue;
+                string sender = string.IsNullOrWhiteSpace(m.SenderName) ? "群成员" : m.SenderName;
+                _currentMessages.Add(new ChatBubbleItem
+                {
+                    Id = m.Id,
+                    SenderName = sender,
+                    SenderInitial = sender[..1].ToUpperInvariant(),
+                    Content = m.Content,
+                    TimeLabel = m.TimeLabel,
+                    IsOutgoing = m.IsOutgoing
+                });
             }
+
+            RefreshMessageListEmptyState(group.DisplayName);
+            if (_currentMessages.Count > 0)
+            {
+                MessagesListView.ScrollIntoView(_currentMessages[^1]);
+            }
+        }
+
+        private void RefreshMessageListEmptyState(string groupName)
+        {
+            bool hasMessages = _currentMessages.Count > 0;
+            EmptyChatTitle.Text = $"「{groupName}」暂无群聊记录";
+            EmptyChatHint.Visibility = hasMessages ? Visibility.Collapsed : Visibility.Visible;
+            MultiSelectMessagesButton.IsEnabled = hasMessages;
+            if (!hasMessages && _isMultiSelectMode)
+            {
+                SetMultiSelectMode(false);
+            }
+        }
+
+        private void SetMultiSelectMode(bool enabled)
+        {
+            _isMultiSelectMode = enabled;
+            MessageMultiSelectBar.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+            MultiSelectMessagesButton.Content = enabled ? "取消多选" : "多选";
+            foreach (var item in _currentMessages)
+            {
+                item.IsSelectionMode = enabled;
+                if (!enabled) item.IsSelected = false;
+            }
+            UpdateMultiSelectSummary();
+        }
+
+        private void UpdateMultiSelectSummary()
+        {
+            int selectedCount = _currentMessages.Count(m => m.IsSelected);
+            SelectedMessagesCountText.Text = $"已选 {selectedCount} 条消息";
+            DeleteSelectedMessagesButton.IsEnabled = selectedCount > 0;
+            DeleteSelectedMessagesButton.Content = selectedCount > 0 ? $"删除所选 ({selectedCount})" : "删除所选";
+            SelectAllMessagesButton.Content = _currentMessages.Count > 0 && selectedCount == _currentMessages.Count ? "取消全选" : "全选";
+        }
+
+        private void MultiSelectMessagesButton_Click(object sender, RoutedEventArgs e) =>
+            SetMultiSelectMode(!_isMultiSelectMode);
+
+        private void ExitMultiSelectButton_Click(object sender, RoutedEventArgs e) =>
+            SetMultiSelectMode(false);
+
+        private void SelectAllMessagesButton_Click(object sender, RoutedEventArgs e)
+        {
+            bool selectAll = _currentMessages.Any(m => !m.IsSelected);
+            foreach (var item in _currentMessages) item.IsSelected = selectAll;
+            UpdateMultiSelectSummary();
+        }
+
+        private void BubbleCheckBox_Click(object sender, RoutedEventArgs e) =>
+            UpdateMultiSelectSummary();
+
+        private void MessagesListView_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (!_isMultiSelectMode || e.ClickedItem is not ChatBubbleItem item) return;
+            item.IsSelected = !item.IsSelected;
+            UpdateMultiSelectSummary();
+        }
+
+        private void CopyBubbleMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
+            try
+            {
+                var pkg = new DataPackage();
+                pkg.SetText(item.Content);
+                Clipboard.SetContent(pkg);
+                ComposerHintText.Text = "已复制该条消息内容。";
+            }
+            catch (Exception ex)
+            {
+                ComposerHintText.Text = $"复制失败：{ex.Message}";
+            }
+        }
+
+        private void MultiSelectFromBubbleMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
+            if (!_isMultiSelectMode) SetMultiSelectMode(true);
+            item.IsSelected = true;
+            UpdateMultiSelectSummary();
+        }
+
+        private void DeleteBubbleMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
+            RemoveBubblesFromUi([item]);
+        }
+
+        private void DeleteSelectedMessagesButton_Click(object sender, RoutedEventArgs e)
+        {
+            var targets = _currentMessages.Where(m => m.IsSelected).ToList();
+            if (targets.Count == 0) return;
+            RemoveBubblesFromUi(targets);
+            SetMultiSelectMode(false);
+        }
+
+        private void RemoveBubblesFromUi(List<ChatBubbleItem> targets)
+        {
+            foreach (var item in targets)
+            {
+                if (item.Id > 0) _locallyDeletedMessageIds.Add(item.Id);
+                _currentMessages.Remove(item);
+            }
+            RefreshMessageListEmptyState(_selectedGroup?.DisplayName ?? string.Empty);
+            ComposerHintText.Text = $"已移除 {targets.Count} 条群聊记录（待接入服务端删除接口后同步持久化）。";
         }
 
         private async void SendMessageButton_Click(object sender, RoutedEventArgs e)

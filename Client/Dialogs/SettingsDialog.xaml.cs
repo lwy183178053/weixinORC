@@ -51,11 +51,16 @@ namespace Client.Dialogs
             RequestedTheme = AppServices.Settings.CurrentElementTheme;
             LogsListView.ItemsSource = _visibleLogs;
             Loaded += SettingsDialog_Loaded;
-            Closed += (_, _) => UnsubscribeLogs();
+            Closed += (_, _) =>
+            {
+                AppServices.Settings.ThemeChanged -= Settings_ThemeChanged;
+                UnsubscribeLogs();
+            };
         }
 
         private void SettingsDialog_Loaded(object sender, RoutedEventArgs e)
         {
+            AppServices.Settings.ThemeChanged += Settings_ThemeChanged;
             BackendUrlBox.Text = AppServices.Backend.BaseUrl;
 
             var emp = AppServices.Backend.CurrentEmployee;
@@ -70,7 +75,74 @@ namespace Client.Dialogs
                 AccountIdText.Text = emp.EmployeeId;
             }
 
+            UpdateAppearanceControls();
             SelectCategory("general");
+        }
+
+        private void Settings_ThemeChanged(bool isDark)
+        {
+            RequestedTheme = AppServices.Settings.CurrentElementTheme;
+            UpdateAppearanceControls();
+            UpdateNavVisuals();
+        }
+
+        private void ThemeModeBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string mode)
+            {
+                AppServices.Settings.ApplyTheme(isDark: mode == "dark", save: true);
+            }
+        }
+
+        private void PaletteSwatch_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string palette)
+            {
+                AppServices.Settings.SetPalette(palette, save: true);
+            }
+        }
+
+        private void UpdateAppearanceControls()
+        {
+            bool isDark = AppServices.Settings.IsDarkMode;
+            var activeBg = (Brush)Application.Current.Resources["AppSurfaceBrush"];
+            var activeFg = (Brush)Application.Current.Resources["BrandPrimaryBrush"];
+            var inactiveBg = new SolidColorBrush(Colors.Transparent);
+            var inactiveFg = (Brush)Application.Current.Resources["TextSecondaryBrush"];
+
+            SetNavState(LightModeBtn, LightModeIcon, LightModeText, !isDark, activeBg, activeFg, inactiveBg, inactiveFg);
+            SetNavState(DarkModeBtn, DarkModeIcon, DarkModeText, isDark, activeBg, activeFg, inactiveBg, inactiveFg);
+
+            string currentPalette = AppServices.Settings.CurrentPalette;
+            var brandBorder = (Brush)Application.Current.Resources["BrandPrimaryBrush"];
+            var defaultBorder = (Brush)Application.Current.Resources["AppBorderBrush"];
+            var activeCardBg = (Brush)Application.Current.Resources["BrandSoftBgBrush"];
+            var defaultCardBg = (Brush)Application.Current.Resources["AppCanvasBgBrush"];
+
+            SetSwatchState(PaletteVioletBtn, PaletteVioletCheck, currentPalette == "violet", brandBorder, defaultBorder, activeCardBg, defaultCardBg);
+            SetSwatchState(PalettePeachBtn, PalettePeachCheck, currentPalette == "peach", brandBorder, defaultBorder, activeCardBg, defaultCardBg);
+            SetSwatchState(PaletteBlueBtn, PaletteBlueCheck, currentPalette == "blue", brandBorder, defaultBorder, activeCardBg, defaultCardBg);
+            SetSwatchState(PaletteAmberBtn, PaletteAmberCheck, currentPalette == "amber", brandBorder, defaultBorder, activeCardBg, defaultCardBg);
+            SetSwatchState(PaletteSageBtn, PaletteSageCheck, currentPalette == "sage", brandBorder, defaultBorder, activeCardBg, defaultCardBg);
+
+            PaletteSwatchGrid.Opacity = isDark ? 0.58 : 1.0;
+            PaletteHintText.Text = isDark
+                ? "当前为黑夜模式，所选颜色偏好将在切换回明亮模式时生效"
+                : "选择工作台主色调（仅在明亮模式下生效）";
+        }
+
+        private static void SetSwatchState(
+            Button btn,
+            FontIcon checkIcon,
+            bool selected,
+            Brush activeBorder,
+            Brush defaultBorder,
+            Brush activeBg,
+            Brush defaultBg)
+        {
+            btn.BorderBrush = selected ? activeBorder : defaultBorder;
+            btn.Background = selected ? activeBg : defaultBg;
+            checkIcon.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void NavCategory_Click(object sender, RoutedEventArgs e)

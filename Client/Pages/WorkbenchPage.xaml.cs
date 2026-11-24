@@ -4,6 +4,7 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 
 namespace Client.Pages
 {
@@ -11,10 +12,12 @@ namespace Client.Pages
     {
         private string _activeTag = "customers";
         private bool _isLoggingOut;
+        private Storyboard? _tabFadeStoryboard;
 
         public WorkbenchPage()
         {
             InitializeComponent();
+            WorkspaceFrame.ContentTransitions = [];
             Loaded += WorkbenchPage_Loaded;
             Unloaded += WorkbenchPage_Unloaded;
         }
@@ -90,8 +93,32 @@ namespace Client.Pages
             ActiveTabTitleText.Text = title;
             if (WorkspaceFrame.CurrentSourcePageType != pageType)
             {
-                WorkspaceFrame.Navigate(pageType);
+                bool hadPage = WorkspaceFrame.CurrentSourcePageType is not null;
+                WorkspaceFrame.Navigate(pageType, null, new SuppressNavigationTransitionInfo());
+                if (hadPage)
+                {
+                    PlaySubtleTabFade();
+                }
             }
+        }
+
+        private void PlaySubtleTabFade()
+        {
+            _tabFadeStoryboard?.Stop();
+            var anim = new DoubleAnimation
+            {
+                From = 0.88,
+                To = 1.0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(95)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(anim, WorkspaceFrame);
+            Storyboard.SetTargetProperty(anim, "Opacity");
+
+            var sb = new Storyboard();
+            sb.Children.Add(anim);
+            _tabFadeStoryboard = sb;
+            sb.Begin();
         }
 
         private void UpdateRailVisuals()

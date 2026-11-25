@@ -74,7 +74,7 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 		"tags":           "机密",
 	})
 
-	// 4. Knowledge base CRUD
+	// 4. Knowledge base CRUD + Search Hit-Test + Batch Import
 	kbCreate := app.request(t, http.MethodPost, "/api/v1/admin/knowledge", aliceToken, map[string]any{
 		"title":          "热玛吉标准报价与红线",
 		"category":       "报价口径",
@@ -84,6 +84,25 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 	})
 	if kbCreate.Code != http.StatusCreated {
 		t.Fatalf("create knowledge: got %d %s", kbCreate.Code, kbCreate.Body.String())
+	}
+
+	kbBatch := app.request(t, http.MethodPost, "/api/v1/admin/knowledge/batch", aliceToken, map[string]any{
+		"items": []map[string]any{
+			{
+				"title":    "术后防晒与修护指南",
+				"category": "售后政策",
+				"tags":     "术后,防晒",
+				"content":  "术后 7 天内加强物理防晒与医用冷敷贴补水，避免高温桑拿。",
+			},
+		},
+	})
+	if kbBatch.Code != http.StatusCreated || !strings.Contains(kbBatch.Body.String(), `"created_count":1`) {
+		t.Fatalf("batch create knowledge failed: %d %s", kbBatch.Code, kbBatch.Body.String())
+	}
+
+	kbSearch := app.request(t, http.MethodGet, "/api/v1/admin/knowledge/search?q=防晒", aliceToken, nil)
+	if kbSearch.Code != http.StatusOK || !strings.Contains(kbSearch.Body.String(), "术后防晒与修护指南") {
+		t.Fatalf("knowledge search hit-test failed: %d %s", kbSearch.Code, kbSearch.Body.String())
 	}
 
 	// 5. Mock OpenAI-compatible server supporting both direct chat and 2-round Function Calling

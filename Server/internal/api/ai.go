@@ -135,6 +135,79 @@ func (s *server) listAdminKnowledge(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+func (s *server) searchAdminKnowledge(c *gin.Context) {
+	q := strings.TrimSpace(c.Query("q"))
+	matched, err := s.store.SearchKnowledge(c.Request.Context(), q, 8)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal_error"})
+		return
+	}
+	all, _ := s.store.ListKnowledge(c.Request.Context())
+	seen := make(map[int64]bool, len(matched))
+	type hitItem struct {
+		store.KnowledgeItem
+		MatchReason string `json:"match_reason"`
+	}
+	results := make([]hitItem, 0, len(matched)+4)
+	for _, it := range all {
+		if it.AlwaysInclude {
+			seen[it.ID] = true
+			results = append(results, hitItem{KnowledgeItem: it, MatchReason: "常驻注入"})
+		}
+	}
+	for _, it := range matched {
+		if !seen[it.ID] {
+			seen[it.ID] = true
+			reason := "关键词命中"
+			if q == "" {
+				reason = "默认展示"
+			}
+			results = append(results, hitItem{KnowledgeItem: it, MatchReason: reason})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"query": q, "items": results})
+}
+
+type batchKnowledgeRequest struct {
+	Items []knowledgeRequest `json:"items"`
+}
+
+func (s *server) batchCreateAdminKnowledge(c *gin.Context) {
+	var req batchKnowledgeRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	if len(req.Items) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "导入列表不能为空"})
+		return
+	}
+	if len(req.Items) > 50 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "单次最多批量导入 50 条知识"})
+		return
+	}
+	created := make([]store.KnowledgeItem, 0, len(req.Items))
+	for _, itemReq := range req.Items {
+		if strings.TrimSpace(itemReq.Title) == "" || strings.TrimSpace(itemReq.Content) == "" {
+			continue
+		}
+		it, err := s.store.CreateKnowledge(c.Request.Context(), store.KnowledgeInput{
+			Title:         itemReq.Title,
+			Category:      itemReq.Category,
+			Tags:          itemReq.Tags,
+			Content:       itemReq.Content,
+			AlwaysInclude: itemReq.AlwaysInclude,
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal_error"})
+			return
+		}
+		created = append(created, it)
+	}
+	id := auth.IdentityFromContext(c)
+	_, _ = s.store.CreateAuditLog(c.Request.Context(), id.EmployeeID, "knowledge_batch_import", "knowledge", "", "")
+	c.JSON(http.StatusCreated, gin.H{"created_count": len(created), "items": created})
+}
+
 func (s *server) createAdminKnowledge(c *gin.Context) {
 	var req knowledgeRequest
 	if !bindJSON(c, &req) {

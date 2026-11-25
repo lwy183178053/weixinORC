@@ -98,7 +98,9 @@ func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.
 	authed.PUT("/admin/ai-config", s.updateAdminAIConfig)
 	authed.POST("/admin/ai-test", s.testAdminAIConfig)
 	authed.GET("/admin/knowledge", s.listAdminKnowledge)
+	authed.GET("/admin/knowledge/search", s.searchAdminKnowledge)
 	authed.POST("/admin/knowledge", s.createAdminKnowledge)
+	authed.POST("/admin/knowledge/batch", s.batchCreateAdminKnowledge)
 	authed.PUT("/admin/knowledge/:id", s.updateAdminKnowledge)
 	authed.DELETE("/admin/knowledge/:id", s.deleteAdminKnowledge)
 

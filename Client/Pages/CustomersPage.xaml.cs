@@ -45,6 +45,7 @@ namespace Client.Pages
         private bool _isMultiSelectMode;
         private bool _isAiSummaryBusy;
         private bool _isAiChatBusy;
+        private bool _isIncomingDirection;
 
         public CustomersPage()
         {
@@ -74,6 +75,7 @@ namespace Client.Pages
         {
             AppServices.Settings.ThemeChanged += OnSettingsThemeChanged;
             UpdateRightTabVisuals();
+            UpdateDirectionToggleVisuals();
         }
 
         private void CustomersPage_Unloaded(object sender, RoutedEventArgs e)
@@ -87,6 +89,7 @@ namespace Client.Pages
         private void OnSettingsThemeChanged(bool _)
         {
             UpdateRightTabVisuals();
+            UpdateDirectionToggleVisuals();
         }
 
         protected override async void OnNavigatedTo(NavigationEventArgs e)
@@ -218,6 +221,7 @@ namespace Client.Pages
             _selectedCustomer = nextSelected;
 
             RebuildCustomerRows(expandAllForSearch: !string.IsNullOrEmpty(q));
+            CustomersListView.Visibility = _filteredCustomers.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
             EmptyListHint.Visibility = _filteredCustomers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             UpdateCustomerMultiSelectSummary();
 
@@ -1494,14 +1498,54 @@ namespace Client.Pages
             UpdateAiChatEmptyState();
         }
 
+        private void DirToggleBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string tag)
+            {
+                _isIncomingDirection = string.Equals(tag, "incoming", StringComparison.OrdinalIgnoreCase);
+                UpdateDirectionToggleVisuals();
+            }
+        }
+
+        private void UpdateDirectionToggleVisuals()
+        {
+            var activeBg = (Brush)Application.Current.Resources["BrandSoftBgBrush"];
+            var activeFg = (Brush)Application.Current.Resources["BrandPrimaryBrush"];
+            var inactiveBg = new SolidColorBrush(Colors.Transparent);
+            var inactiveFg = (Brush)Application.Current.Resources["TextSecondaryBrush"];
+
+            DirOutgoingBtn.Background = !_isIncomingDirection ? activeBg : inactiveBg;
+            DirOutgoingBtn.Foreground = !_isIncomingDirection ? activeFg : inactiveFg;
+            DirOutgoingBtn.FontWeight = !_isIncomingDirection ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+
+            DirIncomingBtn.Background = _isIncomingDirection ? activeBg : inactiveBg;
+            DirIncomingBtn.Foreground = _isIncomingDirection ? activeFg : inactiveFg;
+            DirIncomingBtn.FontWeight = _isIncomingDirection ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+        }
+
+        private async void MessageInputBox_KeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            if (e.Key != VirtualKey.Enter) return;
+            var shiftState = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift);
+            if ((shiftState & CoreVirtualKeyStates.Down) == CoreVirtualKeyStates.Down) return;
+
+            e.Handled = true;
+            await SendCurrentCustomerMessageAsync();
+        }
+
         private async void SendMessageButton_Click(object sender, RoutedEventArgs e)
+        {
+            await SendCurrentCustomerMessageAsync();
+        }
+
+        private async Task SendCurrentCustomerMessageAsync()
         {
             var target = _selectedCustomer;
             if (target is null) return;
             string content = MessageInputBox.Text.Trim();
             if (string.IsNullOrEmpty(content)) return;
 
-            string direction = DirIncomingRadio.IsChecked == true ? "incoming" : "outgoing";
+            string direction = _isIncomingDirection ? "incoming" : "outgoing";
             SendMessageButton.IsEnabled = false;
             try
             {

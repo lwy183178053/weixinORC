@@ -3,12 +3,16 @@ using Client.Controls;
 using Client.Dialogs;
 using Client.Models;
 using Client.Services;
+using Microsoft.UI;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.System;
+using Windows.UI.Core;
 
 namespace Client.Pages
 {
@@ -20,6 +24,7 @@ namespace Client.Pages
         private readonly HashSet<long> _locallyDeletedMessageIds = [];
         private bool _isMultiSelectMode;
         private bool _isEditing;
+        private bool _isIncomingDirection;
 
         public GroupsPage()
         {
@@ -34,6 +39,24 @@ namespace Client.Pages
                 centerMin: 450,
                 rightDefault: 356, rightMin: 290, rightMax: 520);
             _ = ComposerResizeController.Attach(ChatStageGrid, ComposerRow, ComposerSplitter, minHeight: 128);
+            Loaded += GroupsPage_Loaded;
+            Unloaded += GroupsPage_Unloaded;
+        }
+
+        private void GroupsPage_Loaded(object sender, RoutedEventArgs e)
+        {
+            AppServices.Settings.ThemeChanged += OnSettingsThemeChanged;
+            UpdateDirectionToggleVisuals();
+        }
+
+        private void GroupsPage_Unloaded(object sender, RoutedEventArgs e)
+        {
+            AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
+        }
+
+        private void OnSettingsThemeChanged(bool _)
+        {
+            UpdateDirectionToggleVisuals();
         }
 
         protected override async void OnNavigatedTo(NavigationEventArgs e)
@@ -80,6 +103,7 @@ namespace Client.Pages
                     g.Note.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
 
             GroupsListView.ItemsSource = filtered;
+            GroupsListView.Visibility = filtered.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
             EmptyListHint.Visibility = filtered.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
             if (filtered.Count > 0)
@@ -543,14 +567,56 @@ namespace Client.Pages
             ComposerHintText.Text = $"已移除 {targets.Count} 条群聊记录（待接入服务端删除接口后同步持久化）。";
         }
 
+        private void DirToggleBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string tag)
+            {
+                _isIncomingDirection = string.Equals(tag, "incoming", StringComparison.OrdinalIgnoreCase);
+                UpdateDirectionToggleVisuals();
+            }
+        }
+
+        private void UpdateDirectionToggleVisuals()
+        {
+            var activeBg = (Brush)Application.Current.Resources["BrandSoftBgBrush"];
+            var activeFg = (Brush)Application.Current.Resources["BrandPrimaryBrush"];
+            var inactiveBg = new SolidColorBrush(Colors.Transparent);
+            var inactiveFg = (Brush)Application.Current.Resources["TextSecondaryBrush"];
+
+            DirOutgoingBtn.Background = !_isIncomingDirection ? activeBg : inactiveBg;
+            DirOutgoingBtn.Foreground = !_isIncomingDirection ? activeFg : inactiveFg;
+            DirOutgoingBtn.FontWeight = !_isIncomingDirection ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+
+            DirIncomingBtn.Background = _isIncomingDirection ? activeBg : inactiveBg;
+            DirIncomingBtn.Foreground = _isIncomingDirection ? activeFg : inactiveFg;
+            DirIncomingBtn.FontWeight = _isIncomingDirection ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+
+            SenderNameBox.Visibility = _isIncomingDirection ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private async void MessageInputBox_KeyDown(object sender, KeyRoutedEventArgs e)
+        {
+            if (e.Key != VirtualKey.Enter) return;
+            var shiftState = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift);
+            if ((shiftState & CoreVirtualKeyStates.Down) == CoreVirtualKeyStates.Down) return;
+
+            e.Handled = true;
+            await SendCurrentGroupMessageAsync();
+        }
+
         private async void SendMessageButton_Click(object sender, RoutedEventArgs e)
+        {
+            await SendCurrentGroupMessageAsync();
+        }
+
+        private async Task SendCurrentGroupMessageAsync()
         {
             var target = _selectedGroup;
             if (target is null) return;
             string content = MessageInputBox.Text.Trim();
             if (string.IsNullOrEmpty(content)) return;
 
-            bool isIncoming = DirIncomingRadio.IsChecked == true;
+            bool isIncoming = _isIncomingDirection;
             string direction = isIncoming ? "incoming" : "outgoing";
             string senderName = isIncoming
                 ? (string.IsNullOrWhiteSpace(SenderNameBox.Text) ? "群成员" : SenderNameBox.Text.Trim())

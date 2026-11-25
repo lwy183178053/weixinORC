@@ -130,24 +130,6 @@
 
                 <!-- Tag-Grouped Collapsible Customer List -->
                 <Grid Grid.Row="2">
-                    <StackPanel
-                        x:Name="EmptyListHint"
-                        Margin="20,44"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Top"
-                        Spacing="10"
-                        Visibility="Collapsed">
-                        <TextBlock HorizontalAlignment="Center" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="暂无客户档案" />
-                        <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="点击上方「+」弹窗截图识别导入，或截图复制后直接按 Ctrl+V。" TextAlignment="Center" TextWrapping="Wrap" />
-                        <Button
-                            HorizontalAlignment="Center"
-                            Height="32"
-                            Click="AddCustomerButton_Click"
-                            Content="+ 新建 / 截图导入"
-                            FontSize="12"
-                            Style="{StaticResource PrimaryVioletButtonStyle}" />
-                    </StackPanel>
-
                     <ListView
                         x:Name="CustomersListView"
                         Padding="6,4"
@@ -320,6 +302,24 @@
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
+
+                    <StackPanel
+                        x:Name="EmptyListHint"
+                        Margin="20,44"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Spacing="10"
+                        Visibility="Collapsed">
+                        <TextBlock HorizontalAlignment="Center" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="暂无客户档案" />
+                        <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="点击上方「+」弹窗截图识别导入，或截图复制后直接按 Ctrl+V。" TextAlignment="Center" TextWrapping="Wrap" />
+                        <Button
+                            HorizontalAlignment="Center"
+                            Height="32"
+                            Click="AddCustomerButton_Click"
+                            Content="+ 新建 / 截图导入"
+                            FontSize="12"
+                            Style="{StaticResource PrimaryVioletButtonStyle}" />
+                    </StackPanel>
                 </Grid>
             </Grid>
         </Border>
@@ -515,70 +515,158 @@
                 x:Name="ComposerSplitter"
                 Grid.Row="2"
                 Background="{StaticResource AppChatCanvasBgBrush}"
-                BorderBrush="{StaticResource AppBorderBrush}"
-                BorderThickness="0,1,0,0"
+                BorderThickness="0"
                 ToolTipService.ToolTip="上下拖动可调整输入框高度">
                 <Border
-                    Width="40"
+                    Width="36"
                     Height="3"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     Background="{StaticResource AppSplitterGripBrush}"
-                    CornerRadius="2" />
+                    CornerRadius="2"
+                    Opacity="0.7" />
             </controls:HorizontalResizeSplitter>
 
-            <!-- Bottom IM Composer -->
-            <Border Grid.Row="3" Padding="14,10,14,12" Background="{StaticResource AppSurfaceBrush}">
-                <Grid RowSpacing="8">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+            <!-- Codex-Style Floating Rounded Customer Chat Composer -->
+            <Grid Grid.Row="3" Padding="16,4,16,14" Background="{StaticResource AppChatCanvasBgBrush}">
+                <Border
+                    Padding="13,10,12,9"
+                    Background="{StaticResource AppSurfaceBrush}"
+                    BorderBrush="{StaticResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16">
+                    <Grid RowSpacing="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
-                    <Grid Grid.Row="0" ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                            <RadioButton x:Name="DirOutgoingRadio" Content="我方回复(绿)" GroupName="CustomerMsgDir" IsChecked="True" />
-                            <RadioButton x:Name="DirIncomingRadio" Content="客户发来(白)" GroupName="CustomerMsgDir" />
-                        </StackPanel>
+                        <!-- Borderless Seamless Multi-line Input -->
+                        <TextBox
+                            x:Name="MessageInputBox"
+                            Grid.Row="0"
+                            Padding="3,2"
+                            AcceptsReturn="True"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            FontSize="13.5"
+                            Foreground="{StaticResource TextPrimaryBrush}"
+                            KeyDown="MessageInputBox_KeyDown"
+                            PlaceholderText="输入聊天内容...（Enter 发送，Shift+Enter 换行）"
+                            TextWrapping="Wrap">
+                            <TextBox.Resources>
+                                <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                                <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                                <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                            </TextBox.Resources>
+                        </TextBox>
 
-                        <StackPanel Grid.Column="1" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="6">
-                            <Button x:Name="ImportChatScreenshotButton" Height="28" Padding="10,0" Click="ImportChatScreenshotButton_Click" Content="导入对话" FontSize="11.5" IsEnabled="False" Style="{StaticResource PrimaryVioletButtonStyle}" ToolTipService.ToolTip="支持单张聊天截图识别，或自动从微信「查找聊天内容」批量导入" />
-                            <Button Height="28" Padding="9,0" Click="OcrChatClipboardButton_Click" Content="粘贴提取单条" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                        </StackPanel>
+                        <!-- Bottom Toolbar inside Rounded Card -->
+                        <Grid Grid.Row="1" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                                <!-- Direction Segmented Pill -->
+                                <Border
+                                    Padding="2"
+                                    Background="{StaticResource AppCanvasBgBrush}"
+                                    BorderBrush="{StaticResource AppBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="15">
+                                    <StackPanel Orientation="Horizontal" Spacing="2">
+                                        <Button
+                                            x:Name="DirOutgoingBtn"
+                                            Height="24"
+                                            Padding="10,0"
+                                            BorderThickness="0"
+                                            Click="DirToggleBtn_Click"
+                                            CornerRadius="12"
+                                            FontSize="11.5"
+                                            Tag="outgoing"
+                                            Content="我方" />
+                                        <Button
+                                            x:Name="DirIncomingBtn"
+                                            Height="24"
+                                            Padding="10,0"
+                                            BorderThickness="0"
+                                            Click="DirToggleBtn_Click"
+                                            CornerRadius="12"
+                                            FontSize="11.5"
+                                            Tag="incoming"
+                                            Content="客户" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Import Dialog Pill -->
+                                <Button
+                                    x:Name="ImportChatScreenshotButton"
+                                    Height="30"
+                                    Padding="11,0"
+                                    Click="ImportChatScreenshotButton_Click"
+                                    CornerRadius="15"
+                                    IsEnabled="False"
+                                    Style="{StaticResource SecondaryOutlineButtonStyle}"
+                                    ToolTipService.ToolTip="截图识别导入，或自动从微信「查找聊天内容」批量导入">
+                                    <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                        <FontIcon FontSize="12" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE896;" />
+                                        <TextBlock FontSize="12" Text="导入对话" />
+                                    </StackPanel>
+                                </Button>
+
+                                <!-- Clipboard Single OCR Icon Button -->
+                                <Button
+                                    Width="30"
+                                    Height="30"
+                                    Padding="0"
+                                    Background="Transparent"
+                                    BorderBrush="{StaticResource AppBorderBrush}"
+                                    BorderThickness="1"
+                                    Click="OcrChatClipboardButton_Click"
+                                    CornerRadius="15"
+                                    ToolTipService.ToolTip="粘贴剪贴板截图提取单条文字">
+                                    <FontIcon FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Glyph="&#xE77F;" />
+                                </Button>
+                            </StackPanel>
+
+                            <TextBlock
+                                x:Name="ComposerHintText"
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Right"
+                                Margin="6,0"
+                                FontSize="11.5"
+                                Foreground="{StaticResource TextMutedBrush}"
+                                Text=""
+                                TextTrimming="CharacterEllipsis" />
+
+                            <Button
+                                x:Name="SendMessageButton"
+                                Grid.Column="2"
+                                Width="32"
+                                Height="32"
+                                Padding="0"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Click="SendMessageButton_Click"
+                                CornerRadius="16"
+                                IsEnabled="False"
+                                Style="{StaticResource PrimaryVioletButtonStyle}"
+                                ToolTipService.ToolTip="发送记录 (Enter)">
+                                <FontIcon FontSize="13" Foreground="#FFFFFF" Glyph="&#xE74A;" />
+                            </Button>
+                        </Grid>
                     </Grid>
-
-                    <TextBox
-                        x:Name="MessageInputBox"
-                        Grid.Row="1"
-                        AcceptsReturn="True"
-                        Background="{StaticResource AppInputBgBrush}"
-                        Foreground="{StaticResource TextPrimaryBrush}"
-                        BorderThickness="0"
-                        CornerRadius="6"
-                        Padding="10,7"
-                        PlaceholderText="输入聊天内容，或粘贴聊天截图自动提取文字..."
-                        TextWrapping="Wrap" />
-
-                    <Grid Grid.Row="2">
-                        <TextBlock x:Name="ComposerHintText" VerticalAlignment="Center" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="内容将保存至当前客户沟通记录" />
-                        <Button
-                            x:Name="SendMessageButton"
-                            HorizontalAlignment="Right"
-                            Height="30"
-                            Padding="18,0"
-                            Click="SendMessageButton_Click"
-                            Content="发送记录"
-                            FontSize="12.5"
-                            IsEnabled="False"
-                            Style="{StaticResource PrimaryVioletButtonStyle}" />
-                    </Grid>
-                </Grid>
-            </Border>
+                </Border>
+            </Grid>
         </Grid>
 
         <!-- Column 3: Right Vertical Splitter -->

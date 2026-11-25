@@ -215,24 +215,24 @@ namespace Client.Services
                     ? Math.Clamp((int)Math.Round(rightColX - leftLabelLine.Bounds.X), 55, 160)
                     : Math.Clamp((int)Math.Round(anchorLine.Bounds.Height * 3.5), 60, 130);
 
-                // Empirically across WeChat 4.x at all DPIs: avatar side ≈ 0.79 * colSpan, left ≈ leftColX + 0.06 * colSpan
-                int expectedSide = Math.Clamp((int)Math.Round(colSpan * 0.79), 48, 128);
+                // Empirically across WeChat 3.9 / 4.x at all DPIs: avatar side ≈ 0.78 * colSpan, left ≈ leftColX + 0.05 * colSpan
+                int expectedSide = Math.Clamp((int)Math.Round(colSpan * 0.78), 42, 136);
                 int geoLeft = leftLabelLine is not null
-                    ? Math.Clamp((int)Math.Round(leftLabelLine.Bounds.X + colSpan * 0.06), 0, Math.Max(0, w - expectedSide))
-                    : Math.Clamp((int)Math.Floor(rightColX) - Math.Max(12, (int)Math.Round(colSpan * 0.21)) - expectedSide, 0, Math.Max(0, w - expectedSide));
-                int geoTop = Math.Clamp((int)Math.Round(topRef.Bounds.Y) + 2, 0, Math.Max(0, h - expectedSide));
+                    ? Math.Clamp((int)Math.Round(leftLabelLine.Bounds.X + colSpan * 0.05), 0, Math.Max(0, w - expectedSide))
+                    : Math.Clamp((int)Math.Floor(rightColX) - Math.Max(10, (int)Math.Round(colSpan * 0.22)) - expectedSide, 0, Math.Max(0, w - expectedSide));
+                int geoTop = Math.Clamp((int)Math.Round(topRef.Bounds.Y) + 1, 0, Math.Max(0, h - expectedSide));
 
-                int searchRight = Math.Clamp((int)Math.Floor(rightColX) - 6, 0, w - 1);
-                if (searchRight < 36)
+                int searchRight = Math.Clamp((int)Math.Floor(rightColX) - 5, 0, w - 1);
+                if (searchRight < 32)
                 {
                     return (null, gender);
                 }
 
-                int bandTop = Math.Clamp(geoTop - 10, 0, h - 1);
-                int bandBottom = Math.Clamp(geoTop + expectedSide + 14, bandTop + 36, h - 1);
+                int bandTop = Math.Clamp(geoTop - 12, 0, h - 1);
+                int bandBottom = Math.Clamp(geoTop + expectedSide + 18, bandTop + 34, h - 1);
                 // Strictly clamp searchLeft to card interior so we NEVER touch black popup shadow margins!
-                int searchLeft = Math.Max(0, geoLeft - 6);
-                int minColForeground = Math.Max(10, (int)(expectedSide * 0.24));
+                int searchLeft = Math.Max(0, geoLeft - 10);
+                int minColForeground = Math.Max(8, (int)(expectedSide * 0.20));
 
                 // 3. Scan strictly right-to-left to isolate ONLY the avatar directly left of the text block
                 int avatarRight = -1;
@@ -354,27 +354,84 @@ namespace Client.Services
                     int bw = avatarRightFound - avatarLeftFound + 1;
                     int bh = avatarBottom - avatarTop + 1;
                     double ratio = bw / (double)bh;
-                    // Use exact pixel-fitted box for normal photo/colorful avatars;
-                    // white-background/line-art avatars fall back to the left-label-aligned geometric square above.
-                    if (bw >= expectedSide * 0.78 && bh >= expectedSide * 0.78 &&
-                        bw <= expectedSide * 1.18 && bh <= expectedSide * 1.18 &&
-                        ratio >= 0.80 && ratio <= 1.25)
+
+                    // Accept broader DPI/WeChat-version box ratios (0.64..1.35 * expectedSide)
+                    if (bw >= expectedSide * 0.64 && bh >= expectedSide * 0.64 &&
+                        bw <= expectedSide * 1.35 && bh <= expectedSide * 1.35 &&
+                        ratio >= 0.72 && ratio <= 1.38)
                     {
-                        int inset = Math.Min(bw, bh) >= 40 ? 1 : 0;
-                        finalLeft = avatarLeftFound + inset;
-                        finalTop = avatarTop + inset;
-                        finalW = bw - inset * 2;
-                        finalH = bh - inset * 2;
+                        int inset = Math.Min(bw, bh) >= 44 ? 1 : 0;
+                        int cx = (avatarLeftFound + avatarRightFound) / 2;
+                        int cy = (avatarTop + avatarBottom) / 2;
+                        // Square-pad using the longer side when one edge of the avatar blended into the white card bg
+                        int side = Math.Max(bw, bh) - inset * 2;
+                        side = Math.Clamp(side, 28, Math.Min(w, h));
+                        finalLeft = Math.Clamp(cx - side / 2, 0, Math.Max(0, w - side));
+                        finalTop = Math.Clamp(cy - side / 2, 0, Math.Max(0, h - side));
+                        finalW = side;
+                        finalH = side;
                     }
                 }
 
                 if (finalW >= 28 && finalH >= 28)
                 {
-                    byte[] png = await CropAndEncodePngAsync(pixels, w, h, finalLeft, finalTop, finalW, finalH, 256);
+                    // Avoid aggressive over-upscaling that softens small 100%-DPI avatars: cap output cleanly at 192px (or native if larger)
+                    int outSize = Math.Clamp(Math.Max(finalW, finalH) * 2, 128, 256);
+                    byte[] png = await CropAndEncodePngAsync(pixels, w, h, finalLeft, finalTop, finalW, finalH, outSize);
                     return (png, gender);
                 }
 
                 return (null, gender);
+        }
+
+        /// <summary>
+        /// Checks whether an avatar region is nearly uniform/blank (e.g. WeChat still loading the avatar placeholder).
+        /// </summary>
+        public static bool IsLikelyPlaceholderAvatar(SoftwareBitmap cardBmp, OcrRecognitionResult cardOcr)
+        {
+            try
+            {
+                if (cardBmp.PixelWidth < 80 || cardBmp.PixelHeight < 80) return true;
+                var anchor = cardOcr.Lines
+                    .OrderBy(l => l.Bounds.Y)
+                    .FirstOrDefault(l => l.Text.TrimStart().StartsWith("微信号", StringComparison.OrdinalIgnoreCase) ||
+                                         l.Text.TrimStart().StartsWith("昵称", StringComparison.OrdinalIgnoreCase));
+                if (anchor is null) return false;
+
+                int w = cardBmp.PixelWidth;
+                int h = cardBmp.PixelHeight;
+                byte[] pixels = CopyBgraPixels(cardBmp);
+
+                int x2 = Math.Clamp((int)anchor.Bounds.X - 10, 12, w - 1);
+                int x1 = Math.Clamp(x2 - 54, 0, x2 - 1);
+                int y1 = Math.Clamp((int)anchor.Bounds.Y - 48, 0, h - 1);
+                int y2 = Math.Clamp(y1 + 54, y1 + 1, h - 1);
+
+                long sum = 0;
+                long sumSq = 0;
+                int count = 0;
+                for (int y = y1; y <= y2; y += 2)
+                {
+                    int rowOff = y * w * 4;
+                    for (int x = x1; x <= x2; x += 2)
+                    {
+                        int idx = rowOff + x * 4;
+                        int lum = (pixels[idx] + pixels[idx + 1] + pixels[idx + 2]) / 3;
+                        sum += lum;
+                        sumSq += lum * lum;
+                        count++;
+                    }
+                }
+                if (count < 20) return false;
+                double mean = sum / (double)count;
+                double variance = (sumSq / (double)count) - (mean * mean);
+                // Very low luminance variance (< 25) means solid white/gray placeholder box
+                return variance < 25.0;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static string DetectGenderIcon(byte[] pixels, int w, int h, OcrLineResult? headline)

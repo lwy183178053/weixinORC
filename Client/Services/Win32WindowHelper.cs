@@ -809,6 +809,89 @@ namespace Client.Services
             return diag;
         }
 
+        internal sealed record AdaptiveClickResult(bool Succeeded, int AttemptsUsed, int LastX, int LastY, int LastPostMessageError);
+
+        private static readonly (int Dx, int Dy)[] DefaultAdaptiveOffsets =
+        [
+            (0, 0),
+            (-18, 0),
+            (20, 0),
+            (0, -6),
+            (0, 7)
+        ];
+
+        /// <summary>
+        /// Adaptive multi-point click with live verification:
+        /// Instead of blindly hammering a single pixel, explores smart DPI-scaled offsets around (baseX, baseY)
+        /// (center -> left/right -> slight vertical adjustments -> direct WM_LBUTTONDOWN/UP fallback),
+        /// stopping IMMEDIATELY the moment verifySucceededAsync() returns true.
+        /// </summary>
+        internal static async Task<AdaptiveClickResult> ClickWithAdaptiveRetryAsync(
+            nint targetHwnd,
+            int baseX,
+            int baseY,
+            double scale,
+            string actionLabel,
+            Func<Task<bool>> verifySucceededAsync,
+            Action<string>? log = null,
+            int waitAfterClickMs = 360,
+            bool allowPostMessageFallback = true,
+            (int Dx, int Dy)[]? customOffsetsLogical = null,
+            Action<int, int>? onCursorMoved = null,
+            CancellationToken ct = default)
+        {
+            var offsets = customOffsetsLogical is { Length: > 0 } ? customOffsetsLogical : DefaultAdaptiveOffsets;
+            int lastX = baseX;
+            int lastY = baseY;
+            int lastPostErr = 0;
+
+            for (int i = 0; i < offsets.Length; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var (dx, dy) = offsets[i];
+                int cx = baseX + (int)Math.Round(dx * scale);
+                int cy = baseY + (int)Math.Round(dy * scale);
+                lastX = cx;
+                lastY = cy;
+
+                string offsetTag = dx == 0 && dy == 0 ? "中心" : $"偏移({dx:+#;-#;0},{dy:+#;-#;0})";
+                var diag = LeftClickAt(cx, cy, targetHwnd, $"{actionLabel}#{i + 1}[{offsetTag}]");
+                onCursorMoved?.Invoke(cx, cy);
+                log?.Invoke($"🖱 [{actionLabel}] 第 {i + 1}/{offsets.Length} 次尝试 [{offsetTag}] -> {diag.Summary}");
+
+                if (waitAfterClickMs > 0)
+                {
+                    await Task.Delay(waitAfterClickMs, ct);
+                }
+
+                if (await verifySucceededAsync())
+                {
+                    log?.Invoke($"✓ [{actionLabel}] 第 {i + 1} 次尝试成功 [{offsetTag}] ({cx},{cy})");
+                    return new AdaptiveClickResult(true, i + 1, cx, cy, 0);
+                }
+
+                // On first attempt (center) or last attempt, also try direct WM_LBUTTONDOWN/UP if enabled
+                if (allowPostMessageFallback && (i == 0 || i == offsets.Length - 1) && targetHwnd != nint.Zero)
+                {
+                    bool okPost = PostWindowLeftClickAt(targetHwnd, cx, cy, out int postErr);
+                    lastPostErr = postErr;
+                    log?.Invoke($"🖱 [{actionLabel}] 窗口消息补点 ({cx},{cy}) -> ok={okPost}, err={postErr}");
+                    if (postErr == ERROR_ACCESS_DENIED)
+                    {
+                        return new AdaptiveClickResult(false, i + 1, cx, cy, postErr);
+                    }
+                    await Task.Delay(Math.Max(220, waitAfterClickMs - 80), ct);
+                    if (await verifySucceededAsync())
+                    {
+                        log?.Invoke($"✓ [{actionLabel}] 窗口消息补点成功 ({cx},{cy})");
+                        return new AdaptiveClickResult(true, i + 1, cx, cy, 0);
+                    }
+                }
+            }
+
+            return new AdaptiveClickResult(false, offsets.Length, lastX, lastY, lastPostErr);
+        }
+
         internal static void ScrollWheelAt(int screenX, int screenY, int notches)
         {
             MoveCursorAbsolute(screenX, screenY);

@@ -270,7 +270,7 @@ namespace Client.Services
                     Win32WindowHelper.SendVirtualKey(Win32WindowHelper.VK_BACK);
                     await Task.Delay(100, ct);
                     Win32WindowHelper.SendUnicodeText(kw);
-                    await Task.Delay(800, ct);
+                    await Task.Delay(950, ct);
 
                     EnsureSafeToContinue(mainWin.Hwnd, ct);
                     using var dropBmp = Win32WindowHelper.CaptureScreenRectToSoftwareBitmap(dropLeft, dropTop, dropW, dropH);
@@ -298,29 +298,43 @@ namespace Client.Services
                 AutoClick(hit.Value.X, hit.Value.Y);
                 await Task.Delay(480, ct);
 
-                // Step 4: Click top-right "..." button & click "查找聊天内容"
+                // Step 4: Click top-right "..." button with adaptive multi-point retry & locate "查找聊天内容"
                 EnsureSafeToContinue(mainWin.Hwnd, ct);
-                Report("正在打开聊天信息并进入「查找聊天内容」...", "▶ 点击聊天界面右上角「...」按钮...");
+                Report("正在打开聊天信息并进入「查找聊天内容」...", "▶ 自适应点击聊天界面右上角「...」按钮...");
 
                 var findChatBtn = await FindTextInRightDrawerAsync(mainRect, ct);
                 if (findChatBtn is null)
                 {
-                    AutoClick(
+                    var moreOffsets = new (int Dx, int Dy)[]
+                    {
+                        (0, 0),
+                        (-10, 0),
+                        (6, 4),
+                        (-18, -3),
+                        (-6, 10)
+                    };
+                    _ = await Win32WindowHelper.ClickWithAdaptiveRetryAsync(
+                        mainWin.Hwnd,
                         mainRect.Right - (int)Math.Round(28 * scale),
-                        mainRect.Top + (int)Math.Round(52 * scale));
-                    await Task.Delay(460, ct);
-                    EnsureSafeToContinue(mainWin.Hwnd, ct);
-                    findChatBtn = await FindTextInRightDrawerAsync(mainRect, ct);
-                }
-
-                if (findChatBtn is null)
-                {
-                    AutoClick(
-                        mainRect.Right - (int)Math.Round(36 * scale),
-                        mainRect.Top + (int)Math.Round(50 * scale));
-                    await Task.Delay(460, ct);
-                    EnsureSafeToContinue(mainWin.Hwnd, ct);
-                    findChatBtn = await FindTextInRightDrawerAsync(mainRect, ct);
+                        mainRect.Top + (int)Math.Round(52 * scale),
+                        scale,
+                        actionLabel: "右上角「...」按钮",
+                        verifySucceededAsync: async () =>
+                        {
+                            EnsureSafeToContinue(mainWin.Hwnd, ct);
+                            findChatBtn = await FindTextInRightDrawerAsync(mainRect, ct);
+                            return findChatBtn is not null;
+                        },
+                        log: msg => Report("正在打开聊天信息...", msg),
+                        waitAfterClickMs: 420,
+                        allowPostMessageFallback: true,
+                        customOffsetsLogical: moreOffsets,
+                        onCursorMoved: (cx, cy) =>
+                        {
+                            _lastAutoCursor = new Win32WindowHelper.POINT { X = cx, Y = cy };
+                            _hasAutoCursor = true;
+                        },
+                        ct: ct);
                 }
 
                 if (findChatBtn is null)
@@ -328,26 +342,51 @@ namespace Client.Services
                     return new BatchChatHistoryResult
                     {
                         Success = false,
-                        SummaryMessage = "已进入聊天界面，但未在右侧抽屉识别到「查找聊天内容」按钮，请确认窗口未被遮挡。"
+                        SummaryMessage = "已进入聊天界面，但多点位尝试点击右上角「...」后仍未在右侧抽屉识别到「查找聊天内容」按钮，请确认窗口未被遮挡。"
                     };
                 }
 
-                Report("正在打开独立聊天记录窗口...", "✓ 已找到「查找聊天内容」，正在打开聊天记录窗口...");
-                AutoClick(findChatBtn.Value.X, findChatBtn.Value.Y);
-
-                for (int wait = 0; wait < 16; wait++)
+                Report("正在打开独立聊天记录窗口...", "✓ 已找到「查找聊天内容」，正在自适应点击打开聊天记录窗口...");
+                var openHistOffsets = new (int Dx, int Dy)[]
                 {
-                    await Task.Delay(250, ct);
-                    historyHwnd = FindChatHistoryWindow(wechatPid, mainWin.Hwnd);
-                    if (historyHwnd != nint.Zero) break;
-                }
+                    (0, 0),
+                    (-26, 0),
+                    (28, 0),
+                    (0, 6)
+                };
+                _ = await Win32WindowHelper.ClickWithAdaptiveRetryAsync(
+                    mainWin.Hwnd,
+                    findChatBtn.Value.X,
+                    findChatBtn.Value.Y,
+                    scale,
+                    actionLabel: "查找聊天内容",
+                    verifySucceededAsync: async () =>
+                    {
+                        for (int wait = 0; wait < 10; wait++)
+                        {
+                            historyHwnd = FindChatHistoryWindow(wechatPid, mainWin.Hwnd);
+                            if (historyHwnd != nint.Zero) return true;
+                            await Task.Delay(240, ct);
+                        }
+                        return false;
+                    },
+                    log: msg => Report("正在打开独立聊天记录窗口...", msg),
+                    waitAfterClickMs: 260,
+                    allowPostMessageFallback: true,
+                    customOffsetsLogical: openHistOffsets,
+                    onCursorMoved: (cx, cy) =>
+                    {
+                        _lastAutoCursor = new Win32WindowHelper.POINT { X = cx, Y = cy };
+                        _hasAutoCursor = true;
+                    },
+                    ct: ct);
 
                 if (historyHwnd == nint.Zero)
                 {
                     return new BatchChatHistoryResult
                     {
                         Success = false,
-                        SummaryMessage = "已点击「查找聊天内容」，但未检测到新弹出的聊天记录窗口。"
+                        SummaryMessage = "已多点位尝试点击「查找聊天内容」，但未检测到新弹出的聊天记录窗口。"
                     };
                 }
 

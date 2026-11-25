@@ -89,7 +89,7 @@ namespace Client.Services
             }
 
             NormalizeWindowSize(mgrHwnd, StandardMgrLogicalWidth, StandardMgrLogicalHeight, offsetX: 60, offsetY: 50);
-            await Task.Delay(620, ct);
+            await Task.Delay(480, ct);
 
             if (!Win32WindowHelper.GetVisibleWindowRect(mgrHwnd, out var rect))
             {
@@ -107,59 +107,66 @@ namespace Client.Services
                 int leftX = rect.Left + (int)(rect.Width * 0.11);
                 int leftY = rect.Top + (int)(rect.Height * 0.55);
                 Win32WindowHelper.ScrollWheelAt(leftX, leftY, -5);
-                await Task.Delay(380, ct);
+                await Task.Delay(420, ct);
             }
 
+            // Adaptive readiness wait for slower/new devices: wait up to ~2.4s until Contact Manager paints its sidebar
             var scan = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
+            for (int waitReady = 0; waitReady < 5 && !scrollLeftSidebarDown && scan.SidebarLines.Count < 4; waitReady++)
+            {
+                LogScan($"「通讯录管理」界面仍在加载中（当前 {scan.SidebarLines.Count} 行），等待加载完成...");
+                await Task.Delay(380, ct);
+                scan = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
+            }
             LogScan($"左侧栏扫描（{scan.SidebarWidth}×{scan.WindowHeight}，{scan.SidebarLines.Count} 行）：[{string.Join(" | ", scan.SidebarLines.Take(16))}]");
 
             // Only click "标签" to expand when the section is genuinely collapsed (neither tags nor "无标签"/"新建标签" appeared!)
             if (!scrollLeftSidebarDown && scan.Tags.Count == 0 && !scan.IsTagSectionExpanded)
             {
-                LogScan("检测到左侧「标签」尚未展开，尝试点击「标签」文字中心展开...");
+                LogScan("检测到左侧「标签」尚未展开，启动多点位自适应点击展开（文字中心 -> 右侧箭头 -> 偏左/微调）...");
 
-                for (int expandTry = 0; expandTry < 2; expandTry++)
+                if (scan.TagHeaderScreenCenter is null)
                 {
-                    ct.ThrowIfCancellationRequested();
-                    _ = Win32WindowHelper.EnsureWindowTrulyActive(mgrHwnd);
-                    await Task.Delay(120, ct);
-
-                    if (scan.TagHeaderScreenCenter is null)
-                    {
-                        LogScan($"第 {expandTry + 1} 次未在左侧栏识别到「标签」标题行，无法自动点击展开。");
-                        break;
-                    }
-
-                    int clickX = scan.TagHeaderScreenCenter.Value.X;
-                    int clickY = scan.TagHeaderScreenCenter.Value.Y;
+                    LogScan("未在左侧栏识别到「标签」标题行，无法自动点击展开。");
+                }
+                else
+                {
+                    uint mgrDpi = Win32WindowHelper.GetDpiForWindow(mgrHwnd);
+                    double mgrScale = mgrDpi > 0 ? mgrDpi / 96.0 : 1.0;
                     int prevLineCount = scan.SidebarLines.Count;
 
-                    var diag = Win32WindowHelper.LeftClickAt(clickX, clickY, mgrHwnd, $"展开「标签」#{expandTry + 1}");
-                    LogScan($"🖱 点击「{scan.TagHeaderText}」文字中心 -> {diag.Summary}");
-                    await Task.Delay(680, ct);
-
-                    scan = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
-                    LogScan($"展开后重扫（{scan.SidebarLines.Count} 行）：[{string.Join(" | ", scan.SidebarLines.Take(16))}]");
-                    if (scan.Tags.Count > 0 || scan.IsTagSectionExpanded)
+                    // Adaptive exploration across the full "标签" row: text center -> right-side '>' chevron -> left side -> slight vertical nudge
+                    var expandOffsets = new (int Dx, int Dy)[]
                     {
-                        LogScan($"✓ 已成功展开「标签」，识别到 {scan.Tags.Count} 个标签。");
-                        break;
-                    }
+                        (0, 0),     // exact OCR center of "标签"
+                        (58, 0),    // right-side expand chevron '>'
+                        (-16, 0),   // left side of "标签"
+                        (26, 3),    // mid-right slight nudge
+                        (0, -5)     // slight upward nudge
+                    };
 
-                    // Only send PostMessage fallback if the sidebar did not change at all (so we never accidentally collapse an expanding list!)
-                    if (scan.SidebarLines.Count == prevLineCount)
-                    {
-                        bool okPost = Win32WindowHelper.PostWindowLeftClickAt(mgrHwnd, clickX, clickY, out int postErr);
-                        LogScan($"🖱 追加窗口消息点击「标签」中心 ({clickX},{clickY}) -> ok={okPost}, err={postErr}");
-                        await Task.Delay(650, ct);
-
-                        scan = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
-                        LogScan($"兜底重扫（{scan.SidebarLines.Count} 行）：[{string.Join(" | ", scan.SidebarLines.Take(16))}]");
-                        if (scan.Tags.Count > 0 || scan.IsTagSectionExpanded)
+                    var expandRes = await Win32WindowHelper.ClickWithAdaptiveRetryAsync(
+                        mgrHwnd,
+                        scan.TagHeaderScreenCenter.Value.X,
+                        scan.TagHeaderScreenCenter.Value.Y,
+                        mgrScale,
+                        actionLabel: $"展开「{scan.TagHeaderText}」",
+                        verifySucceededAsync: async () =>
                         {
-                            LogScan($"✓ 窗口消息点击后已展开「标签」，识别到 {scan.Tags.Count} 个标签。");
-                            break;
-                        }
+                            scan = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
+                            LogScan($"展开校验（{scan.SidebarLines.Count} 行）：[{string.Join(" | ", scan.SidebarLines.Take(16))}]");
+                            // Stop immediately if expanded OR if sidebar grew (prevent accidental double-toggle collapse!)
+                            return scan.Tags.Count > 0 || scan.IsTagSectionExpanded || scan.SidebarLines.Count > prevLineCount;
+                        },
+                        log: LogScan,
+                        waitAfterClickMs: 650,
+                        allowPostMessageFallback: true,
+                        customOffsetsLogical: expandOffsets,
+                        ct: ct);
+
+                    if (expandRes.LastPostMessageError == 5)
+                    {
+                        throw new InvalidOperationException("Windows 权限隔离 (UIPI/ACCESS_DENIED) 拦截了点击：请以管理员身份运行本工作台或普通权限重启微信。");
                     }
                 }
             }
@@ -237,7 +244,7 @@ namespace Client.Services
                         throw new OperationCanceledException("无法读取「通讯录管理」窗口位置。");
                     }
 
-                    // 1. Click target tag on left sidebar
+                    // 1. Click target tag on left sidebar with adaptive multi-point retry
                     var tagPos = await FindTagClickPositionAsync(contactManagerHwnd, mgrRect, tag, ct);
                     if (tagPos is null)
                     {
@@ -245,8 +252,23 @@ namespace Client.Services
                         continue;
                     }
 
-                    AutoClick(tagPos.Value.X, tagPos.Value.Y);
-                    await Task.Delay(Math.Max(420, stepDelayMs), ct);
+                    uint tagDpi = Win32WindowHelper.GetDpiForWindow(contactManagerHwnd);
+                    double tagScale = tagDpi > 0 ? tagDpi / 96.0 : 1.0;
+                    var tagOffsets = new (int Dx, int Dy)[] { (0, 0), (22, 0), (-14, 0) };
+                    for (int tTry = 0; tTry < tagOffsets.Length; tTry++)
+                    {
+                        EnsureSafeToContinue(contactManagerHwnd, ct);
+                        int tx = tagPos.Value.X + (int)Math.Round(tagOffsets[tTry].Dx * tagScale);
+                        int ty = tagPos.Value.Y + (int)Math.Round(tagOffsets[tTry].Dy * tagScale);
+                        var tagDiag = Win32WindowHelper.LeftClickAt(tx, ty, contactManagerHwnd, $"切换标签「{tag.Name}」#{tTry + 1}");
+                        _lastAutoCursor = new Win32WindowHelper.POINT { X = tx, Y = ty };
+                        _hasAutoCursor = true;
+                        await Task.Delay(Math.Max(380, stepDelayMs), ct);
+                        if (tagDiag.SendDown == 1 && tagDiag.SendUp == 1 && tagDiag.HitTargetProcess)
+                        {
+                            break;
+                        }
+                    }
 
                     // 2. Scroll right contact table all the way to the top so we always start at row #1
                     int tableMidX = mgrRect.Left + (int)(mgrRect.Width * 0.62);
@@ -347,21 +369,14 @@ namespace Client.Services
                             int clickX = mgrRect.Left + pageSnap.AvatarClickRelX;
                             int clickY = mgrRect.Top + row.CenterY;
 
-                            AutoClick(clickX, clickY);
-                            await WaitForProfilePopupAsync(contactManagerHwnd, wechatPid, Math.Max(260, stepDelayMs / 2), ct);
-
-                            using var cardBmp = CaptureProfileCardPopup(contactManagerHwnd, wechatPid, mgrRect, out bool isDedicatedPopup);
-                            var cardOcr = await AppServices.Ocr.RapidEngine.RecognizeAsync(cardBmp, ct);
-                            if (!isDedicatedPopup)
-                            {
-                                cardOcr = FilterOcrToProfileCard(cardOcr, cardBmp.PixelWidth);
-                            }
+                            var (cardBmp, cardOcr, parsed) = await OpenAndCaptureProfileCardWithRetryAsync(
+                                contactManagerHwnd, wechatPid, mgrRect, clickX, clickY, stepDelayMs, ct);
+                            using var ownedCardBmp = cardBmp;
 
                             // Dismiss floating profile card safely by clicking empty top-header space (NEVER ESC!)
                             DismissPopupSafe(contactManagerHwnd, mgrRect);
                             await Task.Delay(Math.Clamp(stepDelayMs / 4, 110, 220), ct);
 
-                            var parsed = WeChatOcrAnalyzer.Analyze(null, cardOcr);
                             if (parsed.InferredState == WeChatLoginState.Disconnected)
                             {
                                 throw new OperationCanceledException("检测到微信掉线/退出提示，已安全熔断停止导入。");
@@ -982,38 +997,47 @@ namespace Client.Services
 
                 int clickX = btnPos?.X ?? (mainRect.Left + (int)Math.Round(178 * scale));
                 int clickY = btnPos?.Y ?? (mainRect.Top + (int)Math.Round((attempt == 0 ? 86 : 102) * scale));
-                var clickDiag = Win32WindowHelper.LeftClickAt(clickX, clickY, mainWin.Hwnd, $"通讯录管理#{attempt + 1}[{btnPos?.Method ?? "fallback"}]");
-                LogStep($"🖱 第 {attempt + 1} 次点击「通讯录管理」[{btnPos?.Method ?? "fallback"}] -> {clickDiag.Summary}");
+                (nint Hwnd, int Pid) foundMgr = (nint.Zero, 0);
 
-                for (int i = 0; i < 8; i++)
+                var mgrOffsets = new (int Dx, int Dy)[]
                 {
-                    await Task.Delay(220, ct);
-                    var found = FindContactManagerWindow();
-                    if (found.Hwnd != nint.Zero)
-                    {
-                        LogStep($"✓ 已检测到「通讯录管理」窗口 (HWND=0x{found.Hwnd:X})");
-                        return found;
-                    }
-                }
+                    (0, 0),
+                    (-26, 0),
+                    (28, 0),
+                    (0, -6),
+                    (0, 7)
+                };
 
-                // If button hovered but Qt didn't open the window on the first click, send direct WM_LBUTTONDOWN/UP
-                // AND inspect lastError == 5 (ERROR_ACCESS_DENIED) to catch UIPI blocks with 100% certainty!
-                bool okMsg = Win32WindowHelper.PostWindowLeftClickAt(mainWin.Hwnd, clickX, clickY, out int postErr);
-                LogStep($"🖱 追加窗口消息点击「通讯录管理」({clickX},{clickY}) -> ok={okMsg}, err={postErr}");
-                if (postErr == 5)
+                var clickRes = await Win32WindowHelper.ClickWithAdaptiveRetryAsync(
+                    mainWin.Hwnd,
+                    clickX,
+                    clickY,
+                    scale,
+                    actionLabel: $"通讯录管理[{btnPos?.Method ?? "fallback"}]",
+                    verifySucceededAsync: async () =>
+                    {
+                        for (int i = 0; i < 10; i++)
+                        {
+                            foundMgr = FindContactManagerWindow();
+                            if (foundMgr.Hwnd != nint.Zero) return true;
+                            await Task.Delay(220, ct);
+                        }
+                        return false;
+                    },
+                    log: LogStep,
+                    waitAfterClickMs: 320,
+                    allowPostMessageFallback: true,
+                    customOffsetsLogical: mgrOffsets,
+                    ct: ct);
+
+                if (foundMgr.Hwnd != nint.Zero)
+                {
+                    LogStep($"✓ 已检测到「通讯录管理」窗口 (HWND=0x{foundMgr.Hwnd:X})");
+                    return foundMgr;
+                }
+                if (clickRes.LastPostMessageError == 5)
                 {
                     throw new InvalidOperationException("Windows 权限隔离 (UIPI/ACCESS_DENIED) 拦截了自动点击：请右键「以管理员身份运行」本工作台，或彻底退出微信后以普通权限重开微信。");
-                }
-
-                for (int i = 0; i < 6; i++)
-                {
-                    await Task.Delay(220, ct);
-                    var found = FindContactManagerWindow();
-                    if (found.Hwnd != nint.Zero)
-                    {
-                        LogStep($"✓ 窗口消息点击后检测到「通讯录管理」窗口 (HWND=0x{found.Hwnd:X})");
-                        return found;
-                    }
                 }
             }
             bool fgNow = Win32WindowHelper.GetForegroundWindow() == mainWin.Hwnd;
@@ -1388,17 +1412,87 @@ namespace Client.Services
             );
         }
 
+        private async Task<(SoftwareBitmap Bitmap, OcrRecognitionResult Ocr, WeChatOcrAnalysis Parsed)> OpenAndCaptureProfileCardWithRetryAsync(
+            nint mgrHwnd,
+            int wechatPid,
+            Win32WindowHelper.RECT mgrRect,
+            int baseX,
+            int baseY,
+            int stepDelayMs,
+            CancellationToken ct)
+        {
+            uint dpi = Win32WindowHelper.GetDpiForWindow(mgrHwnd);
+            double scale = dpi > 0 ? dpi / 96.0 : 1.0;
+            var offsets = new (int Dx, int Dy)[] { (0, 0), (14, 0), (-6, 4), (6, -5) };
+
+            SoftwareBitmap? lastBmp = null;
+            OcrRecognitionResult? lastOcr = null;
+            WeChatOcrAnalysis? lastParsed = null;
+
+            for (int i = 0; i < offsets.Length; i++)
+            {
+                EnsureSafeToContinue(mgrHwnd, ct);
+                int cx = baseX + (int)Math.Round(offsets[i].Dx * scale);
+                int cy = baseY + (int)Math.Round(offsets[i].Dy * scale);
+
+                AutoClick(cx, cy);
+                await WaitForProfilePopupAsync(mgrHwnd, wechatPid, Math.Max(520, stepDelayMs), ct);
+
+                ClickVisualOverlay.HideImmediately();
+                await Task.Delay(40, ct);
+
+                lastBmp?.Dispose();
+                lastBmp = CaptureProfileCardPopup(mgrHwnd, wechatPid, mgrRect, out bool isDedicatedPopup);
+                lastOcr = await AppServices.Ocr.RapidEngine.RecognizeAsync(lastBmp, ct);
+                if (!isDedicatedPopup)
+                {
+                    lastOcr = FilterOcrToProfileCard(lastOcr, lastBmp.PixelWidth);
+                }
+                lastParsed = WeChatOcrAnalyzer.Analyze(null, lastOcr);
+
+                bool gotProfile = isDedicatedPopup ||
+                    !string.IsNullOrWhiteSpace(lastParsed.CandidateWechatAccount) ||
+                    !string.IsNullOrWhiteSpace(lastParsed.CandidateWechatName) ||
+                    !string.IsNullOrWhiteSpace(lastParsed.CandidateWechatRemark);
+                if (gotProfile)
+                {
+                    // On slower/new PCs, WeChat draws popup text before finishing async avatar decoding.
+                    // If the avatar box still looks like a blank/gray placeholder, wait 340ms and re-capture once!
+                    if (AvatarImageService.IsLikelyPlaceholderAvatar(lastBmp, lastOcr))
+                    {
+                        await Task.Delay(340, ct);
+                        var refreshedBmp = CaptureProfileCardPopup(mgrHwnd, wechatPid, mgrRect, out bool refreshedDedicated);
+                        var refreshedOcr = await AppServices.Ocr.RapidEngine.RecognizeAsync(refreshedBmp, ct);
+                        if (!refreshedDedicated)
+                        {
+                            refreshedOcr = FilterOcrToProfileCard(refreshedOcr, refreshedBmp.PixelWidth);
+                        }
+                        lastBmp.Dispose();
+                        lastBmp = refreshedBmp;
+                        lastOcr = refreshedOcr;
+                        lastParsed = WeChatOcrAnalyzer.Analyze(null, lastOcr);
+                    }
+                    return (lastBmp, lastOcr, lastParsed);
+                }
+
+                await Task.Delay(140, ct);
+            }
+
+            return (lastBmp!, lastOcr!, lastParsed!);
+        }
+
         private static async Task WaitForProfilePopupAsync(nint mgrHwnd, int wechatPid, int maxWaitMs, CancellationToken ct)
         {
             int elapsed = 0;
-            const int pollStep = 55;
-            await Task.Delay(120, ct);
-            elapsed += 120;
+            const int pollStep = 60;
+            await Task.Delay(150, ct);
+            elapsed += 150;
             while (elapsed < maxWaitMs)
             {
                 if (FindProfilePopupWindow(wechatPid, mgrHwnd) != nint.Zero)
                 {
-                    await Task.Delay(60, ct);
+                    // Give WeChat 200ms after popup creation to finish rendering high-res avatar & text
+                    await Task.Delay(200, ct);
                     return;
                 }
                 await Task.Delay(pollStep, ct);

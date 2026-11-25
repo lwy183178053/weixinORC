@@ -145,6 +145,33 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE INDEX IF NOT EXISTS audit_logs_owner_id
 	ON audit_logs(owner_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS ai_settings (
+	id            INTEGER PRIMARY KEY CHECK (id = 1),
+	enabled       INTEGER NOT NULL DEFAULT 0,
+	base_url      TEXT NOT NULL DEFAULT '',
+	api_key       TEXT NOT NULL DEFAULT '',
+	model         TEXT NOT NULL DEFAULT '',
+	system_prompt TEXT NOT NULL DEFAULT '',
+	temperature   REAL NOT NULL DEFAULT 0.5,
+	max_tokens    INTEGER NOT NULL DEFAULT 1500,
+	timeout_sec   INTEGER NOT NULL DEFAULT 60,
+	updated_at    TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_items (
+	id             INTEGER PRIMARY KEY AUTOINCREMENT,
+	title          TEXT NOT NULL DEFAULT '',
+	category       TEXT NOT NULL DEFAULT '通用',
+	tags           TEXT NOT NULL DEFAULT '',
+	content        TEXT NOT NULL DEFAULT '',
+	always_include INTEGER NOT NULL DEFAULT 0,
+	created_at     TEXT NOT NULL,
+	updated_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS knowledge_items_id_idx
+	ON knowledge_items(id DESC);
 `
 
 type Store struct {

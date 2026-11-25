@@ -158,6 +158,18 @@
                         </Button>
 
                         <Button
+                            x:Name="RailAiButton"
+                            Click="RailNav_Click"
+                            Style="{StaticResource RailButtonStyle}"
+                            Tag="ai"
+                            ToolTipService.ToolTip="AI 助手（内置 Agent Skills）">
+                            <StackPanel HorizontalAlignment="Center" Spacing="2">
+                                <FontIcon x:Name="RailAiIcon" FontSize="15" Glyph="&#xE99A;" />
+                                <TextBlock x:Name="RailAiLabel" HorizontalAlignment="Center" FontSize="9.5" Text="AI 助手" />
+                            </StackPanel>
+                        </Button>
+
+                        <Button
                             x:Name="RailOcrButton"
                             Click="RailNav_Click"
                             Style="{StaticResource RailButtonStyle}"

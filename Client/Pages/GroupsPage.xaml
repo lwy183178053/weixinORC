@@ -203,6 +203,9 @@
                 </StackPanel>
 
                 <ListView x:Name="MessagesListView" Grid.Row="1" Padding="18,14" IsItemClickEnabled="True" ItemClick="MessagesListView_ItemClick" SelectionMode="None">
+                    <ListView.ItemContainerTransitions>
+                        <TransitionCollection />
+                    </ListView.ItemContainerTransitions>
                     <ListView.ItemContainerStyle>
                         <Style TargetType="ListViewItem">
                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -228,7 +231,7 @@
                                     Visibility="{x:Bind SelectionCheckVisibility, Mode=OneWay}" />
 
                                 <Grid Grid.Column="1">
-                                    <Grid ColumnSpacing="10" Visibility="{x:Bind IncomingVisibility}">
+                                    <Grid ColumnSpacing="10" Visibility="{x:Bind IncomingVisibility, Mode=OneWay}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="34" />
                                             <ColumnDefinition Width="*" />
@@ -237,10 +240,20 @@
                                             <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="{StaticResource InfoTextBrush}" Text="{x:Bind SenderInitial}" />
                                         </Border>
                                         <StackPanel Grid.Column="1" HorizontalAlignment="Left" MaxWidth="460" Spacing="3">
-                                            <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind SenderName}" Visibility="{x:Bind SenderNameVisibility}" />
+                                            <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind SenderName, Mode=OneWay}" Visibility="{x:Bind SenderNameVisibility, Mode=OneWay}" />
                                             <Border Padding="12,9" Background="{StaticResource ChatIncomingBgBrush}" BorderBrush="{StaticResource ChatIncomingBorderBrush}" BorderThickness="1" CornerRadius="4,10,10,10">
                                                 <Border.ContextFlyout>
                                                     <MenuFlyout>
+                                                        <MenuFlyoutItem Click="EditBubbleMenuItem_Click" Text="编辑消息">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE70F;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                        <MenuFlyoutItem Click="InsertAboveBubbleMenuItem_Click" Text="在上方插入消息">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74A;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                        <MenuFlyoutItem Click="InsertBelowBubbleMenuItem_Click" Text="在下方插入消息">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74B;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                        <MenuFlyoutSeparator />
                                                         <MenuFlyoutItem Click="CopyBubbleMenuItem_Click" Text="复制内容">
                                                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C8;" /></MenuFlyoutItem.Icon>
                                                         </MenuFlyoutItem>
@@ -253,13 +266,13 @@
                                                         </MenuFlyoutItem>
                                                     </MenuFlyout>
                                                 </Border.ContextFlyout>
-                                                <TextBlock FontSize="13.5" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind Content}" TextWrapping="Wrap" />
+                                                <TextBlock FontSize="13.5" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind Content, Mode=OneWay}" TextWrapping="Wrap" />
                                             </Border>
-                                            <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel}" />
+                                            <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel, Mode=OneWay}" />
                                         </StackPanel>
                                     </Grid>
 
-                                    <Grid ColumnSpacing="10" Visibility="{x:Bind OutgoingVisibility}">
+                                    <Grid ColumnSpacing="10" Visibility="{x:Bind OutgoingVisibility, Mode=OneWay}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="34" />
@@ -268,6 +281,16 @@
                                             <Border Padding="12,9" Background="{StaticResource ChatOutgoingBgBrush}" CornerRadius="10,4,10,10">
                                                 <Border.ContextFlyout>
                                                     <MenuFlyout>
+                                                        <MenuFlyoutItem Click="EditBubbleMenuItem_Click" Text="编辑消息">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE70F;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                        <MenuFlyoutItem Click="InsertAboveBubbleMenuItem_Click" Text="在上方插入消息">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74A;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                        <MenuFlyoutItem Click="InsertBelowBubbleMenuItem_Click" Text="在下方插入消息">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74B;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                        <MenuFlyoutSeparator />
                                                         <MenuFlyoutItem Click="CopyBubbleMenuItem_Click" Text="复制内容">
                                                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C8;" /></MenuFlyoutItem.Icon>
                                                         </MenuFlyoutItem>
@@ -280,9 +303,9 @@
                                                         </MenuFlyoutItem>
                                                     </MenuFlyout>
                                                 </Border.ContextFlyout>
-                                                <TextBlock FontSize="13.5" Foreground="{StaticResource ChatOutgoingTextBrush}" Text="{x:Bind Content}" TextWrapping="Wrap" />
+                                                <TextBlock FontSize="13.5" Foreground="{StaticResource ChatOutgoingTextBrush}" Text="{x:Bind Content, Mode=OneWay}" TextWrapping="Wrap" />
                                             </Border>
-                                            <TextBlock HorizontalAlignment="Right" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel}" />
+                                            <TextBlock HorizontalAlignment="Right" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel, Mode=OneWay}" />
                                         </StackPanel>
                                         <Border Grid.Column="1" Width="34" Height="34" VerticalAlignment="Top" Background="{StaticResource BrandPrimaryBrush}" CornerRadius="6">
                                             <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12.5" FontWeight="Bold" Foreground="#FFFFFF" Text="我" />
@@ -327,7 +350,7 @@
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="6">
-                            <Button x:Name="ImportChatScreenshotButton" Height="28" Padding="9,0" Click="ImportChatScreenshotButton_Click" Content="截图导入对话" FontSize="11.5" IsEnabled="False" Style="{StaticResource PrimaryVioletButtonStyle}" />
+                            <Button x:Name="ImportChatScreenshotButton" Height="28" Padding="10,0" Click="ImportChatScreenshotButton_Click" Content="导入对话" FontSize="11.5" IsEnabled="False" Style="{StaticResource PrimaryVioletButtonStyle}" ToolTipService.ToolTip="支持单张群聊截图识别，或自动从微信「查找聊天内容」批量导入" />
                             <Button Height="28" Padding="9,0" Click="OcrChatClipboardButton_Click" Content="粘贴提取单条" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
                         </StackPanel>
                     </Grid>

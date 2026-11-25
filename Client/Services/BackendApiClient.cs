@@ -24,6 +24,7 @@ namespace Client.Services
     public sealed class BackendApiClient
     {
         private readonly HttpClient _httpClient;
+        private readonly HttpClient _aiHttpClient;
         private readonly ConcurrentDictionary<string, byte[]> _avatarCache = new(StringComparer.Ordinal);
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
@@ -33,9 +34,11 @@ namespace Client.Services
         public BackendApiClient()
         {
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            _aiHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(130) };
         }
 
         public string BaseUrl { get; private set; } = "http://127.0.0.1:28765";
+        public string AdminWebUrl => $"{BaseUrl}/admin";
         public string? AccessToken { get; private set; }
         public EmployeeIdentity? CurrentEmployee { get; private set; }
         public bool IsAuthenticated => !string.IsNullOrEmpty(AccessToken) && CurrentEmployee is not null;
@@ -320,8 +323,54 @@ namespace Client.Services
             SendAuthedAsync<AuditLogDto>(HttpMethod.Post, "/api/v1/audit-logs",
                 new CreateAuditLogRequest { Action = action, TargetType = targetType, TargetId = targetId, Detail = detail }, ct);
 
+        // ---- AI Gateway & Built-in Agent Skills ----
+
+        public Task<ApiResult<AiStatusResponse>> GetAiStatusAsync(CancellationToken ct = default) =>
+            SendAuthedAsync<AiStatusResponse>(HttpMethod.Get, "/api/v1/ai/status", null, ct);
+
+        public Task<ApiResult<AiCustomerSummaryResponse>> SummarizeCustomerWithAiAsync(long customerId, CancellationToken ct = default) =>
+            SendAuthedLongRunningAsync<AiCustomerSummaryResponse>(HttpMethod.Post, "/api/v1/ai/customer-summary",
+                new { customer_id = customerId }, ct);
+
+        public Task<ApiResult<AiChatResponse>> CustomerAiChatAsync(
+            long customerId,
+            IEnumerable<AiChatTurnDto> history,
+            string message,
+            IEnumerable<string>? images = null,
+            CancellationToken ct = default) =>
+            SendAuthedLongRunningAsync<AiChatResponse>(HttpMethod.Post, "/api/v1/ai/customer-chat",
+                new
+                {
+                    customer_id = customerId,
+                    history = history.ToList(),
+                    message = message.Trim(),
+                    images = images?.ToList() ?? []
+                }, ct);
+
+        public Task<ApiResult<AiChatResponse>> AgentAiChatAsync(
+            IEnumerable<AiChatTurnDto> history,
+            string message,
+            IEnumerable<string>? images = null,
+            CancellationToken ct = default) =>
+            SendAuthedLongRunningAsync<AiChatResponse>(HttpMethod.Post, "/api/v1/ai/agent-chat",
+                new
+                {
+                    history = history.ToList(),
+                    message = message.Trim(),
+                    images = images?.ToList() ?? []
+                }, ct);
+
+        private Task<ApiResult<T>> SendAuthedLongRunningAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct) =>
+            SendAuthedCoreAsync(_aiHttpClient, method, path, body, async (resp, token) =>
+            {
+                var data = await resp.Content.ReadFromJsonAsync<T>(JsonOptions, token);
+                return data is not null
+                    ? ApiResult<T>.Ok(data, resp.StatusCode)
+                    : ApiResult<T>.Fail("响应解析为空。", resp.StatusCode);
+            }, ct);
+
         private Task<ApiResult<T>> SendAuthedAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct) =>
-            SendAuthedCoreAsync(method, path, body, async (resp, token) =>
+            SendAuthedCoreAsync(_httpClient, method, path, body, async (resp, token) =>
             {
                 var data = await resp.Content.ReadFromJsonAsync<T>(JsonOptions, token);
                 return data is not null
@@ -330,10 +379,11 @@ namespace Client.Services
             }, ct);
 
         private Task<ApiResult<bool>> SendAuthedNoContentAsync(HttpMethod method, string path, CancellationToken ct) =>
-            SendAuthedCoreAsync(method, path, null, (resp, _) =>
+            SendAuthedCoreAsync(_httpClient, method, path, null, (resp, _) =>
                 Task.FromResult(ApiResult<bool>.Ok(true, resp.StatusCode)), ct);
 
         private async Task<ApiResult<T>> SendAuthedCoreAsync<T>(
+            HttpClient httpClient,
             HttpMethod method,
             string path,
             object? body,
@@ -351,7 +401,7 @@ namespace Client.Services
                 {
                     req.Content = JsonContent.Create(body, options: JsonOptions);
                 }
-                using var resp = await _httpClient.SendAsync(req, ct);
+                using var resp = await httpClient.SendAsync(req, ct);
                 if (resp.IsSuccessStatusCode)
                 {
                     if (method != HttpMethod.Get)

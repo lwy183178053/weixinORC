@@ -152,175 +152,185 @@
             </Border>
         </Grid>
 
-        <!-- Row 3: Two-Pane Monitor Body (Left: Processes + Windows + Events | Right: Window Detail & OCR Diagnosis) -->
+        <!-- Row 3: Two-Pane Monitor Body (Left: Processes & Windows Side-by-Side + Events | Right: Window Detail & OCR Diagnosis) -->
         <Grid Grid.Row="3" Padding="16,4,16,14" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MinWidth="460" />
-                <ColumnDefinition Width="410" MinWidth="340" />
+                <ColumnDefinition Width="*" MinWidth="500" />
+                <ColumnDefinition Width="388" MinWidth="320" />
             </Grid.ColumnDefinitions>
 
-            <!-- Left Column: Processes, Windows & Event Log -->
+            <!-- Left Column: Two Vertical Cards (Processes | Windows) + Bottom Event Log -->
             <Grid Grid.Column="0" RowSpacing="10">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" MaxHeight="220" />
                     <RowDefinition Height="*" />
                     <RowDefinition Height="148" />
                 </Grid.RowDefinitions>
 
-                <!-- Card 1: Running WeChat Processes (PID, Version, Memory, Threads, Uptime, Path) -->
-                <Border
-                    Grid.Row="0"
-                    Background="{StaticResource AppSurfaceBrush}"
-                    BorderBrush="{StaticResource AppBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="10">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
+                <!-- Top Row: Processes (Left) & Windows (Right) as Tall Vertical Cards -->
+                <Grid Grid.Row="0" ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.2*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
 
-                        <Border Grid.Row="0" Padding="14,9" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
-                            <Grid>
-                                <TextBlock VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信进程明细（PID / 版本 / 内存 / 运行时长）" />
-                                <Border HorizontalAlignment="Right" Padding="7,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8">
-                                    <TextBlock x:Name="ProcessCountPill" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="0" />
-                                </Border>
+                    <!-- Card 1: Running WeChat Processes -->
+                    <Border
+                        Grid.Column="0"
+                        Background="{StaticResource AppSurfaceBrush}"
+                        BorderBrush="{StaticResource AppBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Padding="14,9" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
+                                <Grid>
+                                    <TextBlock VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信进程明细" />
+                                    <Border HorizontalAlignment="Right" Padding="7,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8">
+                                        <TextBlock x:Name="ProcessCountPill" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="0" />
+                                    </Border>
+                                </Grid>
+                            </Border>
+
+                            <Grid Grid.Row="1">
+                                <TextBlock
+                                    x:Name="EmptyProcessHint"
+                                    Margin="14,18"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Foreground="{StaticResource TextMutedBrush}"
+                                    Text="当前未检测到运行中的微信进程。"
+                                    TextAlignment="Center"
+                                    TextWrapping="Wrap" />
+
+                                <ListView x:Name="ProcessesListView" Padding="8,6" SelectionMode="None">
+                                    <ListView.ItemContainerTransitions>
+                                        <TransitionCollection />
+                                    </ListView.ItemContainerTransitions>
+                                    <ListView.ItemContainerStyle>
+                                        <Style TargetType="ListViewItem">
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Padding" Value="0,3" />
+                                            <Setter Property="MinHeight" Value="0" />
+                                        </Style>
+                                    </ListView.ItemContainerStyle>
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="models:WeChatProcessInfo">
+                                            <Border Padding="10,7" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="7">
+                                                <StackPanel Spacing="3">
+                                                    <Grid ColumnSpacing="6">
+                                                        <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                                            <Border Padding="6,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="4">
+                                                                <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind DisplayType}" />
+                                                            </Border>
+                                                            <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind ProcessName}" />
+                                                            <Border Padding="5,1" Background="{StaticResource AppInputBgBrush}" CornerRadius="4">
+                                                                <TextBlock FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind RoleTag, Mode=OneWay}" />
+                                                            </Border>
+                                                        </StackPanel>
+                                                        <Border HorizontalAlignment="Right" Padding="7,1" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
+                                                            <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandHighlightTextBrush}" Text="{x:Bind LoginStateLabel, Mode=OneWay}" />
+                                                        </Border>
+                                                    </Grid>
+                                                    <TextBlock FontFamily="Consolas" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind MetricsSummary, Mode=OneWay}" TextWrapping="Wrap" />
+                                                    <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" IsTextSelectionEnabled="True" Text="{x:Bind PathDisplay, Mode=OneWay}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind PathDisplay, Mode=OneWay}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
                             </Grid>
-                        </Border>
+                        </Grid>
+                    </Border>
 
-                        <Grid Grid.Row="1">
-                            <TextBlock
-                                x:Name="EmptyProcessHint"
-                                Margin="14,18"
-                                HorizontalAlignment="Center"
-                                FontSize="12"
-                                Foreground="{StaticResource TextMutedBrush}"
-                                Text="当前未检测到运行中的微信或企业微信进程。" />
+                    <!-- Card 2: Detected WeChat Windows (Selectable) -->
+                    <Border
+                        Grid.Column="1"
+                        Background="{StaticResource AppSurfaceBrush}"
+                        BorderBrush="{StaticResource AppBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
 
-                            <ListView x:Name="ProcessesListView" MaxHeight="172" Padding="8,4" SelectionMode="None">
-                                <ListView.ItemContainerTransitions>
-                                    <TransitionCollection />
-                                </ListView.ItemContainerTransitions>
-                                <ListView.ItemContainerStyle>
-                                    <Style TargetType="ListViewItem">
-                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                        <Setter Property="Padding" Value="0,3" />
-                                        <Setter Property="MinHeight" Value="0" />
-                                    </Style>
-                                </ListView.ItemContainerStyle>
-                                <ListView.ItemTemplate>
-                                    <DataTemplate x:DataType="models:WeChatProcessInfo">
-                                        <Border Padding="10,7" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="7">
-                                            <StackPanel Spacing="3">
-                                                <Grid ColumnSpacing="6">
-                                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                                        <Border Padding="6,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="4">
-                                                            <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind DisplayType}" />
-                                                        </Border>
-                                                        <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind ProcessName}" />
-                                                        <Border Padding="5,1" Background="{StaticResource AppInputBgBrush}" CornerRadius="4">
-                                                            <TextBlock FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind RoleTag, Mode=OneWay}" />
-                                                        </Border>
+                            <Border Grid.Row="0" Padding="14,9" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
+                                <Grid>
+                                    <TextBlock VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信窗口列表" />
+                                    <Border HorizontalAlignment="Right" Padding="7,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8">
+                                        <TextBlock x:Name="WindowCountPill" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="0" />
+                                    </Border>
+                                </Grid>
+                            </Border>
+
+                            <Grid Grid.Row="1">
+                                <TextBlock
+                                    x:Name="EmptyWindowHint"
+                                    Margin="18,24"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Foreground="{StaticResource TextMutedBrush}"
+                                    Text="当前无微信窗口"
+                                    TextAlignment="Center"
+                                    TextWrapping="Wrap" />
+
+                                <ListView
+                                    x:Name="WindowsListView"
+                                    Padding="8,6"
+                                    SelectionChanged="WindowsListView_SelectionChanged"
+                                    SelectionMode="Single">
+                                    <ListView.ItemContainerTransitions>
+                                        <TransitionCollection />
+                                    </ListView.ItemContainerTransitions>
+                                    <ListView.ItemContainerStyle>
+                                        <Style TargetType="ListViewItem">
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Padding" Value="0,2" />
+                                            <Setter Property="MinHeight" Value="0" />
+                                        </Style>
+                                    </ListView.ItemContainerStyle>
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="models:WeChatWindowInfo">
+                                            <Border Padding="9,7" CornerRadius="7">
+                                                <Grid ColumnSpacing="7">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <Border Grid.Column="0" VerticalAlignment="Center" Padding="6,2" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="5">
+                                                        <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind WindowRole, Mode=OneWay}" />
+                                                    </Border>
+
+                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                                        <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayTitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock FontFamily="Consolas" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind SummaryLine, Mode=OneWay}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind SummaryLine, Mode=OneWay}" />
                                                     </StackPanel>
-                                                    <Border HorizontalAlignment="Right" Padding="7,1" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
-                                                        <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandHighlightTextBrush}" Text="{x:Bind LoginStateLabel, Mode=OneWay}" />
+
+                                                    <Border Grid.Column="2" VerticalAlignment="Center" Padding="6,2" Background="{StaticResource AppInputBgBrush}" CornerRadius="8">
+                                                        <TextBlock FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind StateLabel, Mode=OneWay}" />
                                                     </Border>
                                                 </Grid>
-                                                <TextBlock FontFamily="Consolas" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind MetricsSummary, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                                                <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" IsTextSelectionEnabled="True" Text="{x:Bind PathDisplay, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                                            </StackPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ListView.ItemTemplate>
-                            </ListView>
-                        </Grid>
-                    </Grid>
-                </Border>
-
-                <!-- Card 2: Detected WeChat Windows (Selectable) -->
-                <Border
-                    Grid.Row="1"
-                    Background="{StaticResource AppSurfaceBrush}"
-                    BorderBrush="{StaticResource AppBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="10">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-
-                        <Border Grid.Row="0" Padding="14,9" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
-                            <Grid>
-                                <TextBlock VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信窗口列表（点击查看详情与诊断）" />
-                                <Border HorizontalAlignment="Right" Padding="7,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8">
-                                    <TextBlock x:Name="WindowCountPill" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="0" />
-                                </Border>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
                             </Grid>
-                        </Border>
-
-                        <Grid Grid.Row="1">
-                            <TextBlock
-                                x:Name="EmptyWindowHint"
-                                Margin="20,28"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                FontSize="12"
-                                Foreground="{StaticResource TextMutedBrush}"
-                                Text="当前无可见或托盘中的微信窗口；若需打开，点击右上角「启动微信」即可。"
-                                TextAlignment="Center"
-                                TextWrapping="Wrap" />
-
-                            <ListView
-                                x:Name="WindowsListView"
-                                Padding="8,6"
-                                SelectionChanged="WindowsListView_SelectionChanged"
-                                SelectionMode="Single">
-                                <ListView.ItemContainerTransitions>
-                                    <TransitionCollection />
-                                </ListView.ItemContainerTransitions>
-                                <ListView.ItemContainerStyle>
-                                    <Style TargetType="ListViewItem">
-                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                        <Setter Property="Padding" Value="0,2" />
-                                        <Setter Property="MinHeight" Value="0" />
-                                    </Style>
-                                </ListView.ItemContainerStyle>
-                                <ListView.ItemTemplate>
-                                    <DataTemplate x:DataType="models:WeChatWindowInfo">
-                                        <Border Padding="10,7" CornerRadius="7">
-                                            <Grid ColumnSpacing="8">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-
-                                                <Border Grid.Column="0" VerticalAlignment="Center" Padding="6,2" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="5">
-                                                    <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind WindowRole, Mode=OneWay}" />
-                                                </Border>
-
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                                    <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayTitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock FontFamily="Consolas" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind SummaryLine, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-
-                                                <Border Grid.Column="2" VerticalAlignment="Center" Padding="7,2" Background="{StaticResource AppInputBgBrush}" CornerRadius="8">
-                                                    <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind StateLabel, Mode=OneWay}" />
-                                                </Border>
-                                            </Grid>
-                                        </Border>
-                                    </DataTemplate>
-                                </ListView.ItemTemplate>
-                            </ListView>
                         </Grid>
-                    </Grid>
-                </Border>
+                    </Border>
+                </Grid>
 
                 <!-- Card 3: Live Status Transition Events -->
                 <Border
-                    Grid.Row="2"
+                    Grid.Row="1"
                     Background="{StaticResource AppSurfaceBrush}"
                     BorderBrush="{StaticResource AppBorderBrush}"
                     BorderThickness="1"

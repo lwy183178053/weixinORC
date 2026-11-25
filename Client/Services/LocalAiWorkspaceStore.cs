@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.UI.Xaml;
 
 namespace Client.Services
@@ -8,10 +9,42 @@ namespace Client.Services
         public string Role { get; set; } = "assistant"; // "user" | "assistant"
         public string Content { get; set; } = string.Empty;
         public string Timestamp { get; set; } = string.Empty;
+        public string ToolTraceSummary { get; set; } = string.Empty;
+        public List<string> Images { get; set; } = [];
 
+        [JsonIgnore]
+        public bool IsPending { get; set; }
+
+        [JsonIgnore]
         public bool IsUser => string.Equals(Role, "user", StringComparison.OrdinalIgnoreCase);
+
+        [JsonIgnore]
         public Visibility UserVisibility => IsUser ? Visibility.Visible : Visibility.Collapsed;
-        public Visibility AssistantVisibility => IsUser ? Visibility.Collapsed : Visibility.Visible;
+
+        [JsonIgnore]
+        public Visibility UserImagesVisibility => IsUser && Images is { Count: > 0 } ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public Visibility UserTextVisibility => IsUser && !string.IsNullOrWhiteSpace(Content) ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public Visibility AssistantVisibility => !IsUser ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public Visibility PendingVisibility => !IsUser && IsPending ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public Visibility AssistantContentVisibility => !IsUser && !IsPending ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public Visibility ToolTraceVisibility => !IsUser && !IsPending && !string.IsNullOrWhiteSpace(ToolTraceSummary)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public Visibility TimestampVisibility => !IsPending && !string.IsNullOrWhiteSpace(Timestamp)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     public sealed class CustomerAiWorkspaceData
@@ -23,9 +56,29 @@ namespace Client.Services
         public List<AiChatMessageItem> Messages { get; set; } = [];
     }
 
+    public sealed class AgentSessionData
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString("N")[..12];
+        public string Title { get; set; } = "新对话";
+        public string UpdatedAt { get; set; } = DateTime.Now.ToString("MM-dd HH:mm");
+        public List<AiChatMessageItem> Messages { get; set; } = [];
+
+        public string PreviewLine
+        {
+            get
+            {
+                if (Messages.Count == 0) return "等待提问...";
+                var last = Messages[^1];
+                string txt = last.Content.Replace("\r", " ").Replace("\n", " ").Trim();
+                if (!string.IsNullOrEmpty(txt)) return txt;
+                return last.Images is { Count: > 0 } ? $"[图片 ×{last.Images.Count}]" : "等待提问...";
+            }
+        }
+    }
+
     /// <summary>
-    /// Stores per-customer AI summaries and AI discussion history locally on disk
-    /// (not uploaded to the backend database).
+    /// Stores per-customer AI summaries/chats and global AI Assistant sessions locally on disk
+    /// (conversation history stays on the employee machine and is not stored in the backend DB).
     /// </summary>
     public sealed class LocalAiWorkspaceStore
     {
@@ -36,6 +89,7 @@ namespace Client.Services
         };
 
         private readonly string _rootDir;
+        private readonly string _agentSessionsPath;
 
         public LocalAiWorkspaceStore()
         {
@@ -43,6 +97,7 @@ namespace Client.Services
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "weixinORC",
                 "ai_workspace");
+            _agentSessionsPath = Path.Combine(_rootDir, "agent_sessions.json");
         }
 
         private string GetCustomerFilePath(long customerId) =>
@@ -67,7 +122,6 @@ namespace Client.Services
             }
             catch
             {
-                // Ignore corrupted local cache and start fresh
             }
 
             return new CustomerAiWorkspaceData { CustomerId = customerId };
@@ -83,7 +137,41 @@ namespace Client.Services
             }
             catch
             {
-                // Best-effort local persistence
+            }
+        }
+
+        public List<AgentSessionData> LoadAgentSessions()
+        {
+            try
+            {
+                if (File.Exists(_agentSessionsPath))
+                {
+                    string json = File.ReadAllText(_agentSessionsPath);
+                    var list = JsonSerializer.Deserialize<List<AgentSessionData>>(json, JsonOpts);
+                    if (list is not null)
+                    {
+                        foreach (var s in list) s.Messages ??= [];
+                        return list;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return [];
+        }
+
+        public void SaveAgentSessions(List<AgentSessionData> sessions)
+        {
+            try
+            {
+                Directory.CreateDirectory(_rootDir);
+                string json = JsonSerializer.Serialize(sessions, JsonOpts);
+                File.WriteAllText(_agentSessionsPath, json);
+            }
+            catch
+            {
             }
         }
     }

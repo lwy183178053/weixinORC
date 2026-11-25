@@ -391,6 +391,9 @@
                 </StackPanel>
 
                 <ListView x:Name="MessagesListView" Grid.Row="1" Padding="18,14" IsItemClickEnabled="True" ItemClick="MessagesListView_ItemClick" SelectionMode="None">
+                    <ListView.ItemContainerTransitions>
+                        <TransitionCollection />
+                    </ListView.ItemContainerTransitions>
                     <ListView.ItemContainerStyle>
                         <Style TargetType="ListViewItem">
                             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -417,7 +420,7 @@
 
                                 <Grid Grid.Column="1">
                                     <!-- Incoming (Left white bubble) -->
-                                    <Grid ColumnSpacing="10" Visibility="{x:Bind IncomingVisibility}">
+                                    <Grid ColumnSpacing="10" Visibility="{x:Bind IncomingVisibility, Mode=OneWay}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="34" />
                                             <ColumnDefinition Width="*" />
@@ -432,6 +435,16 @@
                                             <Border Padding="12,9" Background="{StaticResource ChatIncomingBgBrush}" BorderBrush="{StaticResource ChatIncomingBorderBrush}" BorderThickness="1" CornerRadius="4,10,10,10">
                                                 <Border.ContextFlyout>
                                                     <MenuFlyout>
+                                                        <MenuFlyoutItem Click="EditBubbleMenuItem_Click" Text="编辑消息">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE70F;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                        <MenuFlyoutItem Click="InsertAboveBubbleMenuItem_Click" Text="在上方插入消息">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74A;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                        <MenuFlyoutItem Click="InsertBelowBubbleMenuItem_Click" Text="在下方插入消息">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74B;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                        <MenuFlyoutSeparator />
                                                         <MenuFlyoutItem Click="CopyBubbleMenuItem_Click" Text="复制内容">
                                                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C8;" /></MenuFlyoutItem.Icon>
                                                         </MenuFlyoutItem>
@@ -444,14 +457,14 @@
                                                         </MenuFlyoutItem>
                                                     </MenuFlyout>
                                                 </Border.ContextFlyout>
-                                                <TextBlock FontSize="13.5" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind Content}" TextWrapping="Wrap" />
+                                                <TextBlock FontSize="13.5" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind Content, Mode=OneWay}" TextWrapping="Wrap" />
                                             </Border>
-                                            <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel}" />
+                                            <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel, Mode=OneWay}" />
                                         </StackPanel>
                                     </Grid>
 
                                     <!-- Outgoing (Right WeChat-green bubble) -->
-                                    <Grid ColumnSpacing="10" Visibility="{x:Bind OutgoingVisibility}">
+                                    <Grid ColumnSpacing="10" Visibility="{x:Bind OutgoingVisibility, Mode=OneWay}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="34" />
@@ -460,6 +473,16 @@
                                             <Border Padding="12,9" Background="{StaticResource ChatOutgoingBgBrush}" CornerRadius="10,4,10,10">
                                                 <Border.ContextFlyout>
                                                     <MenuFlyout>
+                                                        <MenuFlyoutItem Click="EditBubbleMenuItem_Click" Text="编辑消息">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE70F;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                        <MenuFlyoutItem Click="InsertAboveBubbleMenuItem_Click" Text="在上方插入消息">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74A;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                        <MenuFlyoutItem Click="InsertBelowBubbleMenuItem_Click" Text="在下方插入消息">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74B;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                        <MenuFlyoutSeparator />
                                                         <MenuFlyoutItem Click="CopyBubbleMenuItem_Click" Text="复制内容">
                                                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C8;" /></MenuFlyoutItem.Icon>
                                                         </MenuFlyoutItem>
@@ -472,9 +495,9 @@
                                                         </MenuFlyoutItem>
                                                     </MenuFlyout>
                                                 </Border.ContextFlyout>
-                                                <TextBlock FontSize="13.5" Foreground="{StaticResource ChatOutgoingTextBrush}" Text="{x:Bind Content}" TextWrapping="Wrap" />
+                                                <TextBlock FontSize="13.5" Foreground="{StaticResource ChatOutgoingTextBrush}" Text="{x:Bind Content, Mode=OneWay}" TextWrapping="Wrap" />
                                             </Border>
-                                            <TextBlock HorizontalAlignment="Right" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel}" />
+                                            <TextBlock HorizontalAlignment="Right" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel, Mode=OneWay}" />
                                         </StackPanel>
                                         <Border Grid.Column="1" Width="34" Height="34" VerticalAlignment="Top" Background="{StaticResource BrandPrimaryBrush}" CornerRadius="6">
                                             <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12.5" FontWeight="Bold" Foreground="#FFFFFF" Text="我" />
@@ -524,7 +547,7 @@
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="6">
-                            <Button x:Name="ImportChatScreenshotButton" Height="28" Padding="9,0" Click="ImportChatScreenshotButton_Click" Content="截图导入对话" FontSize="11.5" IsEnabled="False" Style="{StaticResource PrimaryVioletButtonStyle}" ToolTipService.ToolTip="导入整张微信聊天截图，自动区分左右气泡并批量入库" />
+                            <Button x:Name="ImportChatScreenshotButton" Height="28" Padding="10,0" Click="ImportChatScreenshotButton_Click" Content="导入对话" FontSize="11.5" IsEnabled="False" Style="{StaticResource PrimaryVioletButtonStyle}" ToolTipService.ToolTip="支持单张聊天截图识别，或自动从微信「查找聊天内容」批量导入" />
                             <Button Height="28" Padding="9,0" Click="OcrChatClipboardButton_Click" Content="粘贴提取单条" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
                         </StackPanel>
                     </Grid>
@@ -900,21 +923,8 @@
                     <!-- Summary Context Header -->
                     <Border Grid.Row="0" Padding="14,10" Background="{StaticResource AppSurfaceAltBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
                         <Grid ColumnSpacing="8">
-                            <StackPanel VerticalAlignment="Center" Spacing="2">
-                                <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="客户完整信息 AI 总结" />
-                                <TextBlock x:Name="AiSummaryContextText" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="基于：基本资料 · 备注 · 0 条聊天记录" TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
-                            <Button
-                                x:Name="RegenerateSummaryTopButton"
-                                Height="28"
-                                Padding="10,0"
-                                HorizontalAlignment="Right"
-                                VerticalAlignment="Center"
-                                Click="GenerateAiSummaryButton_Click"
-                                Content="重新总结"
-                                FontSize="11.5"
-                                Style="{StaticResource SecondaryOutlineButtonStyle}"
-                                Visibility="Collapsed" />
+                            <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="客户 AI 总结" />
+                            <TextBlock x:Name="AiSummaryContextText" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="0 条对话" />
                         </Grid>
                     </Border>
 
@@ -926,27 +936,26 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         Spacing="12">
-                        <Border Width="52" Height="52" HorizontalAlignment="Center" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="14">
-                            <FontIcon FontSize="22" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE734;" />
+                        <Border Width="48" Height="48" HorizontalAlignment="Center" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="14">
+                            <FontIcon FontSize="20" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE734;" />
                         </Border>
-                        <TextBlock HorizontalAlignment="Center" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="一键 AI 总结客户画像" />
-                        <TextBlock
-                            HorizontalAlignment="Center"
-                            FontSize="12"
-                            Foreground="{StaticResource TextMutedBrush}"
-                            LineHeight="19"
-                            Text="自动结合该客户的基础资料、标签、员工跟进备注与历史聊天记录，提炼客户意向与跟进建议。"
-                            TextAlignment="Center"
-                            TextWrapping="Wrap" />
+                        <TextBlock HorizontalAlignment="Center" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="暂无客户总结" />
+                        <Border
+                            x:Name="AiSummaryErrorBanner"
+                            Padding="10,7"
+                            Background="{StaticResource DangerBgBrush}"
+                            CornerRadius="7"
+                            Visibility="Collapsed">
+                            <TextBlock x:Name="AiSummaryErrorText" FontSize="11.5" Foreground="{StaticResource DangerTextBrush}" TextWrapping="Wrap" />
+                        </Border>
                         <Button
                             x:Name="GenerateAiSummaryButton"
-                            Height="36"
-                            Margin="0,4,0,0"
+                            Height="34"
                             Padding="20,0"
                             HorizontalAlignment="Center"
                             Click="GenerateAiSummaryButton_Click"
-                            Content="一键 AI 总结"
-                            FontSize="13"
+                            Content="生成总结"
+                            FontSize="12.5"
                             Style="{StaticResource PrimaryVioletButtonStyle}" />
                     </StackPanel>
 
@@ -959,34 +968,27 @@
                         Spacing="10"
                         Visibility="Collapsed">
                         <ProgressRing x:Name="AiSummarySpinner" Width="28" Height="28" IsActive="False" />
-                        <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Text="正在梳理客户完整资料与对话要点..." />
+                        <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Text="正在生成客户总结..." />
                     </StackPanel>
 
-                    <!-- Generated Summary Card -->
+                    <!-- Generated Summary Card (Markdown Rendered) -->
                     <ScrollViewer x:Name="AiSummaryResultScroll" Grid.Row="1" Padding="14,12" Visibility="Collapsed">
-                        <StackPanel Spacing="10">
+                        <StackPanel Spacing="8">
                             <Border Padding="14" Background="{StaticResource BrandCardTintBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
                                 <StackPanel Spacing="10">
                                     <Grid>
                                         <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                             <FontIcon FontSize="13" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE734;" />
-                                            <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource BrandHighlightTextBrush}" Text="AI 客户档案总结" />
+                                            <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource BrandHighlightTextBrush}" Text="客户画像与跟进总结" />
                                         </StackPanel>
                                         <TextBlock x:Name="AiSummaryTimeText" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="" />
                                     </Grid>
                                     <Border Height="1" Background="{StaticResource BrandSoftBorderBrush}" Opacity="0.65" />
-                                    <TextBlock
-                                        x:Name="AiSummaryContentText"
-                                        FontSize="13"
-                                        Foreground="{StaticResource TextPrimaryBrush}"
-                                        IsTextSelectionEnabled="True"
-                                        LineHeight="21"
-                                        Text=""
-                                        TextWrapping="Wrap" />
+                                    <controls:MarkdownTextView x:Name="AiSummaryMarkdownView" BaseFontSize="12.5" />
                                 </StackPanel>
                             </Border>
 
-                            <TextBlock x:Name="AiSummaryNoticeText" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="当前为界面本地预览，后续接入服务端 AI 接口后将由大模型深度生成。" TextWrapping="Wrap" />
+                            <TextBlock x:Name="AiSummaryNoticeText" FontSize="11.5" Foreground="{StaticResource SuccessTextBrush}" TextWrapping="Wrap" Visibility="Collapsed" />
                         </StackPanel>
                     </ScrollViewer>
 
@@ -1024,7 +1026,7 @@
                     </Border>
                 </Grid>
 
-                <!-- TAB 3: AI 对话 (Scoped per customer, context saved locally) -->
+                <!-- TAB 3: AI 对话 (Scoped per customer) -->
                 <Grid x:Name="AiChatTabContainer" Grid.Row="1" Visibility="Collapsed">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -1035,10 +1037,7 @@
                     <!-- Context Strip -->
                     <Border Grid.Row="0" Padding="14,9" Background="{StaticResource AppSurfaceAltBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
                         <Grid ColumnSpacing="8">
-                            <StackPanel VerticalAlignment="Center" Spacing="1">
-                                <TextBlock x:Name="AiChatContextTitle" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="基于当前客户完整资料讨论" TextTrimming="CharacterEllipsis" />
-                                <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="对话上下文仅保存于本地" />
-                            </StackPanel>
+                            <TextBlock x:Name="AiChatContextTitle" VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="AI 对话" TextTrimming="CharacterEllipsis" />
                             <Button
                                 x:Name="ClearAiChatButton"
                                 Height="26"
@@ -1046,7 +1045,7 @@
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Center"
                                 Click="ClearAiChatButton_Click"
-                                Content="清空对话"
+                                Content="清空"
                                 FontSize="11.5"
                                 Style="{StaticResource SecondaryOutlineButtonStyle}" />
                         </Grid>
@@ -1061,27 +1060,23 @@
                             HorizontalAlignment="Stretch"
                             VerticalAlignment="Center"
                             Spacing="10">
-                            <Border Width="44" Height="44" HorizontalAlignment="Center" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="12">
-                                <FontIcon FontSize="19" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8F2;" />
+                            <Border Width="42" Height="42" HorizontalAlignment="Center" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="12">
+                                <FontIcon FontSize="18" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8F2;" />
                             </Border>
-                            <TextBlock HorizontalAlignment="Center" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="与 AI 讨论该客户跟进策略" />
-                            <TextBlock
-                                HorizontalAlignment="Center"
-                                FontSize="11.5"
-                                Foreground="{StaticResource TextMutedBrush}"
-                                Text="AI 将基于当前客户的完整资料、备注与聊天记录回答问题，试试下方快捷提问："
-                                TextAlignment="Center"
-                                TextWrapping="Wrap" />
+                            <TextBlock HorizontalAlignment="Center" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="快捷提问" />
 
-                            <StackPanel Margin="0,4,0,0" Spacing="6">
+                            <StackPanel Margin="0,2,0,0" Spacing="6">
                                 <Button Padding="11,8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Click="AiQuickPrompt_Click" Content="分析这位客户的当前意向与关键需求" FontSize="12" Style="{StaticResource SecondaryOutlineButtonStyle}" />
                                 <Button Padding="11,8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Click="AiQuickPrompt_Click" Content="结合最近对话帮我起草一条跟进话术" FontSize="12" Style="{StaticResource SecondaryOutlineButtonStyle}" />
                                 <Button Padding="11,8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Click="AiQuickPrompt_Click" Content="梳理目前沟通中需要注意的风险点" FontSize="12" Style="{StaticResource SecondaryOutlineButtonStyle}" />
                             </StackPanel>
                         </StackPanel>
 
-                        <!-- Messages Thread -->
+                        <!-- Messages Thread (Markdown + Live Replying Indicator) -->
                         <ListView x:Name="AiChatListView" Padding="12,10" SelectionMode="None">
+                            <ListView.ItemContainerTransitions>
+                                <TransitionCollection />
+                            </ListView.ItemContainerTransitions>
                             <ListView.ItemContainerStyle>
                                 <Style TargetType="ListViewItem">
                                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -1095,21 +1090,74 @@
                                         <!-- User Message (Right) -->
                                         <StackPanel HorizontalAlignment="Right" MaxWidth="270" Spacing="3" Visibility="{x:Bind UserVisibility}">
                                             <Border Padding="10,8" Background="{StaticResource BrandPrimaryBrush}" CornerRadius="10,4,10,10">
-                                                <TextBlock FontSize="12.5" Foreground="#FFFFFF" IsTextSelectionEnabled="True" Text="{x:Bind Content}" TextWrapping="Wrap" />
+                                                <StackPanel Spacing="6">
+                                                    <ItemsControl ItemsSource="{x:Bind Images}" Visibility="{x:Bind UserImagesVisibility}">
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <StackPanel Orientation="Horizontal" Spacing="5" />
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="x:String">
+                                                                <Border Width="62" Height="62" CornerRadius="6">
+                                                                    <controls:DataUriImage DataUri="{x:Bind}" />
+                                                                </Border>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                    <TextBlock FontSize="12.5" Foreground="#FFFFFF" IsTextSelectionEnabled="True" Text="{x:Bind Content}" TextWrapping="Wrap" Visibility="{x:Bind UserTextVisibility}" />
+                                                </StackPanel>
                                             </Border>
                                             <TextBlock HorizontalAlignment="Right" FontSize="10" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind Timestamp}" />
                                         </StackPanel>
 
                                         <!-- AI Assistant Message (Left) -->
-                                        <StackPanel HorizontalAlignment="Left" MaxWidth="290" Spacing="3" Visibility="{x:Bind AssistantVisibility}">
+                                        <StackPanel HorizontalAlignment="Left" MaxWidth="304" Spacing="3" Visibility="{x:Bind AssistantVisibility}">
                                             <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                                                 <FontIcon FontSize="11" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE734;" />
                                                 <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="AI 助手" />
                                             </StackPanel>
-                                            <Border Padding="10,8" Background="{StaticResource AppSurfaceAltBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="4,10,10,10">
-                                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextPrimaryBrush}" IsTextSelectionEnabled="True" LineHeight="19" Text="{x:Bind Content}" TextWrapping="Wrap" />
+
+                                            <!-- Live Thinking / Replying Bubble -->
+                                            <Border
+                                                Padding="10,8"
+                                                HorizontalAlignment="Left"
+                                                Background="{StaticResource AppSurfaceAltBrush}"
+                                                BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="4,10,10,10"
+                                                Visibility="{x:Bind PendingVisibility}">
+                                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                    <ProgressRing Width="14" Height="14" IsActive="{x:Bind IsPending}" />
+                                                    <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind Content}" />
+                                                </StackPanel>
                                             </Border>
-                                            <TextBlock FontSize="10" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind Timestamp}" />
+
+                                            <!-- Markdown Rendered Assistant Bubble -->
+                                            <Border
+                                                Padding="10,9"
+                                                Background="{StaticResource AppSurfaceAltBrush}"
+                                                BorderBrush="{StaticResource AppBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="4,10,10,10"
+                                                Visibility="{x:Bind AssistantContentVisibility}">
+                                                <Border.ContextFlyout>
+                                                    <MenuFlyout>
+                                                        <MenuFlyoutItem Click="CopyAiChatMessageMenuItem_Click" Text="复制回复">
+                                                            <MenuFlyoutItem.Icon>
+                                                                <FontIcon Glyph="&#xE8C8;" />
+                                                            </MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
+                                                    </MenuFlyout>
+                                                </Border.ContextFlyout>
+                                                <controls:MarkdownTextView BaseFontSize="12.5" Text="{x:Bind Content}" />
+                                            </Border>
+
+                                            <TextBlock
+                                                FontSize="10"
+                                                Foreground="{StaticResource TextMutedBrush}"
+                                                Text="{x:Bind Timestamp}"
+                                                Visibility="{x:Bind TimestampVisibility}" />
                                         </StackPanel>
                                     </Grid>
                                 </DataTemplate>
@@ -1117,41 +1165,140 @@
                         </ListView>
                     </Grid>
 
-                    <!-- Bottom Input Bar -->
-                    <Border
-                        Grid.Row="2"
-                        Padding="12,10"
-                        Background="{StaticResource AppSurfaceAltBrush}"
-                        BorderBrush="{StaticResource AppBorderBrush}"
-                        BorderThickness="0,1,0,0">
-                        <Grid ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBox
-                                x:Name="AiChatInputBox"
-                                Grid.Column="0"
-                                MaxHeight="88"
-                                Padding="10,7"
-                                AcceptsReturn="True"
-                                FontSize="12.5"
-                                KeyDown="AiChatInputBox_KeyDown"
-                                PlaceholderText="围绕该客户向 AI 提问..."
-                                Style="{StaticResource SoftTextBoxStyle}"
-                                TextWrapping="Wrap" />
-                            <Button
-                                x:Name="AiChatSendButton"
-                                Grid.Column="1"
-                                Height="34"
-                                Padding="14,0"
-                                VerticalAlignment="Bottom"
-                                Click="AiChatSendButton_Click"
-                                Content="发送"
-                                FontSize="12.5"
-                                Style="{StaticResource PrimaryVioletButtonStyle}" />
-                        </Grid>
-                    </Border>
+                    <!-- Codex-Style Compact Rounded Input Card -->
+                    <Grid Grid.Row="2" Padding="10,6,10,10">
+                        <Border
+                            Padding="10,8,9,8"
+                            Background="{StaticResource AppCanvasBgBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="14">
+                            <Grid RowSpacing="5">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <!-- Attached Image Preview Strip -->
+                                <ScrollViewer
+                                    x:Name="AiChatPendingImagesScroll"
+                                    Grid.Row="0"
+                                    HorizontalScrollBarVisibility="Auto"
+                                    HorizontalScrollMode="Enabled"
+                                    VerticalScrollMode="Disabled"
+                                    Visibility="Collapsed">
+                                    <ItemsControl x:Name="AiChatPendingImagesItems">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <StackPanel Orientation="Horizontal" Spacing="6" />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="services:AiImageAttachment">
+                                                <Grid Width="48" Height="48">
+                                                    <Border BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="7">
+                                                        <Image Source="{x:Bind Preview}" Stretch="UniformToFill" />
+                                                    </Border>
+                                                    <Button
+                                                        Width="16"
+                                                        Height="16"
+                                                        Margin="0,2,2,0"
+                                                        Padding="0"
+                                                        HorizontalAlignment="Right"
+                                                        VerticalAlignment="Top"
+                                                        Background="#CC1E2430"
+                                                        BorderThickness="0"
+                                                        Click="RemoveCustomerAiImage_Click"
+                                                        CornerRadius="8"
+                                                        Tag="{x:Bind Id}">
+                                                        <FontIcon FontSize="8" Foreground="#FFFFFF" Glyph="&#xE8BB;" />
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+
+                                <!-- Borderless Multi-line Input -->
+                                <TextBox
+                                    x:Name="AiChatInputBox"
+                                    Grid.Row="1"
+                                    MinHeight="34"
+                                    MaxHeight="96"
+                                    Padding="2,2"
+                                    AcceptsReturn="True"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    FontSize="12.5"
+                                    Foreground="{StaticResource TextPrimaryBrush}"
+                                    KeyDown="AiChatInputBox_KeyDown"
+                                    Paste="AiChatInputBox_Paste"
+                                    PlaceholderText="输入问题，支持粘贴或上传图片..."
+                                    TextWrapping="Wrap">
+                                    <TextBox.Resources>
+                                        <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                                        <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                        <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                        <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                                        <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                                        <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                                        <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                                        <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                                    </TextBox.Resources>
+                                </TextBox>
+
+                                <!-- Bottom Action Bar (+ Image | Circular Send) -->
+                                <Grid Grid.Row="2">
+                                    <Button
+                                        x:Name="AiChatAttachButton"
+                                        Width="26"
+                                        Height="26"
+                                        Padding="0"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
+                                        Background="Transparent"
+                                        BorderBrush="{StaticResource AppBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="13"
+                                        ToolTipService.ToolTip="添加图片">
+                                        <Button.Flyout>
+                                            <MenuFlyout Placement="TopEdgeAlignedLeft">
+                                                <MenuFlyoutItem Click="UploadCustomerAiImage_Click" Text="上传本地图片">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xE8B9;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutItem Click="PasteCustomerAiImage_Click" Text="粘贴剪贴板图片">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xE77F;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                            </MenuFlyout>
+                                        </Button.Flyout>
+                                        <FontIcon FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Glyph="&#xE710;" />
+                                    </Button>
+
+                                    <Button
+                                        x:Name="AiChatSendButton"
+                                        Width="28"
+                                        Height="28"
+                                        Padding="0"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        Click="AiChatSendButton_Click"
+                                        CornerRadius="14"
+                                        Style="{StaticResource PrimaryVioletButtonStyle}"
+                                        ToolTipService.ToolTip="发送 (Enter)">
+                                        <Grid>
+                                            <FontIcon x:Name="AiChatSendIcon" FontSize="12" Foreground="#FFFFFF" Glyph="&#xE74A;" />
+                                            <ProgressRing x:Name="AiChatSendBusyRing" Width="13" Height="13" Foreground="#FFFFFF" IsActive="False" Visibility="Collapsed" />
+                                        </Grid>
+                                    </Button>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Grid>
             </Grid>
         </Border>

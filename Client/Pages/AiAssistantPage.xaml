@@ -1,0 +1,713 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Client.Pages.AiAssistantPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Client.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:services="using:Client.Services"
+    mc:Ignorable="d">
+
+    <Grid Background="{StaticResource AppCanvasBgBrush}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="244" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Left Sidebar: Compact Status + Local Session History -->
+        <Border
+            Grid.Column="0"
+            Background="{StaticResource AppSurfaceBrush}"
+            BorderBrush="{StaticResource AppBorderBrush}"
+            BorderThickness="0,0,1,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Header -->
+                <Grid Grid.Row="0" Padding="14,14,12,10">
+                    <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                        <Border
+                            Width="24"
+                            Height="24"
+                            Background="{StaticResource BrandSoftBgBrush}"
+                            BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="7">
+                            <FontIcon FontSize="12.5" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE99A;" />
+                        </Border>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            FontSize="15"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource TextPrimaryBrush}"
+                            Text="AI 助手" />
+                    </StackPanel>
+
+                    <Button
+                        HorizontalAlignment="Right"
+                        Height="28"
+                        Padding="10,0"
+                        Click="NewSessionButton_Click"
+                        Style="{StaticResource PrimaryVioletButtonStyle}"
+                        ToolTipService.ToolTip="新建对话">
+                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <FontIcon FontSize="11" Glyph="&#xE710;" />
+                            <TextBlock FontSize="11.5" Text="新对话" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <!-- Compact AI Availability Indicator -->
+                <Border
+                    Grid.Row="1"
+                    Margin="12,0,12,10"
+                    Padding="10,7"
+                    Background="{StaticResource AppCanvasBgBrush}"
+                    BorderBrush="{StaticResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8">
+                    <Grid ColumnSpacing="7">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Ellipse
+                            x:Name="AiStatusDot"
+                            Grid.Column="0"
+                            Width="8"
+                            Height="8"
+                            VerticalAlignment="Center"
+                            Fill="{StaticResource WarningTextBrush}" />
+
+                        <TextBlock
+                            x:Name="AiStatusTitleText"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource TextPrimaryBrush}"
+                            Text="检测中..."
+                            TextTrimming="CharacterEllipsis" />
+
+                        <Button
+                            Grid.Column="2"
+                            Width="22"
+                            Height="22"
+                            Padding="0"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Click="RefreshStatusButton_Click"
+                            CornerRadius="5"
+                            ToolTipService.ToolTip="刷新状态">
+                            <FontIcon FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Glyph="&#xE72C;" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <!-- Session List Header -->
+                <Grid Grid.Row="2" Padding="14,2,14,6">
+                    <TextBlock
+                        FontSize="11.5"
+                        FontWeight="SemiBold"
+                        Foreground="{StaticResource TextMutedBrush}"
+                        Text="对话记录" />
+                    <TextBlock
+                        x:Name="SessionCountText"
+                        HorizontalAlignment="Right"
+                        FontSize="11"
+                        Foreground="{StaticResource TextMutedBrush}"
+                        Text="0" />
+                </Grid>
+
+                <!-- Sessions List (Right-click Rename + Delete) -->
+                <ListView
+                    x:Name="SessionsListView"
+                    Grid.Row="3"
+                    Padding="8,0,8,10"
+                    SelectionChanged="SessionsListView_SelectionChanged"
+                    SelectionMode="Single">
+                    <ListView.ItemContainerTransitions>
+                        <TransitionCollection />
+                    </ListView.ItemContainerTransitions>
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Margin" Value="0,0,0,4" />
+                            <Setter Property="MinHeight" Value="0" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="services:AgentSessionData">
+                            <Border
+                                Padding="10,8"
+                                Background="{StaticResource AppCanvasBgBrush}"
+                                BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                                <Border.ContextFlyout>
+                                    <MenuFlyout>
+                                        <MenuFlyoutItem
+                                            Click="RenameSessionMenuItem_Click"
+                                            Text="重命名">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE8AC;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutSeparator />
+                                        <MenuFlyoutItem
+                                            Click="DeleteSessionMenuItem_Click"
+                                            Text="删除该会话">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE74D;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                    </MenuFlyout>
+                                </Border.ContextFlyout>
+                                <Grid ColumnSpacing="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Grid.Column="0" Spacing="3">
+                                        <Grid ColumnSpacing="6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock
+                                                Grid.Column="0"
+                                                FontSize="12.5"
+                                                FontWeight="SemiBold"
+                                                Foreground="{StaticResource TextPrimaryBrush}"
+                                                Text="{x:Bind Title}"
+                                                TextTrimming="CharacterEllipsis" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                VerticalAlignment="Center"
+                                                FontSize="10.5"
+                                                Foreground="{StaticResource TextMutedBrush}"
+                                                Text="{x:Bind UpdatedAt}" />
+                                        </Grid>
+                                        <TextBlock
+                                            FontSize="11.5"
+                                            Foreground="{StaticResource TextMutedBrush}"
+                                            MaxLines="1"
+                                            Text="{x:Bind PreviewLine}"
+                                            TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+
+                                    <Button
+                                        Grid.Column="1"
+                                        Width="22"
+                                        Height="22"
+                                        Padding="0"
+                                        VerticalAlignment="Center"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Click="DeleteSessionInlineButton_Click"
+                                        CornerRadius="5"
+                                        ToolTipService.ToolTip="删除会话">
+                                        <FontIcon FontSize="11" Foreground="{StaticResource TextMutedBrush}" Glyph="&#xE74D;" />
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+        </Border>
+
+        <!-- Right Main Stage -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Minimal Top Header (Title + Clear Only) -->
+            <Border
+                Grid.Row="0"
+                Height="48"
+                Padding="20,0,16,0"
+                Background="{StaticResource AppSurfaceBrush}"
+                BorderBrush="{StaticResource AppBorderBrush}"
+                BorderThickness="0,0,0,1">
+                <Grid>
+                    <TextBlock
+                        x:Name="ActiveSessionTitleText"
+                        VerticalAlignment="Center"
+                        FontSize="14.5"
+                        FontWeight="SemiBold"
+                        Foreground="{StaticResource TextPrimaryBrush}"
+                        Text="新对话"
+                        TextTrimming="CharacterEllipsis" />
+
+                    <Button
+                        x:Name="ClearSessionButton"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Height="28"
+                        Padding="10,0"
+                        Click="ClearSessionButton_Click"
+                        Style="{StaticResource SecondaryOutlineButtonStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                            <FontIcon FontSize="11" Glyph="&#xE74D;" />
+                            <TextBlock FontSize="11.5" Text="清空" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- Chat Body / Starter Cards -->
+            <Grid Grid.Row="1">
+                <!-- Starter Empty State -->
+                <ScrollViewer x:Name="StarterPanel" Padding="28,42,28,20">
+                    <StackPanel MaxWidth="720" HorizontalAlignment="Center" Spacing="18">
+                        <StackPanel HorizontalAlignment="Center" Spacing="8">
+                            <Border
+                                Width="48"
+                                Height="48"
+                                HorizontalAlignment="Center"
+                                Background="{StaticResource BrandSoftBgBrush}"
+                                BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="14">
+                                <FontIcon FontSize="22" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE99A;" />
+                            </Border>
+                            <TextBlock
+                                HorizontalAlignment="Center"
+                                FontSize="18"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource TextPrimaryBrush}"
+                                Text="有什么可以帮你？" />
+                        </StackPanel>
+
+                        <Border
+                            x:Name="UnconfiguredHintBanner"
+                            Padding="12,9"
+                            Background="{StaticResource WarningBgBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Visibility="Collapsed">
+                            <TextBlock
+                                HorizontalAlignment="Center"
+                                FontSize="12"
+                                Foreground="{StaticResource WarningTextBrush}"
+                                Text="AI 服务暂未启用，请联系管理员配置。" />
+                        </Border>
+
+                        <!-- 4 Quick Starter Cards -->
+                        <Grid ColumnSpacing="10" RowSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Button
+                                Grid.Row="0"
+                                Grid.Column="0"
+                                Padding="14,12"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Left"
+                                Background="{StaticResource AppSurfaceBrush}"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Click="StarterPromptCard_Click"
+                                CornerRadius="10"
+                                Tag="请统计我名下客户总量、各标签分布和跟进阶段情况，为我整理一份简洁的今日工作简报。">
+                                <StackPanel Spacing="4">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon FontSize="13" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE9D2;" />
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="今日工作简报" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="汇总名下客户总量、标签与跟进分布" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button
+                                Grid.Row="0"
+                                Grid.Column="1"
+                                Padding="14,12"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Left"
+                                Background="{StaticResource AppSurfaceBrush}"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Click="StarterPromptCard_Click"
+                                CornerRadius="10"
+                                Tag="请帮我检索当前名下重点客户，查看他们最近的沟通记录与备注，按优先级整理出今天最值得先跟进的清单和破冰话术。">
+                                <StackPanel Spacing="4">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon FontSize="13" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE77B;" />
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="重点客户跟进清单" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="筛选重点客户并生成优先跟进建议" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button
+                                Grid.Row="1"
+                                Grid.Column="0"
+                                Padding="14,12"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Left"
+                                Background="{StaticResource AppSurfaceBrush}"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Click="StarterPromptCard_Click"
+                                CornerRadius="10"
+                                Tag="请检索企业知识库里的产品卖点、报价政策与话术红线，帮我总结成一份员工日常回复速查表。">
+                                <StackPanel Spacing="4">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon FontSize="13" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE82D;" />
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="企业知识库速查" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="整理产品口径、常见问题与话术红线" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button
+                                Grid.Row="1"
+                                Grid.Column="1"
+                                Padding="14,12"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Left"
+                                Background="{StaticResource AppSurfaceBrush}"
+                                BorderBrush="{StaticResource AppBorderBrush}"
+                                BorderThickness="1"
+                                Click="StarterPromptCard_Click"
+                                CornerRadius="10"
+                                Tag="请查看我名下已建档的微信群组，读取最近群聊记录并汇总各群的核心动态和待处理事项。">
+                                <StackPanel Spacing="4">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon FontSize="13" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE716;" />
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信群组动态汇总" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="提炼近期群聊要点与待办事项" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Chat Messages Stream -->
+                <ListView
+                    x:Name="AgentChatListView"
+                    Padding="20,16,20,10"
+                    SelectionMode="None"
+                    Visibility="Collapsed">
+                    <ListView.ItemContainerTransitions>
+                        <TransitionCollection />
+                    </ListView.ItemContainerTransitions>
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Padding" Value="0,6" />
+                            <Setter Property="MinHeight" Value="0" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="services:AiChatMessageItem">
+                            <Grid MaxWidth="820" HorizontalAlignment="Stretch">
+                                <!-- User Bubble (Right) -->
+                                <StackPanel
+                                    HorizontalAlignment="Right"
+                                    MaxWidth="640"
+                                    Spacing="4"
+                                    Visibility="{x:Bind UserVisibility}">
+                                    <Border
+                                        Padding="13,9"
+                                        Background="{StaticResource BrandSoftBgBrush}"
+                                        BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="14,14,4,14">
+                                        <Border.ContextFlyout>
+                                            <MenuFlyout>
+                                                <MenuFlyoutItem Click="CopyMessageMenuItem_Click" Text="复制内容">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xE8C8;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                            </MenuFlyout>
+                                        </Border.ContextFlyout>
+                                        <StackPanel Spacing="7">
+                                            <ItemsControl ItemsSource="{x:Bind Images}" Visibility="{x:Bind UserImagesVisibility}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <StackPanel Orientation="Horizontal" Spacing="6" />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="x:String">
+                                                        <Border
+                                                            Width="76"
+                                                            Height="76"
+                                                            BorderBrush="{StaticResource AppBorderBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="8">
+                                                            <controls:DataUriImage DataUri="{x:Bind}" />
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <TextBlock
+                                                FontSize="13"
+                                                Foreground="{StaticResource TextPrimaryBrush}"
+                                                IsTextSelectionEnabled="True"
+                                                LineHeight="20"
+                                                Text="{x:Bind Content}"
+                                                TextWrapping="Wrap"
+                                                Visibility="{x:Bind UserTextVisibility}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <TextBlock
+                                        HorizontalAlignment="Right"
+                                        FontSize="10.5"
+                                        Foreground="{StaticResource TextMutedBrush}"
+                                        Text="{x:Bind Timestamp}" />
+                                </StackPanel>
+
+                                <!-- Assistant Bubble (Left) -->
+                                <StackPanel
+                                    HorizontalAlignment="Left"
+                                    MaxWidth="740"
+                                    Spacing="5"
+                                    Visibility="{x:Bind AssistantVisibility}">
+                                    <!-- Invoked Skills Trace Pill -->
+                                    <Border
+                                        Padding="9,4"
+                                        HorizontalAlignment="Left"
+                                        Background="{StaticResource BrandSoftBgBrush}"
+                                        BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        Visibility="{x:Bind ToolTraceVisibility}">
+                                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                            <FontIcon FontSize="11" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE945;" />
+                                            <TextBlock
+                                                FontSize="11"
+                                                Foreground="{StaticResource BrandPrimaryBrush}"
+                                                Text="{x:Bind ToolTraceSummary}"
+                                                TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!-- Live Thinking / Replying Indicator Bubble -->
+                                    <Border
+                                        Padding="14,10"
+                                        HorizontalAlignment="Left"
+                                        Background="{StaticResource AppSurfaceBrush}"
+                                        BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="4,14,14,14"
+                                        Visibility="{x:Bind PendingVisibility}">
+                                        <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                                            <ProgressRing Width="15" Height="15" IsActive="{x:Bind IsPending}" />
+                                            <TextBlock
+                                                FontSize="12.5"
+                                                Foreground="{StaticResource TextSecondaryBrush}"
+                                                Text="{x:Bind Content}" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!-- Markdown Rendered Reply Bubble -->
+                                    <Border
+                                        Padding="14,11"
+                                        Background="{StaticResource AppSurfaceBrush}"
+                                        BorderBrush="{StaticResource AppBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="4,14,14,14"
+                                        Visibility="{x:Bind AssistantContentVisibility}">
+                                        <Border.ContextFlyout>
+                                            <MenuFlyout>
+                                                <MenuFlyoutItem Click="CopyMessageMenuItem_Click" Text="复制回复">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xE8C8;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                            </MenuFlyout>
+                                        </Border.ContextFlyout>
+                                        <controls:MarkdownTextView BaseFontSize="13" Text="{x:Bind Content}" />
+                                    </Border>
+
+                                    <TextBlock
+                                        FontSize="10.5"
+                                        Foreground="{StaticResource TextMutedBrush}"
+                                        Text="{x:Bind Timestamp}"
+                                        Visibility="{x:Bind TimestampVisibility}" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Grid>
+
+            <!-- Codex-Style Floating Rounded Composer Card -->
+            <Grid Grid.Row="2" Padding="20,6,20,16">
+                <Border
+                    MaxWidth="820"
+                    HorizontalAlignment="Stretch"
+                    Padding="12,10,12,9"
+                    Background="{StaticResource AppSurfaceBrush}"
+                    BorderBrush="{StaticResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16">
+                    <Grid RowSpacing="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Row 0: Attached Image Thumbnails Preview Strip -->
+                        <ScrollViewer
+                            x:Name="PendingImagesScroll"
+                            Grid.Row="0"
+                            Margin="2,0,2,2"
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Enabled"
+                            VerticalScrollMode="Disabled"
+                            Visibility="Collapsed">
+                            <ItemsControl x:Name="PendingImagesItemsControl">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="8" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="services:AiImageAttachment">
+                                        <Grid Width="58" Height="58">
+                                            <Border
+                                                Background="{StaticResource AppCanvasBgBrush}"
+                                                BorderBrush="{StaticResource AppBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="9"
+                                                ToolTipService.ToolTip="{x:Bind DisplayName}">
+                                                <Image Source="{x:Bind Preview}" Stretch="UniformToFill" />
+                                            </Border>
+                                            <Button
+                                                Width="18"
+                                                Height="18"
+                                                Margin="0,3,3,0"
+                                                Padding="0"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Top"
+                                                Background="#CC1E2430"
+                                                BorderThickness="0"
+                                                Click="RemovePendingImage_Click"
+                                                CornerRadius="9"
+                                                Tag="{x:Bind Id}"
+                                                ToolTipService.ToolTip="移除图片">
+                                                <FontIcon FontSize="8.5" Foreground="#FFFFFF" Glyph="&#xE8BB;" />
+                                            </Button>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+
+                        <!-- Row 1: Borderless Seamless Multi-line Input -->
+                        <TextBox
+                            x:Name="AgentInputBox"
+                            Grid.Row="1"
+                            MinHeight="40"
+                            MaxHeight="140"
+                            Padding="4,4,4,4"
+                            AcceptsReturn="True"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            FontSize="13.5"
+                            Foreground="{StaticResource TextPrimaryBrush}"
+                            KeyDown="AgentInputBox_KeyDown"
+                            Paste="AgentInputBox_Paste"
+                            PlaceholderText="输入问题，支持粘贴或上传图片..."
+                            TextWrapping="Wrap">
+                            <TextBox.Resources>
+                                <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                                <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                                <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                            </TextBox.Resources>
+                        </TextBox>
+
+                        <!-- Row 2: Bottom Action Toolbar (+ Attach Image on Left | Circular Send on Right) -->
+                        <Grid Grid.Row="2" Padding="0,2,0,0">
+                            <StackPanel HorizontalAlignment="Left" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Button
+                                    x:Name="AttachMenuButton"
+                                    Width="30"
+                                    Height="30"
+                                    Padding="0"
+                                    Background="Transparent"
+                                    BorderBrush="{StaticResource AppBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="15"
+                                    ToolTipService.ToolTip="添加图片（也支持直接 Ctrl+V 粘贴）">
+                                    <Button.Flyout>
+                                        <MenuFlyout Placement="TopEdgeAlignedLeft">
+                                            <MenuFlyoutItem Click="UploadImageMenuItem_Click" Text="上传本地图片">
+                                                <MenuFlyoutItem.Icon>
+                                                    <FontIcon Glyph="&#xE8B9;" />
+                                                </MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                            <MenuFlyoutItem Click="PasteImageMenuItem_Click" Text="粘贴剪贴板图片">
+                                                <MenuFlyoutItem.Icon>
+                                                    <FontIcon Glyph="&#xE77F;" />
+                                                </MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                        </MenuFlyout>
+                                    </Button.Flyout>
+                                    <FontIcon FontSize="13" Foreground="{StaticResource TextSecondaryBrush}" Glyph="&#xE710;" />
+                                </Button>
+
+                                <TextBlock
+                                    x:Name="AttachmentStatusText"
+                                    VerticalAlignment="Center"
+                                    FontSize="11.5"
+                                    Foreground="{StaticResource TextMutedBrush}"
+                                    Visibility="Collapsed" />
+                            </StackPanel>
+
+                            <Button
+                                x:Name="SendAgentButton"
+                                Width="32"
+                                Height="32"
+                                Padding="0"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Click="SendAgentButton_Click"
+                                CornerRadius="16"
+                                Style="{StaticResource PrimaryVioletButtonStyle}"
+                                ToolTipService.ToolTip="发送 (Enter)">
+                                <Grid>
+                                    <FontIcon x:Name="SendAgentIcon" FontSize="13" Foreground="#FFFFFF" Glyph="&#xE74A;" />
+                                    <ProgressRing x:Name="SendAgentBusyRing" Width="15" Height="15" Foreground="#FFFFFF" IsActive="False" Visibility="Collapsed" />
+                                </Grid>
+                            </Button>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</Page>

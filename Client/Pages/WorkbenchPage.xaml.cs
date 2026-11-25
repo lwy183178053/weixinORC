@@ -86,6 +86,7 @@ namespace Client.Pages
             {
                 "customers" => (typeof(CustomersPage), "客户档案"),
                 "groups" => (typeof(GroupsPage), "群组档案"),
+                "ai" => (typeof(AiAssistantPage), "AI 助手"),
                 "guide" => (typeof(GuidePage), "使用介绍"),
                 _ => (typeof(WeChatOcrPage), "微信监控")
             };
@@ -130,6 +131,7 @@ namespace Client.Pages
 
             SetRailItemState(RailCustomersButton, RailCustomersIcon, RailCustomersLabel, _activeTag == "customers", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailGroupsButton, RailGroupsIcon, RailGroupsLabel, _activeTag == "groups", activeBg, activeFg, inactiveBg, inactiveFg);
+            SetRailItemState(RailAiButton, RailAiIcon, RailAiLabel, _activeTag == "ai", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailOcrButton, RailOcrIcon, RailOcrLabel, _activeTag == "ocr", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailGuideButton, RailGuideIcon, RailGuideLabel, _activeTag == "guide", activeBg, activeFg, inactiveBg, inactiveFg);
         }

@@ -100,10 +100,17 @@ namespace Client.Services
         internal const int SW_RESTORE = 9;
 
         private const uint INPUT_MOUSE = 0;
+        private const uint INPUT_KEYBOARD = 1;
         private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
         private const uint MOUSEEVENTF_LEFTUP = 0x0004;
         private const uint MOUSEEVENTF_WHEEL = 0x0800;
-        private const ushort VK_ESCAPE = 0x1B;
+        private const uint KEYEVENTF_KEYUP = 0x0002;
+        private const uint KEYEVENTF_UNICODE = 0x0004;
+        internal const ushort VK_BACK = 0x08;
+        internal const ushort VK_RETURN = 0x0D;
+        internal const ushort VK_CONTROL = 0x11;
+        internal const ushort VK_ESCAPE = 0x1B;
+        internal const ushort VK_A = 0x41;
         private const uint SWP_SHOWWINDOW = 0x0040;
         private const int WHEEL_DELTA = 120;
         private const uint WM_CLOSE = 0x0010;
@@ -336,6 +343,51 @@ namespace Client.Services
             inputs[0].u.mi.dwFlags = MOUSEEVENTF_WHEEL;
             inputs[0].u.mi.mouseData = unchecked((uint)(notches * WHEEL_DELTA));
             _ = SendInput(1, inputs, Marshal.SizeOf<INPUT>());
+        }
+
+        internal static void SendVirtualKey(ushort vk)
+        {
+            var inputs = new INPUT[2];
+            inputs[0].type = INPUT_KEYBOARD;
+            inputs[0].u.ki.wVk = vk;
+            inputs[1].type = INPUT_KEYBOARD;
+            inputs[1].u.ki.wVk = vk;
+            inputs[1].u.ki.dwFlags = KEYEVENTF_KEYUP;
+            _ = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        }
+
+        internal static void SendKeyCombo(ushort modifierVk, ushort keyVk)
+        {
+            var inputs = new INPUT[4];
+            inputs[0].type = INPUT_KEYBOARD;
+            inputs[0].u.ki.wVk = modifierVk;
+            inputs[1].type = INPUT_KEYBOARD;
+            inputs[1].u.ki.wVk = keyVk;
+            inputs[2].type = INPUT_KEYBOARD;
+            inputs[2].u.ki.wVk = keyVk;
+            inputs[2].u.ki.dwFlags = KEYEVENTF_KEYUP;
+            inputs[3].type = INPUT_KEYBOARD;
+            inputs[3].u.ki.wVk = modifierVk;
+            inputs[3].u.ki.dwFlags = KEYEVENTF_KEYUP;
+            _ = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        }
+
+        internal static void SendUnicodeText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            var inputs = new INPUT[text.Length * 2];
+            for (int i = 0; i < text.Length; i++)
+            {
+                char ch = text[i];
+                inputs[i * 2].type = INPUT_KEYBOARD;
+                inputs[i * 2].u.ki.wScan = ch;
+                inputs[i * 2].u.ki.dwFlags = KEYEVENTF_UNICODE;
+
+                inputs[i * 2 + 1].type = INPUT_KEYBOARD;
+                inputs[i * 2 + 1].u.ki.wScan = ch;
+                inputs[i * 2 + 1].u.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+            }
+            _ = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
         }
 
         internal static SoftwareBitmap CaptureScreenRectToSoftwareBitmap(int left, int top, int width, int height)

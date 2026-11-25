@@ -106,9 +106,9 @@ func main() {
 		Addr:              cfg.addr,
 		Handler:           api.New(db, verifier, auth.NewSessions(cfg.sessionTTL)),
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      150 * time.Second,
+		IdleTimeout:       90 * time.Second,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

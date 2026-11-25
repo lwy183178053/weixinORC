@@ -204,7 +204,7 @@
                         <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                             <StackPanel Spacing="9">
                                 <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="聊天记录录入与截图提取" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 截图导入对话：点击输入框上方的「截图导入对话」，粘贴微信聊天窗口截图后自动区分绿色我方气泡与白色对方气泡，核对后批量入库。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 导入对话（双模式）：点击输入框上方的「导入对话」，可在「截图识别导入」（单图识别绿/白气泡）与「微信聊天记录批量导入」（自动搜索账号 → 打开查找聊天内容 → 逐屏 OCR 批量采集并去重）之间切换。" TextWrapping="Wrap" />
                                 <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 粘贴提取单条：将单段文字截图复制到剪贴板，点击「粘贴提取单条」即可快速把文字填入输入框。" TextWrapping="Wrap" />
                                 <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 上下拖动聊天区与输入框之间的横条，可自由调整输入框高度。" TextWrapping="Wrap" />
                             </StackPanel>
@@ -213,7 +213,7 @@
                         <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                             <StackPanel Spacing="9">
                                 <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="气泡右键菜单与多选删除" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 右键点击任意聊天气泡，可快速执行「复制内容」「多选消息」或「删除消息」。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 右键点击任意聊天气泡，可快速执行「编辑消息」「在上方插入消息」「在下方插入消息」「复制内容」「多选消息」或「删除消息」。" TextWrapping="Wrap" />
                                 <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 点击聊天栏右上角的「多选」按钮，可进入批量勾选模式，支持全选与一键批量删除冗余记录。" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>

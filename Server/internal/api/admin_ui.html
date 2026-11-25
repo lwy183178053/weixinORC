@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>智美员工工作台 · 服务端配置管理台</title>
+  <style>
+    :root {
+      --bg: #f5f6fa;
+      --surface: #ffffff;
+      --surface-alt: #fafafc;
+      --border: #e5e7f0;
+      --text: #1f2329;
+      --muted: #646a73;
+      --brand: #7c5cfc;
+      --brand-hover: #6946f5;
+      --brand-soft: #f1eeff;
+      --brand-border: #ddd5ff;
+      --ok-bg: #e9f9f0;
+      --ok-fg: #15803d;
+      --err-bg: #fff5f5;
+      --err-fg: #dc2626;
+      --radius: 10px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .hidden { display: none !important; }
+    /* Login */
+    .login-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .login-card {
+      width: 380px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px;
+      box-shadow: 0 12px 32px rgba(28, 35, 64, 0.06);
+    }
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 11px;
+      background: var(--brand-soft);
+      color: var(--brand);
+      border-radius: 99px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    h1 { margin: 0 0 6px; font-size: 20px; }
+    .sub { margin: 0 0 20px; font-size: 13px; color: var(--muted); }
+    label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+    input[type="text"], input[type="password"], input[type="number"], textarea, select {
+      width: 100%;
+      padding: 9px 11px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13.5px;
+      font-family: inherit;
+      background: var(--surface);
+      color: var(--text);
+      outline: none;
+      transition: border-color .15s;
+    }
+    input:focus, textarea:focus, select:focus { border-color: var(--brand); }
+    textarea { resize: vertical; min-height: 100px; }
+    .field { margin-bottom: 14px; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      height: 36px;
+      padding: 0 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .btn:hover { background: #f2f4f8; }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
+    .btn-primary {
+      background: var(--brand);
+      border-color: var(--brand);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--brand-hover); }
+    .btn-danger {
+      color: var(--err-fg);
+      border-color: #fecaca;
+      background: var(--err-bg);
+    }
+    .btn-danger:hover { background: #fee2e2; }
+    .btn-sm { height: 30px; padding: 0 11px; font-size: 12px; }
+    .btn-full { width: 100%; }
+    /* App Shell */
+    .topbar {
+      height: 56px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 14px; }
+    .topbar-title { font-size: 15.5px; font-weight: 700; }
+    .pill {
+      padding: 3px 10px;
+      border-radius: 99px;
+      font-size: 11.5px;
+      font-weight: 600;
+      background: var(--brand-soft);
+      color: var(--brand);
+      border: 1px solid var(--brand-border);
+    }
+    .pill-ok { background: var(--ok-bg); color: var(--ok-fg); border-color: #bbf7d0; }
+    .pill-off { background: #f3f4f6; color: var(--muted); border-color: var(--border); }
+    .shell {
+      max-width: 1100px;
+      margin: 22px auto;
+      padding: 0 20px 40px;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 18px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 10px;
+    }
+    .tab-btn {
+      padding: 7px 16px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      font-size: 13.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .tab-btn.active {
+      background: var(--brand-soft);
+      color: var(--brand);
+      border-color: var(--brand-border);
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 22px;
+      margin-bottom: 16px;
+    }
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      gap: 10px;
+    }
+    .card-title { font-size: 15px; font-weight: 700; margin: 0; }
+    .card-sub { font-size: 12.5px; color: var(--muted); margin: 2px 0 0; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+    .presets { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
+    .preset-chip {
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface-alt);
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--text);
+    }
+    .preset-chip:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
+    .banner {
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 14px;
+      border: 1px solid transparent;
+    }
+    .banner-ok { background: var(--ok-bg); color: var(--ok-fg); border-color: #bbf7d0; }
+    .banner-err { background: var(--err-bg); color: var(--err-fg); border-color: #fecaca; }
+    .banner-info { background: var(--brand-soft); color: var(--brand); border-color: var(--brand-border); }
+    .row-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .switch-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--surface-alt);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      margin-bottom: 16px;
+    }
+    .switch-row input { width: 17px; height: 17px; accent-color: var(--brand); }
+    .list-item {
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 13px 15px;
+      background: var(--surface-alt);
+      margin-bottom: 10px;
+    }
+    .list-item-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+    .skill-card {
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 13px 15px;
+      background: var(--surface-alt);
+    }
+    .mono { font-family: Consolas, ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+    .audit-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .audit-table th, .audit-table td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .audit-table th { color: var(--muted); font-weight: 600; background: var(--surface-alt); }
+    @media (max-width: 720px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <!-- LOGIN VIEW -->
+  <div id="loginView" class="login-wrap">
+    <div class="login-card">
+      <div class="brand-badge">智美员工工作台 · 服务端后台</div>
+      <h1>管理员登录</h1>
+      <p class="sub">使用服务端员工/管理员账号登录，统一管理 OpenAI 兼容大模型接口与企业知识库。</p>
+      <div id="loginBanner" class="banner banner-err hidden"></div>
+      <div class="field">
+        <label for="loginAccount">账号</label>
+        <input id="loginAccount" type="text" placeholder="如 demo" autocomplete="username" />
+      </div>
+      <div class="field">
+        <label for="loginPassword">密码</label>
+        <input id="loginPassword" type="password" placeholder="请输入密码" autocomplete="current-password" />
+      </div>
+      <button id="loginBtn" class="btn btn-primary btn-full">登录管理台</button>
+    </div>
+  </div>
+
+  <!-- MAIN CONSOLE VIEW -->
+  <div id="appView" class="hidden">
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="topbar-title">智美工作台 · 服务端配置中心</span>
+        <span id="topAiBadge" class="pill pill-off">AI 未启用</span>
+      </div>
+      <div class="row-actions">
+        <span id="topUser" style="font-size:13px;color:var(--muted)"></span>
+        <button id="logoutBtn" class="btn btn-sm">退出登录</button>
+      </div>
+    </header>
+
+    <main class="shell">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="ai">大模型 API 配置</button>
+        <button class="tab-btn" data-tab="knowledge">企业知识库与话术红线</button>
+        <button class="tab-btn" data-tab="skills">内置 Agent Skills 与审计</button>
+      </div>
+
+      <!-- TAB 1: AI CONFIG -->
+      <section id="tab-ai">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">OpenAI 标准接口统一配置</h2>
+              <p class="card-sub">客户端所有「客户 AI 总结 / 客户 AI 对话 / 左侧 AI 助手」均通过服务端统一调用，密钥仅保存于服务端数据库。</p>
+            </div>
+          </div>
+
+          <div id="aiBanner" class="banner hidden"></div>
+
+          <div class="switch-row">
+            <input id="aiEnabled" type="checkbox" />
+            <div>
+              <div style="font-weight:600;font-size:13.5px;">启用服务端 AI 能力</div>
+              <div style="font-size:12px;color:var(--muted);">关闭后客户端将暂停调用外部大模型接口。</div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>常见服务商快捷填充（可按需修改）</label>
+            <div class="presets">
+              <button type="button" class="preset-chip" data-url="https://api.deepseek.com/v1" data-model="deepseek-chat">DeepSeek</button>
+              <button type="button" class="preset-chip" data-url="https://dashscope.aliyuncs.com/compatible-mode/v1" data-model="qwen-plus">阿里云百炼 (Qwen)</button>
+              <button type="button" class="preset-chip" data-url="https://openrouter.ai/api/v1" data-model="deepseek/deepseek-chat">OpenRouter</button>
+              <button type="button" class="preset-chip" data-url="https://api.openai.com/v1" data-model="gpt-4o-mini">OpenAI</button>
+              <button type="button" class="preset-chip" data-url="http://127.0.0.1:11434/v1" data-model="qwen2.5:7b">本机 Ollama</button>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="aiBaseUrl">API Base URL（OpenAI 兼容）</label>
+              <input id="aiBaseUrl" type="text" placeholder="https://api.deepseek.com/v1" />
+            </div>
+            <div class="field">
+              <label for="aiModel">模型名称 (Model)</label>
+              <input id="aiModel" type="text" placeholder="deepseek-chat" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="aiApiKey">API Key <span id="keyHint" class="mono"></span></label>
+            <input id="aiApiKey" type="password" placeholder="输入新的 API Key（留空则保持服务端已保存密钥不变）" autocomplete="off" />
+          </div>
+
+          <div class="grid-3">
+            <div class="field">
+              <label for="aiTemp">Temperature (0 ~ 2)</label>
+              <input id="aiTemp" type="number" step="0.1" min="0" max="2" value="0.5" />
+            </div>
+            <div class="field">
+              <label for="aiMaxTokens">单次最大输出 Tokens</label>
+              <input id="aiMaxTokens" type="number" step="100" min="128" max="16384" value="1500" />
+            </div>
+            <div class="field">
+              <label for="aiTimeout">请求超时（秒）</label>
+              <input id="aiTimeout" type="number" min="5" max="180" value="60" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="aiSystemPrompt">全局系统提示词（公司定位 / 回复口径 / 风险红线）</label>
+            <textarea id="aiSystemPrompt" rows="5"></textarea>
+          </div>
+
+          <div class="row-actions">
+            <button id="saveAiBtn" class="btn btn-primary">保存配置</button>
+            <button id="testAiBtn" class="btn">测试接口连通性</button>
+            <button id="clearKeyBtn" class="btn btn-danger">清除已保存密钥</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: KNOWLEDGE BASE -->
+      <section id="tab-knowledge" class="hidden">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">新增 / 编辑企业知识条目</h2>
+              <p class="card-sub">用于产品介绍、标准报价、常见 FAQ 与客服禁说红线；Agent 的「企业知识库」Skill 会实时检索这些内容。</p>
+            </div>
+          </div>
+          <div id="kbBanner" class="banner hidden"></div>
+          <input id="kbEditId" type="hidden" />
+          <div class="grid-3">
+            <div class="field">
+              <label for="kbTitle">标题</label>
+              <input id="kbTitle" type="text" placeholder="如：售后退款政策与红线" />
+            </div>
+            <div class="field">
+              <label for="kbCategory">分类</label>
+              <select id="kbCategory">
+                <option value="产品介绍">产品介绍</option>
+                <option value="报价规则">报价规则</option>
+                <option value="常见问题">常见问题</option>
+                <option value="话术红线">话术红线</option>
+                <option value="通用">通用</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="kbTags">关键词标签</label>
+              <input id="kbTags" type="text" placeholder="如：退款,售后,报价" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="kbContent">正文内容</label>
+            <textarea id="kbContent" rows="4" placeholder="填写具体产品说明、标准答复或禁止承诺事项..."></textarea>
+          </div>
+          <div class="row-actions" style="justify-content:space-between;">
+            <label style="display:inline-flex;align-items:center;gap:7px;margin:0;cursor:pointer;">
+              <input id="kbAlways" type="checkbox" style="width:16px;height:16px;accent-color:var(--brand);" />
+              <span>设为常驻背景（自动注入所有客户 AI 总结与问答）</span>
+            </label>
+            <div class="row-actions">
+              <button id="kbResetBtn" class="btn btn-sm">清空表单</button>
+              <button id="kbSaveBtn" class="btn btn-primary btn-sm">保存知识条目</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">已收录知识条目 (<span id="kbCount">0</span>)</h2>
+            <button id="kbRefreshBtn" class="btn btn-sm">刷新</button>
+          </div>
+          <div id="kbList"></div>
+        </div>
+      </section>
+
+      <!-- TAB 3: SKILLS & AUDIT -->
+      <section id="tab-skills" class="hidden">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2 class="card-title">服务端内置 Agent Skills（严格按员工隔离 · 只读安全边界）</h2>
+              <p class="card-sub">客户端左侧「AI 助手」通过标准 OpenAI Function Calling 自动编排以下技能，不支持私自发微信或执行系统命令。</p>
+            </div>
+          </div>
+          <div id="skillsGrid" class="skill-grid"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">近期操作与 AI 调用审计</h2>
+            <button id="auditRefreshBtn" class="btn btn-sm">刷新日志</button>
+          </div>
+          <table class="audit-table">
+            <thead>
+              <tr><th>时间</th><th>动作</th><th>目标</th><th>详情</th></tr>
+            </thead>
+            <tbody id="auditBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const TOKEN_KEY = "zhimei_admin_token";
+    let token = sessionStorage.getItem(TOKEN_KEY) || "";
+    let kbItems = [];
+
+    const $ = (id) => document.getElementById(id);
+
+    async function apiFetch(path, opts = {}) {
+      const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+      if (token) headers["Authorization"] = "Bearer " + token;
+      const resp = await fetch(path, { ...opts, headers });
+      if (resp.status === 401) {
+        token = "";
+        sessionStorage.removeItem(TOKEN_KEY);
+        showLogin("登录已过期，请重新登录。");
+        throw new Error("未登录或会话已过期");
+      }
+      if (resp.status === 204) return null;
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || ("HTTP " + resp.status));
+      return data;
+    }
+
+    function showBanner(el, msg, type = "info") {
+      el.className = "banner banner-" + type;
+      el.textContent = msg;
+      el.classList.remove("hidden");
+    }
+
+    function showLogin(err) {
+      $("appView").classList.add("hidden");
+      $("loginView").classList.remove("hidden");
+      if (err) showBanner($("loginBanner"), err, "err");
+      else $("loginBanner").classList.add("hidden");
+    }
+
+    async function enterApp() {
+      const me = await apiFetch("/api/v1/me");
+      $("topUser").textContent = (me.employee.display_name || me.employee.account) + " (" + me.employee.account + ")";
+      $("loginView").classList.add("hidden");
+      $("appView").classList.remove("hidden");
+      await Promise.all([loadAIConfig(), loadKnowledge(), loadSkillsAndAudit()]);
+    }
+
+    async function loadAIConfig() {
+      const cfg = await apiFetch("/api/v1/admin/ai-config");
+      $("aiEnabled").checked = !!cfg.enabled;
+      $("aiBaseUrl").value = cfg.base_url || "";
+      $("aiModel").value = cfg.model || "";
+      $("aiApiKey").value = "";
+      $("keyHint").textContent = cfg.has_api_key ? `（已保存：${cfg.api_key_masked}）` : "（尚未设置密钥）";
+      $("aiTemp").value = cfg.temperature ?? 0.5;
+      $("aiMaxTokens").value = cfg.max_tokens ?? 1500;
+      $("aiTimeout").value = cfg.timeout_sec ?? 60;
+      $("aiSystemPrompt").value = cfg.system_prompt || "";
+
+      const ready = cfg.enabled && cfg.base_url && cfg.model;
+      $("topAiBadge").textContent = ready ? ("AI 已启用 · " + cfg.model) : "AI 未启用";
+      $("topAiBadge").className = "pill " + (ready ? "pill-ok" : "pill-off");
+    }
+
+    async function loadKnowledge() {
+      const res = await apiFetch("/api/v1/admin/knowledge");
+      kbItems = res.items || [];
+      $("kbCount").textContent = kbItems.length;
+      if (kbItems.length === 0) {
+        $("kbList").innerHTML = `<div style="text-align:center;color:var(--muted);padding:24px;font-size:13px;">暂无企业知识条目，可在上方添加产品说明、常见问答或红线规范。</div>`;
+        return;
+      }
+      $("kbList").innerHTML = kbItems.map(it => `
+        <div class="list-item">
+          <div class="list-item-top">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <strong>${escapeHtml(it.title)}</strong>
+              <span class="pill">${escapeHtml(it.category || "通用")}</span>
+              ${it.always_include ? `<span class="pill pill-ok">常驻注入</span>` : ""}
+              ${it.tags ? `<span class="mono">#${escapeHtml(it.tags)}</span>` : ""}
+            </div>
+            <div class="row-actions">
+              <button class="btn btn-sm" onclick="editKb(${it.id})">编辑</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteKb(${it.id})">删除</button>
+            </div>
+          </div>
+          <div style="font-size:13px;color:var(--muted);white-space:pre-wrap;">${escapeHtml(it.content)}</div>
+        </div>
+      `).join("");
+    }
+
+    async function loadSkillsAndAudit() {
+      const [status, logs] = await Promise.all([
+        apiFetch("/api/v1/ai/status"),
+        apiFetch("/api/v1/audit-logs?limit=30")
+      ]);
+      const skills = status.skills || [];
+      $("skillsGrid").innerHTML = skills.map(s => `
+        <div class="skill-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <strong style="font-size:14px;">${escapeHtml(s.name)}</strong>
+            <span class="pill">${escapeHtml(s.category)}</span>
+          </div>
+          <div class="mono" style="margin-bottom:6px;">${escapeHtml(s.id)}</div>
+          <div style="font-size:12.5px;color:var(--muted);">${escapeHtml(s.description)}</div>
+        </div>
+      `).join("");
+
+      const rows = (logs.items || []).map(l => `
+        <tr>
+          <td class="mono">${escapeHtml((l.created_at || "").replace("T", " ").slice(0, 19))}</td>
+          <td><strong>${escapeHtml(l.action)}</strong></td>
+          <td>${escapeHtml(l.target_type || "-")}</td>
+          <td class="mono">${escapeHtml(l.detail || "-")}</td>
+        </tr>
+      `).join("");
+      $("auditBody").innerHTML = rows || `<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:16px;">暂无审计记录</td></tr>`;
+    }
+
+    function escapeHtml(s) {
+      return String(s || "").replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+    }
+
+    window.editKb = (id) => {
+      const it = kbItems.find(x => x.id === id);
+      if (!it) return;
+      $("kbEditId").value = it.id;
+      $("kbTitle").value = it.title;
+      $("kbCategory").value = it.category || "通用";
+      $("kbTags").value = it.tags || "";
+      $("kbContent").value = it.content || "";
+      $("kbAlways").checked = !!it.always_include;
+      $("kbTitle").focus();
+    };
+
+    window.deleteKb = async (id) => {
+      if (!confirm("确定删除该条知识库记录？")) return;
+      try {
+        await apiFetch("/api/v1/admin/knowledge/" + id, { method: "DELETE" });
+        showBanner($("kbBanner"), "已删除知识条目。", "ok");
+        await loadKnowledge();
+      } catch (e) { showBanner($("kbBanner"), "删除失败：" + e.message, "err"); }
+    };
+
+    // Event bindings
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        const t = btn.dataset.tab;
+        ["ai", "knowledge", "skills"].forEach(k => $("tab-" + k).classList.toggle("hidden", k !== t));
+        if (t === "skills") loadSkillsAndAudit();
+      });
+    });
+
+    document.querySelectorAll(".preset-chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        $("aiBaseUrl").value = chip.dataset.url;
+        $("aiModel").value = chip.dataset.model;
+      });
+    });
+
+    async function doLogin() {
+      const account = $("loginAccount").value.trim();
+      const password = $("loginPassword").value;
+      if (!account || !password) return showBanner($("loginBanner"), "请输入账号和密码。", "err");
+      $("loginBtn").disabled = true;
+      try {
+        const res = await apiFetch("/api/v1/login", { method: "POST", body: JSON.stringify({ account, password }) });
+        token = res.token;
+        sessionStorage.setItem(TOKEN_KEY, token);
+        await enterApp();
+      } catch (e) {
+        showBanner($("loginBanner"), "登录失败：" + e.message, "err");
+      } finally {
+        $("loginBtn").disabled = false;
+      }
+    }
+
+    $("loginBtn").addEventListener("click", doLogin);
+    $("loginPassword").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+
+    $("logoutBtn").addEventListener("click", async () => {
+      try { await apiFetch("/api/v1/logout", { method: "POST" }); } catch {}
+      token = "";
+      sessionStorage.removeItem(TOKEN_KEY);
+      showLogin();
+    });
+
+    $("saveAiBtn").addEventListener("click", async () => {
+      $("saveAiBtn").disabled = true;
+      try {
+        await apiFetch("/api/v1/admin/ai-config", {
+          method: "PUT",
+          body: JSON.stringify({
+            enabled: $("aiEnabled").checked,
+            base_url: $("aiBaseUrl").value.trim(),
+            api_key: $("aiApiKey").value.trim(),
+            clear_api_key: false,
+            model: $("aiModel").value.trim(),
+            system_prompt: $("aiSystemPrompt").value,
+            temperature: parseFloat($("aiTemp").value) || 0.5,
+            max_tokens: parseInt($("aiMaxTokens").value, 10) || 1500,
+            timeout_sec: parseInt($("aiTimeout").value, 10) || 60
+          })
+        });
+        showBanner($("aiBanner"), "✓ 配置已保存到服务端并立即生效。", "ok");
+        await loadAIConfig();
+      } catch (e) {
+        showBanner($("aiBanner"), "保存失败：" + e.message, "err");
+      } finally {
+        $("saveAiBtn").disabled = false;
+      }
+    });
+
+    $("clearKeyBtn").addEventListener("click", async () => {
+      if (!confirm("确定清除服务端已保存的 API Key？")) return;
+      try {
+        await apiFetch("/api/v1/admin/ai-config", {
+          method: "PUT",
+          body: JSON.stringify({
+            enabled: false,
+            base_url: $("aiBaseUrl").value.trim(),
+            clear_api_key: true,
+            model: $("aiModel").value.trim(),
+            system_prompt: $("aiSystemPrompt").value,
+            temperature: parseFloat($("aiTemp").value) || 0.5,
+            max_tokens: parseInt($("aiMaxTokens").value, 10) || 1500,
+            timeout_sec: parseInt($("aiTimeout").value, 10) || 60
+          })
+        });
+        showBanner($("aiBanner"), "已清除 API Key 并停用 AI 服务。", "info");
+        await loadAIConfig();
+      } catch (e) { showBanner($("aiBanner"), "操作失败：" + e.message, "err"); }
+    });
+
+    $("testAiBtn").addEventListener("click", async () => {
+      $("testAiBtn").disabled = true;
+      showBanner($("aiBanner"), "正在发起真实连通性测试，请稍候...", "info");
+      try {
+        const res = await apiFetch("/api/v1/admin/ai-test", {
+          method: "POST",
+          body: JSON.stringify({
+            base_url: $("aiBaseUrl").value.trim(),
+            api_key: $("aiApiKey").value.trim(),
+            model: $("aiModel").value.trim(),
+            timeout_sec: parseInt($("aiTimeout").value, 10) || 30
+          })
+        });
+        if (res.ok) {
+          showBanner($("aiBanner"), `✓ 连通成功！模型：${res.model} · 耗时 ${res.latency_ms} ms · 返回：「${res.reply_preview}」`, "ok");
+        } else {
+          showBanner($("aiBanner"), `✕ 连通失败（${res.latency_ms} ms）：${res.error}`, "err");
+        }
+      } catch (e) {
+        showBanner($("aiBanner"), "测试异常：" + e.message, "err");
+      } finally {
+        $("testAiBtn").disabled = false;
+      }
+    });
+
+    $("kbResetBtn").addEventListener("click", () => {
+      $("kbEditId").value = "";
+      $("kbTitle").value = "";
+      $("kbCategory").value = "产品介绍";
+      $("kbTags").value = "";
+      $("kbContent").value = "";
+      $("kbAlways").checked = false;
+    });
+
+    $("kbSaveBtn").addEventListener("click", async () => {
+      const editId = $("kbEditId").value.trim();
+      const payload = {
+        title: $("kbTitle").value.trim(),
+        category: $("kbCategory").value,
+        tags: $("kbTags").value.trim(),
+        content: $("kbContent").value.trim(),
+        always_include: $("kbAlways").checked
+      };
+      if (!payload.title || !payload.content) return showBanner($("kbBanner"), "标题与正文不能为空。", "err");
+      try {
+        if (editId) {
+          await apiFetch("/api/v1/admin/knowledge/" + editId, { method: "PUT", body: JSON.stringify(payload) });
+          showBanner($("kbBanner"), "✓ 知识条目已更新。", "ok");
+        } else {
+          await apiFetch("/api/v1/admin/knowledge", { method: "POST", body: JSON.stringify(payload) });
+          showBanner($("kbBanner"), "✓ 已新增知识条目。", "ok");
+        }
+        $("kbResetBtn").click();
+        await loadKnowledge();
+      } catch (e) { showBanner($("kbBanner"), "保存失败：" + e.message, "err"); }
+    });
+
+    $("kbRefreshBtn").addEventListener("click", loadKnowledge);
+    $("auditRefreshBtn").addEventListener("click", loadSkillsAndAudit);
+
+    // Boot
+    if (token) {
+      enterApp().catch(() => showLogin());
+    } else {
+      showLogin();
+    }
+  </script>
+</body>
+</html>

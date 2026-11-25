@@ -437,4 +437,93 @@ namespace Client.Models
         [JsonPropertyName("detail")]
         public string Detail { get; set; } = string.Empty;
     }
+
+    // ---- AI Gateway & Built-in Agent Skills DTOs ----
+
+    public sealed class AiSkillDto
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("description")]
+        public string Description { get; set; } = string.Empty;
+
+        [JsonPropertyName("category")]
+        public string Category { get; set; } = string.Empty;
+    }
+
+    public sealed class AiStatusResponse
+    {
+        [JsonPropertyName("enabled")]
+        public bool Enabled { get; set; }
+
+        [JsonPropertyName("configured")]
+        public bool Configured { get; set; }
+
+        [JsonPropertyName("model")]
+        public string Model { get; set; } = string.Empty;
+
+        [JsonPropertyName("base_url")]
+        public string BaseUrl { get; set; } = string.Empty;
+
+        [JsonPropertyName("skills")]
+        public List<AiSkillDto> Skills { get; set; } = [];
+    }
+
+    public sealed class AiChatTurnDto
+    {
+        [JsonPropertyName("role")]
+        public string Role { get; set; } = "user";
+
+        [JsonPropertyName("content")]
+        public string Content { get; set; } = string.Empty;
+    }
+
+    public sealed class AiToolTraceDto
+    {
+        [JsonPropertyName("skill_id")]
+        public string SkillId { get; set; } = string.Empty;
+
+        [JsonPropertyName("skill_name")]
+        public string SkillName { get; set; } = string.Empty;
+
+        [JsonPropertyName("summary")]
+        public string Summary { get; set; } = string.Empty;
+
+        [JsonPropertyName("ok")]
+        public bool Ok { get; set; }
+    }
+
+    public sealed class AiCustomerSummaryResponse
+    {
+        [JsonPropertyName("summary")]
+        public string Summary { get; set; } = string.Empty;
+
+        [JsonPropertyName("model")]
+        public string Model { get; set; } = string.Empty;
+
+        [JsonPropertyName("latency_ms")]
+        public long LatencyMs { get; set; }
+
+        [JsonPropertyName("message_count")]
+        public int MessageCount { get; set; }
+    }
+
+    public sealed class AiChatResponse
+    {
+        [JsonPropertyName("reply")]
+        public string Reply { get; set; } = string.Empty;
+
+        [JsonPropertyName("model")]
+        public string Model { get; set; } = string.Empty;
+
+        [JsonPropertyName("latency_ms")]
+        public long LatencyMs { get; set; }
+
+        [JsonPropertyName("tool_trace")]
+        public List<AiToolTraceDto> ToolTrace { get; set; } = [];
+    }
 }

@@ -12,16 +12,18 @@ import (
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
+	"weixinorc/server/internal/ai"
 	"weixinorc/server/internal/auth"
 	"weixinorc/server/internal/store"
 )
 
-const maxBodyBytes = 4 << 20 // 4 MB (supports base64 avatar upload up to 2 MB)
+const maxBodyBytes = 12 << 20 // 12 MB (supports multimodal base64 image uploads)
 
 type server struct {
 	store    *store.Store
 	verifier auth.Verifier
 	sessions *auth.Sessions
+	ai       *ai.Service
 }
 
 func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.Engine {
@@ -33,11 +35,15 @@ func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.
 		c.Next()
 	})
 
-	s := &server{store: db, verifier: verifier, sessions: sessions}
+	s := &server{store: db, verifier: verifier, sessions: sessions, ai: ai.NewService(db)}
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+	r.GET("/", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/admin")
+	})
+	r.GET("/admin", s.serveAdminUI)
 
 	v1 := r.Group("/api/v1")
 	v1.POST("/login", s.login)
@@ -80,6 +86,21 @@ func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.
 	// Audit Logs
 	authed.GET("/audit-logs", s.listAuditLogs)
 	authed.POST("/audit-logs", s.createAuditLog)
+
+	// AI Gateway & Built-in Agent Skills
+	authed.GET("/ai/status", s.getAIStatus)
+	authed.POST("/ai/customer-summary", s.aiCustomerSummary)
+	authed.POST("/ai/customer-chat", s.aiCustomerChat)
+	authed.POST("/ai/agent-chat", s.aiAgentChat)
+
+	// Server Web Admin Console APIs (AI Model Config + Company Knowledge Base)
+	authed.GET("/admin/ai-config", s.getAdminAIConfig)
+	authed.PUT("/admin/ai-config", s.updateAdminAIConfig)
+	authed.POST("/admin/ai-test", s.testAdminAIConfig)
+	authed.GET("/admin/knowledge", s.listAdminKnowledge)
+	authed.POST("/admin/knowledge", s.createAdminKnowledge)
+	authed.PUT("/admin/knowledge/:id", s.updateAdminKnowledge)
+	authed.DELETE("/admin/knowledge/:id", s.deleteAdminKnowledge)
 
 	return r
 }

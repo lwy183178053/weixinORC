@@ -428,6 +428,72 @@ namespace Client.Pages
             UpdateMultiSelectSummary();
         }
 
+        private async void EditBubbleMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
+            var res = await ChatBubbleEditorHelper.ShowAsync(
+                XamlRoot,
+                title: "编辑群聊消息",
+                primaryButtonText: "保存修改",
+                initialIsOutgoing: item.IsOutgoing,
+                initialContent: item.Content,
+                isGroupChat: true,
+                initialSenderName: item.SenderName);
+            if (!res.Confirmed) return;
+
+            item.IsOutgoing = res.IsOutgoing;
+            item.SenderName = res.SenderName;
+            item.Content = res.Content;
+            ComposerHintText.Text = "已修改该条群聊消息。";
+        }
+
+        private async void InsertAboveBubbleMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem anchor) return;
+            await InsertGroupBubbleRelativeToAsync(anchor, insertAfter: false);
+        }
+
+        private async void InsertBelowBubbleMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem anchor) return;
+            await InsertGroupBubbleRelativeToAsync(anchor, insertAfter: true);
+        }
+
+        private async Task InsertGroupBubbleRelativeToAsync(ChatBubbleItem anchor, bool insertAfter)
+        {
+            var group = _selectedGroup;
+            if (group is null) return;
+
+            var res = await ChatBubbleEditorHelper.ShowAsync(
+                XamlRoot,
+                title: insertAfter ? "在下方插入群聊消息" : "在上方插入群聊消息",
+                primaryButtonText: "确认插入",
+                initialIsOutgoing: anchor.IsOutgoing,
+                initialContent: string.Empty,
+                isGroupChat: true,
+                initialSenderName: anchor.SenderName);
+            if (!res.Confirmed) return;
+
+            int idx = _currentMessages.IndexOf(anchor);
+            if (idx < 0) return;
+
+            string initial = !string.IsNullOrWhiteSpace(res.SenderName) ? res.SenderName[..1].ToUpperInvariant() : "群";
+            var newBubble = new ChatBubbleItem
+            {
+                Id = 0,
+                SenderName = res.SenderName,
+                SenderInitial = initial,
+                Content = res.Content,
+                TimeLabel = string.IsNullOrWhiteSpace(anchor.TimeLabel) ? DateTime.Now.ToString("HH:mm") : anchor.TimeLabel,
+                IsOutgoing = res.IsOutgoing,
+                IsSelectionMode = _isMultiSelectMode
+            };
+
+            _currentMessages.Insert(insertAfter ? idx + 1 : idx, newBubble);
+            RefreshMessageListEmptyState(group.DisplayName);
+            ComposerHintText.Text = insertAfter ? "已在下方插入 1 条群聊消息。" : "已在上方插入 1 条群聊消息。";
+        }
+
         private void CopyBubbleMenuItem_Click(object sender, RoutedEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
@@ -520,9 +586,13 @@ namespace Client.Pages
             if (target is null || !AppServices.TryBeginModalDialog()) return;
             try
             {
-                var dialog = new ImportChatScreenshotDialog { XamlRoot = XamlRoot };
-                var choice = await dialog.ShowAsync();
-                if (choice != ContentDialogResult.Primary || dialog.ConfirmedMessages.Count == 0) return;
+                var existing = _currentMessages.Select(m => (m.IsOutgoing ? "outgoing" : "incoming", m.Content));
+                var dialog = new ImportChatScreenshotDialog(target.GroupName, new[] { target.GroupName }, existing, isGroupSearch: true)
+                {
+                    XamlRoot = XamlRoot
+                };
+                await dialog.ShowAsync();
+                if (dialog.ConfirmedMessages.Count == 0) return;
 
                 string fallbackSender = string.IsNullOrWhiteSpace(SenderNameBox.Text) ? "群成员" : SenderNameBox.Text.Trim();
                 string myName = AppServices.Backend.CurrentEmployee?.DisplayName ?? "我";
@@ -539,11 +609,13 @@ namespace Client.Pages
                 {
                     await LoadGroupMessagesAsync(target);
                 }
-                ComposerHintText.Text = $"已从群聊截图批量导入 {saved} 条消息。";
+                ComposerHintText.Text = dialog.WasBatchImported
+                    ? $"已从微信群聊记录批量导入 {saved} 条消息。"
+                    : $"已从群聊截图批量导入 {saved} 条消息。";
             }
             catch (Exception ex)
             {
-                ComposerHintText.Text = $"截图导入异常：{ex.Message}";
+                ComposerHintText.Text = $"导入对话异常：{ex.Message}";
             }
             finally
             {

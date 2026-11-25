@@ -88,7 +88,7 @@ namespace Client.Services
             NormalizeWindowSize(mgrHwnd, StandardMgrLogicalWidth, StandardMgrLogicalHeight, offsetX: 60, offsetY: 50);
             await Task.Delay(350, ct);
 
-            if (!Win32WindowHelper.GetWindowRect(mgrHwnd, out var rect))
+            if (!Win32WindowHelper.GetVisibleWindowRect(mgrHwnd, out var rect))
             {
                 throw new InvalidOperationException("无法获取「通讯录管理」窗口坐标。");
             }
@@ -187,7 +187,7 @@ namespace Client.Services
                     EnsureSafeToContinue(contactManagerHwnd, ct);
                     Report(tag.Name, $"正在切换标签「{tag.Name}」...", $"▶ 开始导入标签「{tag.Name}」{(tag.Count > 0 ? $"（预计 {tag.Count} 人）" : "")}");
 
-                    if (!Win32WindowHelper.GetWindowRect(contactManagerHwnd, out var mgrRect))
+                    if (!Win32WindowHelper.GetVisibleWindowRect(contactManagerHwnd, out var mgrRect))
                     {
                         throw new OperationCanceledException("无法读取「通讯录管理」窗口位置。");
                     }
@@ -224,7 +224,7 @@ namespace Client.Services
                     for (int page = 0; page < 120; page++)
                     {
                         EnsureSafeToContinue(contactManagerHwnd, ct);
-                        if (!Win32WindowHelper.GetWindowRect(contactManagerHwnd, out mgrRect))
+                        if (!Win32WindowHelper.GetVisibleWindowRect(contactManagerHwnd, out mgrRect))
                         {
                             throw new OperationCanceledException("「通讯录管理」窗口位置失效。");
                         }
@@ -795,43 +795,249 @@ namespace Client.Services
             }
 
             var mainWin = ensured.Window;
-            NormalizeWindowSize(mainWin.Hwnd, StandardMainLogicalWidth, StandardMainLogicalHeight, offsetX: 40, offsetY: 40);
-            await Task.Delay(380, ct);
 
-            if (!Win32WindowHelper.GetWindowRect(mainWin.Hwnd, out var mainRect)) return (nint.Zero, 0);
+            // Detect Windows UIPI elevation mismatch (WeChat running as Admin while Client is standard user)
+            if (Win32WindowHelper.IsTargetProcessElevatedMismatch(mainWin.Hwnd))
+            {
+                throw new InvalidOperationException("检测到微信正以管理员权限运行，Windows 安全机制会拦截自动点击。请以管理员身份运行本工作台，或以普通权限重启微信后再试。");
+            }
+
+            NormalizeWindowSize(mainWin.Hwnd, StandardMainLogicalWidth, StandardMainLogicalHeight, offsetX: 36, offsetY: 32);
+            await Task.Delay(420, ct);
+
+            if (!Win32WindowHelper.GetVisibleWindowRect(mainWin.Hwnd, out var mainRect)) return (nint.Zero, 0);
 
             uint dpi = Win32WindowHelper.GetDpiForWindow(mainWin.Hwnd);
             double scale = dpi > 0 ? dpi / 96.0 : 1.0;
 
-            // Click left-rail Contacts icon
-            Win32WindowHelper.LeftClickAt(
-                mainRect.Left + (int)Math.Round(30 * scale),
-                mainRect.Top + (int)Math.Round(152 * scale));
-            await Task.Delay(400, ct);
-
-            // Scroll friend list all the way UP to the top
-            int listScrollX = mainRect.Left + (int)Math.Round(180 * scale);
-            int listScrollY = mainRect.Top + (int)Math.Round(300 * scale);
-            for (int s = 0; s < 3; s++)
+            // ---- Step A: Switch to left-rail Contacts tab (2nd icon) with visual detection & OCR verification ----
+            using (var initBmp = CaptureVisibleWindow(mainWin.Hwnd, out mainRect))
             {
-                Win32WindowHelper.ScrollWheelAt(listScrollX, listScrollY, +12);
-                await Task.Delay(120, ct);
+                var initOcr = await AppServices.Ocr.RapidEngine.RecognizeAsync(initBmp, ct);
+                bool onContacts = IsOnContactsTab(initOcr, initBmp.PixelWidth, initBmp.PixelHeight);
+
+                if (!onContacts)
+                {
+                    var railIcons = Win32WindowHelper.DetectWeChatLeftRailIcons(initBmp, scale);
+                    double rx = mainRect.Width / (double)Math.Max(1, initBmp.PixelWidth);
+                    double ry = mainRect.Height / (double)Math.Max(1, initBmp.PixelHeight);
+
+                    var contactCandidates = new List<(int X, int Y, string Source)>();
+                    if (railIcons.Count >= 3)
+                    {
+                        // Run 0 = Avatar, Run 1 = Messages, Run 2 = Contacts
+                        var c2 = railIcons[2];
+                        contactCandidates.Add((
+                            mainRect.Left + (int)Math.Round(c2.CenterX * rx),
+                            mainRect.Top + (int)Math.Round(c2.CenterY * ry),
+                            "visual-rail-2"));
+                    }
+                    // Curated DPI-scaled fallback offsets on the visible frame (covers WeChat 4.x & 3.9 across 100%~200% DPI)
+                    int railCenterX = railIcons.Count > 0
+                        ? mainRect.Left + (int)Math.Round(railIcons[0].CenterX * rx)
+                        : mainRect.Left + (int)Math.Round(28 * scale);
+                    foreach (int logicalY in new[] { 150, 166, 136, 182 })
+                    {
+                        int cy = mainRect.Top + (int)Math.Round(logicalY * scale);
+                        if (!contactCandidates.Any(p => Math.Abs(p.Y - cy) <= (int)Math.Round(10 * scale)))
+                        {
+                            contactCandidates.Add((railCenterX, cy, $"fallback-y{logicalY}"));
+                        }
+                    }
+
+                    AppServices.Logs.Info("TAG", $"微信主窗口可见区域 {mainRect.Width}×{mainRect.Height} (DPI={dpi}, 识别到左侧栏图标 {railIcons.Count} 个)");
+
+                    foreach (var cand in contactCandidates)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        Win32WindowHelper.LeftClickAt(cand.X, cand.Y, mainWin.Hwnd);
+                        await Task.Delay(420, ct);
+
+                        using var verifyBmp = CaptureVisibleWindow(mainWin.Hwnd, out mainRect);
+                        var verifyOcr = await AppServices.Ocr.RapidEngine.RecognizeAsync(verifyBmp, ct);
+                        if (IsOnContactsTab(verifyOcr, verifyBmp.PixelWidth, verifyBmp.PixelHeight))
+                        {
+                            onContacts = true;
+                            AppServices.Logs.Info("TAG", $"已通过 {cand.Source} ({cand.X},{cand.Y}) 成功切换到微信「通讯录」页");
+                            break;
+                        }
+
+                        // If visually detected icon didn't switch on first hardware click, try direct window click once
+                        if (cand.Source == "visual-rail-2")
+                        {
+                            Win32WindowHelper.PostWindowLeftClickAt(mainWin.Hwnd, cand.X, cand.Y);
+                            await Task.Delay(380, ct);
+                            using var retryBmp = CaptureVisibleWindow(mainWin.Hwnd, out mainRect);
+                            var retryOcr = await AppServices.Ocr.RapidEngine.RecognizeAsync(retryBmp, ct);
+                            if (IsOnContactsTab(retryOcr, retryBmp.PixelWidth, retryBmp.PixelHeight))
+                            {
+                                onContacts = true;
+                                AppServices.Logs.Info("TAG", $"已通过窗口消息兜底 {cand.Source} ({cand.X},{cand.Y}) 切换到「通讯录」页");
+                                break;
+                            }
+                        }
+                    }
+                }
             }
-            await Task.Delay(250, ct);
 
-            // Locate & click "通讯录管理" button
-            var btnPos = await FindTextCenterInWindowAsync(mainWin.Hwnd, mainRect, "通讯录管理", ct);
-            Win32WindowHelper.LeftClickAt(
-                btnPos?.X ?? (mainRect.Left + (int)Math.Round(190 * scale)),
-                btnPos?.Y ?? (mainRect.Top + (int)Math.Round(94 * scale)));
+            // ---- Step B: Ensure top of Contacts column is visible, then locate & click「通讯录管理」with retry ----
+            int listScrollX = mainRect.Left + (int)Math.Round(175 * scale);
+            int listScrollY = mainRect.Top + (int)Math.Round(290 * scale);
 
-            for (int i = 0; i < 10; i++)
+            for (int attempt = 0; attempt < 3; attempt++)
             {
-                await Task.Delay(250, ct);
-                var found = FindContactManagerWindow();
-                if (found.Hwnd != nint.Zero) return found;
+                ct.ThrowIfCancellationRequested();
+                _ = Win32WindowHelper.ForceBringToForeground(mainWin.Hwnd);
+                await Task.Delay(120, ct);
+
+                using var curBmp = CaptureVisibleWindow(mainWin.Hwnd, out mainRect);
+                var curOcr = await AppServices.Ocr.RapidEngine.RecognizeAsync(curBmp, ct);
+                var btnPos = FindContactManagerButtonInWindow(curOcr, curBmp.PixelWidth, curBmp.PixelHeight, mainRect, scale);
+
+                // If "通讯录管理" wasn't found yet, scroll the Contacts list strongly to the very top first
+                if (btnPos is null)
+                {
+                    for (int s = 0; s < 5; s++)
+                    {
+                        Win32WindowHelper.ScrollWheelAt(listScrollX, listScrollY, +18);
+                        await Task.Delay(80, ct);
+                    }
+                    await Task.Delay(260, ct);
+
+                    using var afterScrollBmp = CaptureVisibleWindow(mainWin.Hwnd, out mainRect);
+                    var afterScrollOcr = await AppServices.Ocr.RapidEngine.RecognizeAsync(afterScrollBmp, ct);
+                    btnPos = FindContactManagerButtonInWindow(afterScrollOcr, afterScrollBmp.PixelWidth, afterScrollBmp.PixelHeight, mainRect, scale);
+                }
+
+                int clickX = btnPos?.X ?? (mainRect.Left + (int)Math.Round(178 * scale));
+                int clickY = btnPos?.Y ?? (mainRect.Top + (int)Math.Round((attempt == 0 ? 86 : 102) * scale));
+                AppServices.Logs.Info("TAG", $"第 {attempt + 1} 次点击「通讯录管理」({clickX},{clickY})，定位方式={btnPos?.Method ?? "fallback"}");
+
+                // Attempt 1: guaranteed window activation + hardware SendInput click (60ms press hold)
+                Win32WindowHelper.LeftClickAt(clickX, clickY, mainWin.Hwnd);
+
+                for (int i = 0; i < 8; i++)
+                {
+                    await Task.Delay(220, ct);
+                    var found = FindContactManagerWindow();
+                    if (found.Hwnd != nint.Zero) return found;
+                }
+
+                // If button hovered but Qt didn't open the window on the first click (e.g. first click only focused
+                // the inactive Qt window or SendInput was ignored), send a direct WM_LBUTTONDOWN/UP message at the same spot!
+                AppServices.Logs.Info("TAG", $"第 {attempt + 1} 次硬件点击后未检测到窗口，追加直接窗口消息点击 ({clickX},{clickY})...");
+                Win32WindowHelper.PostWindowLeftClickAt(mainWin.Hwnd, clickX, clickY);
+
+                for (int i = 0; i < 6; i++)
+                {
+                    await Task.Delay(220, ct);
+                    var found = FindContactManagerWindow();
+                    if (found.Hwnd != nint.Zero) return found;
+                }
             }
             return (nint.Zero, 0);
+        }
+
+        private static bool IsOnContactsTab(OcrRecognitionResult ocr, int bmpW, int bmpH)
+        {
+            double minX = bmpW * 0.04;
+            double maxX = bmpW * 0.48;
+            double maxY = bmpH * 0.65;
+
+            foreach (var l in ocr.Lines)
+            {
+                if (l.Bounds.X < minX || l.Bounds.X > maxX || l.Bounds.Y > maxY) continue;
+                string t = l.Text.Replace(" ", "").Trim();
+                if (string.IsNullOrEmpty(t)) continue;
+
+                if (FuzzyMatchContactManagerText(t) ||
+                    t.Contains("新的朋友", StringComparison.Ordinal) ||
+                    t.Contains("企业微信联系人", StringComparison.Ordinal) ||
+                    t is "公众号" or "服务号" or "标签" or "群聊" or "新的朋友")
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool FuzzyMatchContactManagerText(string compactText)
+        {
+            if (compactText.Contains("通讯录管理", StringComparison.Ordinal) ||
+                compactText.Contains("ContactManager", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            if (compactText.Length is >= 3 and <= 8)
+            {
+                const string target = "通讯录管理";
+                int matched = 0;
+                foreach (char ch in target)
+                {
+                    if (compactText.Contains(ch)) matched++;
+                }
+                if (matched >= 3 && (compactText.Contains('通') || compactText.Contains('管') || compactText.Contains('录')))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static (int X, int Y, string Method)? FindContactManagerButtonInWindow(
+            OcrRecognitionResult ocr,
+            int bmpW,
+            int bmpH,
+            Win32WindowHelper.RECT rect,
+            double scale)
+        {
+            double rx = rect.Width / (double)Math.Max(1, bmpW);
+            double ry = rect.Height / (double)Math.Max(1, bmpH);
+            double minX = bmpW * 0.04;
+            double maxX = bmpW * 0.48;
+            double minY = bmpH * 0.04;
+            double maxY = bmpH * 0.36;
+
+            // Priority 1 & 2: Exact or fuzzy OCR match for "通讯录管理"
+            var direct = ocr.Lines
+                .Where(l => l.Bounds.X >= minX && l.Bounds.X <= maxX && l.Bounds.Y >= minY && l.Bounds.Y <= maxY)
+                .OrderBy(l => l.Bounds.Y)
+                .FirstOrDefault(l => FuzzyMatchContactManagerText(l.Text.Replace(" ", "").Trim()));
+            if (direct is not null)
+            {
+                return (
+                    rect.Left + (int)Math.Round((direct.Bounds.X + direct.Bounds.Width / 2.0) * rx),
+                    rect.Top + (int)Math.Round((direct.Bounds.Y + direct.Bounds.Height / 2.0) * ry),
+                    $"ocr:{direct.Text.Trim()}"
+                );
+            }
+
+            // Priority 3: Geometric anchor right above "新的朋友" (in WeChat Contacts, 通讯录管理 sits directly above 新的朋友)
+            var newFriends = ocr.Lines
+                .Where(l => l.Bounds.X >= minX && l.Bounds.X <= maxX && l.Bounds.Y >= bmpH * 0.08 && l.Bounds.Y <= bmpH * 0.45)
+                .OrderBy(l => l.Bounds.Y)
+                .FirstOrDefault(l => l.Text.Replace(" ", "").Contains("新的朋友", StringComparison.Ordinal));
+            if (newFriends is not null)
+            {
+                int anchorX = rect.Left + (int)Math.Round((newFriends.Bounds.X + newFriends.Bounds.Width / 2.0) * rx);
+                int anchorY = rect.Top + (int)Math.Round(newFriends.Bounds.Y * ry - 38 * scale);
+                if (anchorY > rect.Top + (int)Math.Round(45 * scale))
+                {
+                    return (anchorX, anchorY, "above-new-friends");
+                }
+            }
+
+            return null;
+        }
+
+        private static SoftwareBitmap CaptureVisibleWindow(nint hWnd, out Win32WindowHelper.RECT visibleRect)
+        {
+            if (Win32WindowHelper.GetVisibleWindowRect(hWnd, out visibleRect) && visibleRect.Width > 0 && visibleRect.Height > 0)
+            {
+                return Win32WindowHelper.CaptureScreenRectToSoftwareBitmap(visibleRect.Left, visibleRect.Top, visibleRect.Width, visibleRect.Height);
+            }
+            _ = Win32WindowHelper.GetWindowRect(hWnd, out visibleRect);
+            return Win32WindowHelper.CaptureWindowToSoftwareBitmap(hWnd);
         }
 
         private static (nint Hwnd, int Pid) FindContactManagerWindow()
@@ -878,14 +1084,7 @@ namespace Client.Services
 
         private static void NormalizeWindowSize(nint hWnd, int logicalW, int logicalH, int offsetX, int offsetY)
         {
-            uint dpi = Win32WindowHelper.GetDpiForWindow(hWnd);
-            double scale = dpi > 0 ? dpi / 96.0 : 1.0;
-            _ = Win32WindowHelper.MoveAndResizeWindow(
-                hWnd,
-                (int)Math.Round(offsetX * scale),
-                (int)Math.Round(offsetY * scale),
-                (int)Math.Round(logicalW * scale),
-                (int)Math.Round(logicalH * scale));
+            _ = Win32WindowHelper.NormalizeWindowOnCurrentMonitor(hWnd, logicalW, logicalH, offsetX, offsetY);
         }
 
         private async Task<List<WeChatTagItem>> ScanTagsFromManagerWindowAsync(nint mgrHwnd, CancellationToken ct)
@@ -1100,7 +1299,7 @@ namespace Client.Services
 
         private static SoftwareBitmap CaptureWindowSafe(nint hWnd)
         {
-            if (Win32WindowHelper.GetWindowRect(hWnd, out var r) && r.Width > 0 && r.Height > 0)
+            if (Win32WindowHelper.GetVisibleWindowRect(hWnd, out var r) && r.Width > 0 && r.Height > 0)
             {
                 return Win32WindowHelper.CaptureScreenRectToSoftwareBitmap(r.Left, r.Top, r.Width, r.Height);
             }

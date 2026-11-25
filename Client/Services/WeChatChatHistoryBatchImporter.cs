@@ -193,6 +193,14 @@ namespace Client.Services
 
                 var mainWin = ensured.Window;
                 int wechatPid = mainWin.ProcessId;
+                if (Win32WindowHelper.IsTargetProcessElevatedMismatch(mainWin.Hwnd))
+                {
+                    return new BatchChatHistoryResult
+                    {
+                        Success = false,
+                        SummaryMessage = "检测到微信正以管理员权限运行，Windows 安全机制会拦截自动点击。请以管理员身份运行本工作台，或以普通权限重启微信后再试。"
+                    };
+                }
                 Report("已定位微信主窗口，正在归位尺寸...", $"✓ 已定位微信主窗口 (PID {wechatPid})。");
 
                 nint staleHistory = FindChatHistoryWindow(wechatPid, mainWin.Hwnd);
@@ -202,10 +210,10 @@ namespace Client.Services
                     await Task.Delay(260, ct);
                 }
 
-                NormalizeWindowSize(mainWin.Hwnd, StandardMainLogicalWidth, StandardMainLogicalHeight, offsetX: 40, offsetY: 40);
-                await Task.Delay(360, ct);
+                NormalizeWindowSize(mainWin.Hwnd, StandardMainLogicalWidth, StandardMainLogicalHeight, offsetX: 36, offsetY: 32);
+                await Task.Delay(400, ct);
 
-                if (!Win32WindowHelper.GetWindowRect(mainWin.Hwnd, out var mainRect))
+                if (!Win32WindowHelper.GetVisibleWindowRect(mainWin.Hwnd, out var mainRect))
                 {
                     return new BatchChatHistoryResult { Success = false, SummaryMessage = "无法读取微信主窗口坐标。" };
                 }
@@ -213,12 +221,25 @@ namespace Client.Services
                 uint dpi = Win32WindowHelper.GetDpiForWindow(mainWin.Hwnd);
                 double scale = dpi > 0 ? dpi / 96.0 : 1.0;
 
-                // Step 2: Click left-rail first Message icon
+                // Step 2: Visually detect & click left-rail first Message icon (fallback to DPI-scaled visible coords)
                 EnsureSafeToContinue(mainWin.Hwnd, ct);
-                AutoClick(
-                    mainRect.Left + (int)Math.Round(28 * scale),
-                    mainRect.Top + (int)Math.Round(108 * scale));
-                await Task.Delay(260, ct);
+                int msgIconX = mainRect.Left + (int)Math.Round(28 * scale);
+                int msgIconY = mainRect.Top + (int)Math.Round(104 * scale);
+                try
+                {
+                    using var railBmp = CaptureWindowSafe(mainWin.Hwnd);
+                    var railIcons = Win32WindowHelper.DetectWeChatLeftRailIcons(railBmp, scale);
+                    if (railIcons.Count >= 2)
+                    {
+                        double rx = mainRect.Width / (double)Math.Max(1, railBmp.PixelWidth);
+                        double ry = mainRect.Height / (double)Math.Max(1, railBmp.PixelHeight);
+                        msgIconX = mainRect.Left + (int)Math.Round(railIcons[1].CenterX * rx);
+                        msgIconY = mainRect.Top + (int)Math.Round(railIcons[1].CenterY * ry);
+                    }
+                }
+                catch { }
+                AutoClick(msgIconX, msgIconY);
+                await Task.Delay(280, ct);
 
                 // Step 3: Search with automatic fallback (Account -> Remark -> Nickname)
                 int dropLeft = mainRect.Left + (int)Math.Round(54 * scale);
@@ -345,7 +366,7 @@ namespace Client.Services
                 NormalizeWindowSize(historyHwnd, StandardHistoryLogicalWidth, StandardHistoryLogicalHeight, offsetX: 120, offsetY: 36);
                 await Task.Delay(420, ct);
 
-                if (!Win32WindowHelper.GetWindowRect(historyHwnd, out var histRect))
+                if (!Win32WindowHelper.GetVisibleWindowRect(historyHwnd, out var histRect))
                 {
                     return new BatchChatHistoryResult { Success = false, SummaryMessage = "无法读取聊天记录窗口坐标。" };
                 }
@@ -957,19 +978,12 @@ namespace Client.Services
 
         private static void NormalizeWindowSize(nint hWnd, int logicalW, int logicalH, int offsetX, int offsetY)
         {
-            uint dpi = Win32WindowHelper.GetDpiForWindow(hWnd);
-            double scale = dpi > 0 ? dpi / 96.0 : 1.0;
-            _ = Win32WindowHelper.MoveAndResizeWindow(
-                hWnd,
-                (int)Math.Round(offsetX * scale),
-                (int)Math.Round(offsetY * scale),
-                (int)Math.Round(logicalW * scale),
-                (int)Math.Round(logicalH * scale));
+            _ = Win32WindowHelper.NormalizeWindowOnCurrentMonitor(hWnd, logicalW, logicalH, offsetX, offsetY);
         }
 
         private static SoftwareBitmap CaptureWindowSafe(nint hWnd)
         {
-            if (Win32WindowHelper.GetWindowRect(hWnd, out var r) && r.Width > 0 && r.Height > 0)
+            if (Win32WindowHelper.GetVisibleWindowRect(hWnd, out var r) && r.Width > 0 && r.Height > 0)
             {
                 return Win32WindowHelper.CaptureScreenRectToSoftwareBitmap(r.Left, r.Top, r.Width, r.Height);
             }

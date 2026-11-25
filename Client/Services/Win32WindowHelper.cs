@@ -101,19 +101,56 @@ namespace Client.Services
 
         private const uint INPUT_MOUSE = 0;
         private const uint INPUT_KEYBOARD = 1;
+        private const uint MOUSEEVENTF_MOVE = 0x0001;
         private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
         private const uint MOUSEEVENTF_LEFTUP = 0x0004;
         private const uint MOUSEEVENTF_WHEEL = 0x0800;
+        private const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
+        private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
         private const uint KEYEVENTF_KEYUP = 0x0002;
         private const uint KEYEVENTF_UNICODE = 0x0004;
         internal const ushort VK_BACK = 0x08;
         internal const ushort VK_RETURN = 0x0D;
         internal const ushort VK_CONTROL = 0x11;
         internal const ushort VK_ESCAPE = 0x1B;
+        internal const ushort VK_HOME = 0x24;
         internal const ushort VK_A = 0x41;
+        private const uint SWP_NOSIZE = 0x0001;
+        private const uint SWP_NOMOVE = 0x0002;
+        private const uint SWP_NOACTIVATE = 0x0010;
         private const uint SWP_SHOWWINDOW = 0x0040;
+        private static readonly nint HWND_TOPMOST = new(-1);
+        private static readonly nint HWND_NOTOPMOST = new(-2);
         private const int WHEEL_DELTA = 120;
         private const uint WM_CLOSE = 0x0010;
+        private const uint WM_MOUSEMOVE = 0x0200;
+        private const uint WM_LBUTTONDOWN = 0x0201;
+        private const uint WM_LBUTTONUP = 0x0202;
+        private const nuint MK_LBUTTON = 0x0001;
+        private const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+        private const uint MONITOR_DEFAULTTONEAREST = 2;
+        private const int SM_XVIRTUALSCREEN = 76;
+        private const int SM_YVIRTUALSCREEN = 77;
+        private const int SM_CXVIRTUALSCREEN = 78;
+        private const int SM_CYVIRTUALSCREEN = 79;
+        private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+        private const uint TOKEN_QUERY = 0x0008;
+        private const int TokenElevation = 20;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MONITORINFO
+        {
+            public int cbSize;
+            public RECT rcMonitor;
+            public RECT rcWork;
+            public uint dwFlags;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct TOKEN_ELEVATION
+        {
+            public uint TokenIsElevated;
+        }
 
         private const uint PW_RENDERFULLCONTENT = 0x00000002;
         private const uint BI_RGB = 0;
@@ -209,6 +246,100 @@ namespace Client.Services
         [DllImport("user32.dll")]
         internal static extern bool IsIconic(nint hWnd);
 
+        [DllImport("user32.dll")]
+        internal static extern bool IsZoomed(nint hWnd);
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(nint hwnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
+
+        [DllImport("user32.dll")]
+        private static extern nint MonitorFromWindow(nint hwnd, uint dwFlags);
+
+        [DllImport("user32.dll")]
+        private static extern bool GetMonitorInfo(nint hMonitor, ref MONITORINFO lpmi);
+
+        [DllImport("user32.dll")]
+        private static extern int GetSystemMetrics(int nIndex);
+
+        [DllImport("user32.dll")]
+        private static extern nint WindowFromPoint(POINT point);
+
+        [DllImport("user32.dll")]
+        private static extern bool ScreenToClient(nint hWnd, ref POINT lpPoint);
+
+        [DllImport("user32.dll")]
+        private static extern bool AllowSetForegroundWindow(uint dwProcessId);
+
+        [DllImport("user32.dll")]
+        private static extern nint GetAncestor(nint hwnd, uint gaFlags);
+
+        private const uint GA_ROOT = 2;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern nint OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(nint hObject);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool OpenProcessToken(nint processHandle, uint desiredAccess, out nint tokenHandle);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool GetTokenInformation(nint tokenHandle, int tokenInformationClass, out TOKEN_ELEVATION tokenInformation, int tokenInformationLength, out int returnLength);
+
+        internal static bool GetVisibleWindowRect(nint hWnd, out RECT rect)
+        {
+            if (IsWindow(hWnd) && DwmGetWindowAttribute(hWnd, DWMWA_EXTENDED_FRAME_BOUNDS, out rect, Marshal.SizeOf<RECT>()) == 0 && rect.Width > 0 && rect.Height > 0)
+            {
+                return true;
+            }
+            return GetWindowRect(hWnd, out rect);
+        }
+
+        internal static bool IsTargetProcessElevatedMismatch(nint targetHwnd)
+        {
+            try
+            {
+                if (!IsWindow(targetHwnd)) return false;
+                _ = GetWindowThreadProcessId(targetHwnd, out uint targetPid);
+                if (targetPid == 0) return false;
+
+                bool selfElevated = IsProcessElevated((uint)Environment.ProcessId);
+                if (selfElevated) return false;
+                return IsProcessElevated(targetPid);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsProcessElevated(uint pid)
+        {
+            nint proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (proc == nint.Zero) return false;
+            try
+            {
+                if (!OpenProcessToken(proc, TOKEN_QUERY, out nint token)) return false;
+                try
+                {
+                    if (GetTokenInformation(token, TokenElevation, out var elev, Marshal.SizeOf<TOKEN_ELEVATION>(), out _))
+                    {
+                        return elev.TokenIsElevated != 0;
+                    }
+                    return false;
+                }
+                finally
+                {
+                    _ = CloseHandle(token);
+                }
+            }
+            finally
+            {
+                _ = CloseHandle(proc);
+            }
+        }
+
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern int GetWindowText(nint hWnd, StringBuilder lpString, int nMaxCount);
 
@@ -259,7 +390,11 @@ namespace Client.Services
             nint fg = GetForegroundWindow();
             uint curThread = GetCurrentThreadId();
             uint fgThread = fg != nint.Zero ? GetWindowThreadProcessId(fg, out _) : 0;
-            uint targetThread = GetWindowThreadProcessId(hWnd, out _);
+            uint targetThread = GetWindowThreadProcessId(hWnd, out uint targetPid);
+            if (targetPid != 0)
+            {
+                _ = AllowSetForegroundWindow(targetPid);
+            }
 
             bool attachedFg = false;
             bool attachedTarget = false;
@@ -276,6 +411,17 @@ namespace Client.Services
 
                 _ = BringWindowToTop(hWnd);
                 _ = SetForegroundWindow(hWnd);
+
+                // If Windows foreground lock kept another window (such as our own Client) above WeChat,
+                // perform a brief TOPMOST -> NOTOPMOST Z-order bump so clicks & screenshots hit WeChat reliably.
+                if (GetForegroundWindow() != hWnd)
+                {
+                    _ = SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+                    _ = SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+                    _ = BringWindowToTop(hWnd);
+                    _ = SetForegroundWindow(hWnd);
+                }
+
                 return IsWindowVisible(hWnd) && !IsIconic(hWnd);
             }
             finally
@@ -283,6 +429,54 @@ namespace Client.Services
                 if (attachedTarget) _ = AttachThreadInput(curThread, targetThread, false);
                 if (attachedFg) _ = AttachThreadInput(curThread, fgThread, false);
             }
+        }
+
+        /// <summary>
+        /// Ensures the target window is genuinely the ACTIVE foreground window (not merely on top visually).
+        /// If Windows foreground lock prevented SetForegroundWindow from activating Qt/WeChat,
+        /// performs one real mouse click on a safe neutral titlebar spot to activate it cleanly.
+        /// </summary>
+        internal static bool EnsureWindowTrulyActive(nint hWnd)
+        {
+            if (!IsWindow(hWnd)) return false;
+            _ = ForceBringToForeground(hWnd);
+            if (GetForegroundWindow() == hWnd) return true;
+
+            Thread.Sleep(60);
+            if (GetForegroundWindow() == hWnd) return true;
+
+            if (GetVisibleWindowRect(hWnd, out var visRect) && visRect.Width > 200 && visRect.Height > 120)
+            {
+                uint dpi = GetDpiForWindow(hWnd);
+                double scale = dpi > 0 ? dpi / 96.0 : 1.0;
+                int safeX = visRect.Left + (int)Math.Round(visRect.Width * 0.62);
+                int safeY = visRect.Top + (int)Math.Round(12 * scale);
+
+                // Only click the neutral titlebar if the point actually belongs to this window's process
+                if (IsPointOwnedByWindowProcess(safeX, safeY, hWnd))
+                {
+                    SendHardwareLeftClick(safeX, safeY, holdMs: 45);
+                    Thread.Sleep(110);
+                }
+            }
+
+            if (GetForegroundWindow() != hWnd)
+            {
+                _ = ForceBringToForeground(hWnd);
+                Thread.Sleep(60);
+            }
+            return GetForegroundWindow() == hWnd;
+        }
+
+        internal static bool IsPointOwnedByWindowProcess(int screenX, int screenY, nint expectedHwnd)
+        {
+            if (!IsWindow(expectedHwnd)) return false;
+            _ = GetWindowThreadProcessId(expectedHwnd, out uint expectedPid);
+            if (expectedPid == 0) return false;
+            nint hit = WindowFromPoint(new POINT { X = screenX, Y = screenY });
+            if (hit == nint.Zero) return false;
+            _ = GetWindowThreadProcessId(hit, out uint hitPid);
+            return hitPid == expectedPid;
         }
 
         [DllImport("user32.dll")]
@@ -316,33 +510,309 @@ namespace Client.Services
         internal static bool MoveAndResizeWindow(nint hWnd, int x, int y, int width, int height)
         {
             if (!IsWindow(hWnd)) return false;
+            if (IsIconic(hWnd) || IsZoomed(hWnd))
+            {
+                _ = ShowWindow(hWnd, SW_RESTORE);
+                Thread.Sleep(80);
+            }
             _ = ForceBringToForeground(hWnd);
             bool ok = SetWindowPos(hWnd, nint.Zero, x, y, width, height, SWP_SHOWWINDOW);
-            _ = SetForegroundWindow(hWnd);
+            _ = ForceBringToForeground(hWnd);
             return ok;
         }
 
-        internal static void LeftClickAt(int screenX, int screenY)
+        /// <summary>
+        /// Restores, resizes, and positions the window safely within its CURRENT monitor's work area
+        /// (preventing taskbar clipping, maximized lock-out, and cross-monitor DPI jumps).
+        /// </summary>
+        internal static bool NormalizeWindowOnCurrentMonitor(nint hWnd, int logicalW, int logicalH, int offsetX, int offsetY)
         {
+            if (!IsWindow(hWnd)) return false;
+            if (IsIconic(hWnd) || IsZoomed(hWnd))
+            {
+                _ = ShowWindow(hWnd, SW_RESTORE);
+                Thread.Sleep(110);
+            }
+
+            uint dpi = GetDpiForWindow(hWnd);
+            double scale = dpi > 0 ? dpi / 96.0 : 1.0;
+
+            int targetW = (int)Math.Round(logicalW * scale);
+            int targetH = (int)Math.Round(logicalH * scale);
+            int targetX = (int)Math.Round(offsetX * scale);
+            int targetY = (int)Math.Round(offsetY * scale);
+
+            nint hMon = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+            if (hMon != nint.Zero)
+            {
+                var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+                if (GetMonitorInfo(hMon, ref mi) && mi.rcWork.Width > 300 && mi.rcWork.Height > 300)
+                {
+                    int maxW = Math.Max(420, mi.rcWork.Width - 24);
+                    int maxH = Math.Max(360, mi.rcWork.Height - 24);
+                    targetW = Math.Min(targetW, maxW);
+                    targetH = Math.Min(targetH, maxH);
+
+                    int desiredX = mi.rcWork.Left + (int)Math.Round(offsetX * scale);
+                    int desiredY = mi.rcWork.Top + (int)Math.Round(offsetY * scale);
+                    targetX = Math.Clamp(desiredX, mi.rcWork.Left + 4, Math.Max(mi.rcWork.Left + 4, mi.rcWork.Right - targetW - 4));
+                    targetY = Math.Clamp(desiredY, mi.rcWork.Top + 4, Math.Max(mi.rcWork.Top + 4, mi.rcWork.Bottom - targetH - 4));
+                }
+            }
+
+            // Compensate for invisible DWM shadow frame so the visible window aligns cleanly
+            if (GetWindowRect(hWnd, out var rawRect) && GetVisibleWindowRect(hWnd, out var visRect))
+            {
+                int shadowL = Math.Max(0, visRect.Left - rawRect.Left);
+                int shadowR = Math.Max(0, rawRect.Right - visRect.Right);
+                int shadowT = Math.Max(0, visRect.Top - rawRect.Top);
+                int shadowB = Math.Max(0, rawRect.Bottom - visRect.Bottom);
+                if (shadowL + shadowR <= 60 && shadowT + shadowB <= 60)
+                {
+                    targetX -= shadowL;
+                    targetY -= shadowT;
+                    targetW += shadowL + shadowR;
+                    targetH += shadowT + shadowB;
+                }
+            }
+
+            bool ok = SetWindowPos(hWnd, nint.Zero, targetX, targetY, targetW, targetH, SWP_SHOWWINDOW);
+            _ = ForceBringToForeground(hWnd);
+            return ok;
+        }
+
+        private static void MoveCursorAbsolute(int screenX, int screenY)
+        {
+            int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+            int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+            int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+            int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+            if (vw > 1 && vh > 1)
+            {
+                int normX = (int)Math.Round((screenX - vx) * 65535.0 / (vw - 1));
+                int normY = (int)Math.Round((screenY - vy) * 65535.0 / (vh - 1));
+                var move = new INPUT[1];
+                move[0].type = INPUT_MOUSE;
+                move[0].u.mi.dx = Math.Clamp(normX, 0, 65535);
+                move[0].u.mi.dy = Math.Clamp(normY, 0, 65535);
+                move[0].u.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+                _ = SendInput(1, move, Marshal.SizeOf<INPUT>());
+            }
+
+            // Always follow up with exact physical SetCursorPos so rounding on virtual desktop never drifts even 1px
             _ = SetCursorPos(screenX, screenY);
-            Thread.Sleep(45);
-            var inputs = new INPUT[2];
-            inputs[0].type = INPUT_MOUSE;
-            inputs[0].u.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-            inputs[1].type = INPUT_MOUSE;
-            inputs[1].u.mi.dwFlags = MOUSEEVENTF_LEFTUP;
-            _ = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        }
+
+        private static bool SendHardwareLeftClick(int screenX, int screenY, int holdMs)
+        {
+            MoveCursorAbsolute(screenX, screenY);
+            Thread.Sleep(65);
+
+            var down = new INPUT[1];
+            down[0].type = INPUT_MOUSE;
+            down[0].u.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+            uint sentDown = SendInput(1, down, Marshal.SizeOf<INPUT>());
+
+            Thread.Sleep(Math.Max(45, holdMs));
+
+            var up = new INPUT[1];
+            up[0].type = INPUT_MOUSE;
+            up[0].u.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+            uint sentUp = SendInput(1, up, Marshal.SizeOf<INPUT>());
+
+            return sentDown == 1 && sentUp == 1;
+        }
+
+        internal static void PostWindowLeftClickAt(nint fallbackHwnd, int screenX, int screenY)
+        {
+            nint target = WindowFromPoint(new POINT { X = screenX, Y = screenY });
+            if (target == nint.Zero || !IsWindow(target)) target = fallbackHwnd;
+            if (target == nint.Zero || !IsWindow(target)) return;
+
+            var pt = new POINT { X = screenX, Y = screenY };
+            if (!ScreenToClient(target, ref pt)) return;
+
+            nint lParam = new(((pt.Y & 0xFFFF) << 16) | (pt.X & 0xFFFF));
+            _ = PostMessage(target, WM_MOUSEMOVE, 0, lParam);
+            Thread.Sleep(35);
+            _ = PostMessage(target, WM_LBUTTONDOWN, MK_LBUTTON, lParam);
+            Thread.Sleep(55);
+            _ = PostMessage(target, WM_LBUTTONUP, 0, lParam);
+        }
+
+        internal static void LeftClickAt(int screenX, int screenY, nint expectedTargetHwnd = 0)
+        {
+            if (expectedTargetHwnd != nint.Zero && IsWindow(expectedTargetHwnd))
+            {
+                bool active = EnsureWindowTrulyActive(expectedTargetHwnd);
+                if (!IsPointOwnedByWindowProcess(screenX, screenY, expectedTargetHwnd))
+                {
+                    nint blocker = WindowFromPoint(new POINT { X = screenX, Y = screenY });
+                    string blockerCls = blocker != nint.Zero ? GetWindowClassName(GetAncestor(blocker, GA_ROOT)) : "none";
+                    AppServices.Logs.Warn("WIN32", $"点击坐标 ({screenX},{screenY}) 被窗口 {blockerCls} 遮挡，重新置顶目标窗口...");
+                    _ = ForceBringToForeground(expectedTargetHwnd);
+                    Thread.Sleep(100);
+                }
+                else if (!active)
+                {
+                    AppServices.Logs.Warn("WIN32", $"目标窗口未能获取系统前台焦点，将继续尝试硬件点击与窗口消息兜底 ({screenX},{screenY})");
+                }
+            }
+
+            bool hardwareOk = SendHardwareLeftClick(screenX, screenY, holdMs: 60);
+            if (!hardwareOk && expectedTargetHwnd != nint.Zero)
+            {
+                AppServices.Logs.Warn("WIN32", $"SendInput 返回 0（可能被系统拦截），改用 WM_LBUTTONDOWN/UP 兜底点击 ({screenX},{screenY})");
+                PostWindowLeftClickAt(expectedTargetHwnd, screenX, screenY);
+            }
         }
 
         internal static void ScrollWheelAt(int screenX, int screenY, int notches)
         {
-            _ = SetCursorPos(screenX, screenY);
-            Thread.Sleep(35);
+            MoveCursorAbsolute(screenX, screenY);
+            Thread.Sleep(40);
             var inputs = new INPUT[1];
             inputs[0].type = INPUT_MOUSE;
             inputs[0].u.mi.dwFlags = MOUSEEVENTF_WHEEL;
             inputs[0].u.mi.mouseData = unchecked((uint)(notches * WHEEL_DELTA));
             _ = SendInput(1, inputs, Marshal.SizeOf<INPUT>());
+        }
+
+        internal sealed record RailIconBounds(int CenterX, int CenterY, int Top, int Bottom, int Width, int Height);
+
+        /// <summary>
+        /// Visually detects the top icons on WeChat's left navigation rail directly from window pixels
+        /// (Run 0 = Avatar, Run 1 = Messages, Run 2 = Contacts, Run 3 = Favorites...).
+        /// Works across WeChat 3.x / 4.x, 100%~250% DPI, and Light / Dark themes without hardcoded offsets.
+        /// </summary>
+        internal static List<RailIconBounds> DetectWeChatLeftRailIcons(SoftwareBitmap bmp, double scale)
+        {
+            var results = new List<RailIconBounds>();
+            int w = bmp.PixelWidth;
+            int h = bmp.PixelHeight;
+            if (w < 120 || h < 200) return results;
+
+            byte[] pixels = AvatarImageService.CopyBgraPixels(bmp);
+
+            // Sample solid rail background color near the left inner edge (y in 25%..75%)
+            int sampleX = Math.Clamp((int)Math.Round(5 * scale), 2, Math.Max(2, w / 20));
+            var bSamples = new List<byte>(64);
+            var gSamples = new List<byte>(64);
+            var rSamples = new List<byte>(64);
+            int yStartBg = (int)(h * 0.25);
+            int yEndBg = (int)(h * 0.75);
+            int stepBg = Math.Max(1, (yEndBg - yStartBg) / 48);
+            for (int y = yStartBg; y < yEndBg; y += stepBg)
+            {
+                int idx = (y * w + sampleX) * 4;
+                bSamples.Add(pixels[idx]);
+                gSamples.Add(pixels[idx + 1]);
+                rSamples.Add(pixels[idx + 2]);
+            }
+            bSamples.Sort();
+            gSamples.Sort();
+            rSamples.Sort();
+            byte bgB = bSamples[bSamples.Count / 2];
+            byte bgG = gSamples[gSamples.Count / 2];
+            byte bgR = rSamples[rSamples.Count / 2];
+
+            // Auto-detect rail right boundary where the sidebar meets the white/dark chat list column
+            int minRailW = Math.Clamp((int)Math.Round(42 * scale), 30, w / 5);
+            int maxRailW = Math.Clamp((int)Math.Round(76 * scale), minRailW + 10, w / 4);
+            int railRight = Math.Clamp((int)Math.Round(56 * scale), minRailW, maxRailW);
+            for (int x = minRailW; x <= maxRailW; x++)
+            {
+                int diffRows = 0;
+                int checkedRows = 0;
+                for (int y = yStartBg; y < yEndBg; y += stepBg)
+                {
+                    checkedRows++;
+                    int idx = (y * w + x) * 4;
+                    int diff = Math.Abs(pixels[idx] - bgB) + Math.Abs(pixels[idx + 1] - bgG) + Math.Abs(pixels[idx + 2] - bgR);
+                    if (diff > 14) diffRows++;
+                }
+                if (checkedRows > 0 && diffRows >= checkedRows * 0.72)
+                {
+                    railRight = x;
+                    break;
+                }
+            }
+
+            int scanXMin = Math.Clamp((int)Math.Round(railRight * 0.14), 3, railRight - 4);
+            int scanXMax = Math.Clamp((int)Math.Round(railRight * 0.86), scanXMin + 4, railRight - 2);
+            int scanYMin = Math.Clamp((int)Math.Round(6 * scale), 2, h / 10);
+            int scanYMax = Math.Min(h - 10, (int)Math.Round(420 * scale));
+            int maxMergeGap = Math.Clamp((int)Math.Round(4 * scale), 2, 10);
+            int minIconHeight = Math.Clamp((int)Math.Round(12 * scale), 8, 36);
+            int maxIconHeight = Math.Clamp((int)Math.Round(64 * scale), 40, 160);
+            int minFgPerRow = Math.Max(3, (int)((scanXMax - scanXMin + 1) * 0.10));
+
+            int runStart = -1;
+            int gap = 0;
+            int runMinX = int.MaxValue;
+            int runMaxX = -1;
+
+            void FlushRun(int runEnd)
+            {
+                int runH = runEnd - runStart + 1;
+                if (runH >= minIconHeight && runH <= maxIconHeight && runMaxX >= runMinX)
+                {
+                    results.Add(new RailIconBounds(
+                        CenterX: (runMinX + runMaxX) / 2,
+                        CenterY: (runStart + runEnd) / 2,
+                        Top: runStart,
+                        Bottom: runEnd,
+                        Width: runMaxX - runMinX + 1,
+                        Height: runH));
+                }
+                runStart = -1;
+                gap = 0;
+                runMinX = int.MaxValue;
+                runMaxX = -1;
+            }
+
+            for (int y = scanYMin; y <= scanYMax; y++)
+            {
+                int fg = 0;
+                int rowMinX = int.MaxValue;
+                int rowMaxX = -1;
+                int rowOff = y * w * 4;
+
+                for (int x = scanXMin; x <= scanXMax; x++)
+                {
+                    int idx = rowOff + x * 4;
+                    int diff = Math.Abs(pixels[idx] - bgB) + Math.Abs(pixels[idx + 1] - bgG) + Math.Abs(pixels[idx + 2] - bgR);
+                    if (diff > 24)
+                    {
+                        fg++;
+                        if (x < rowMinX) rowMinX = x;
+                        if (x > rowMaxX) rowMaxX = x;
+                    }
+                }
+
+                if (fg >= minFgPerRow)
+                {
+                    if (runStart < 0) runStart = y;
+                    gap = 0;
+                    if (rowMinX < runMinX) runMinX = rowMinX;
+                    if (rowMaxX > runMaxX) runMaxX = rowMaxX;
+                }
+                else if (runStart >= 0)
+                {
+                    gap++;
+                    if (gap > maxMergeGap)
+                    {
+                        FlushRun(y - gap);
+                    }
+                }
+            }
+
+            if (runStart >= 0)
+            {
+                FlushRun(scanYMax - gap);
+            }
+
+            return results;
         }
 
         internal static void SendVirtualKey(ushort vk)

@@ -468,7 +468,11 @@ namespace Client.Dialogs
 
             try
             {
-                var result = await Task.Run(() => _importer.LocateAndScanTagsAsync(scrollLeftSidebarDown: scrollDown, ct: ct), ct);
+                var scanProgress = new Progress<string>(line =>
+                {
+                    if (!_isClosed) AppendLog(line);
+                });
+                var result = await Task.Run(() => _importer.LocateAndScanTagsAsync(scrollLeftSidebarDown: scrollDown, scanLog: scanProgress, ct: ct), ct);
                 if (_isClosed) return;
 
                 _contactManagerHwnd = result.ContactManagerHwnd;

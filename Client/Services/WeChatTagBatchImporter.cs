@@ -72,25 +72,34 @@ namespace Client.Services
         // Step 1: Locate / Clean-Reset Contact Manager & Scan Left Sidebar Tags
         // =====================================================================
 
-        public async Task<TagScanResult> LocateAndScanTagsAsync(bool scrollLeftSidebarDown = false, CancellationToken ct = default)
+        public async Task<TagScanResult> LocateAndScanTagsAsync(
+            bool scrollLeftSidebarDown = false,
+            IProgress<string>? scanLog = null,
+            CancellationToken ct = default)
         {
             if (!AppServices.Ocr.RapidEngine.IsAvailable)
             {
                 throw new InvalidOperationException(AppServices.Ocr.RapidEngine.AvailabilityNote);
             }
 
-            var (mgrHwnd, pid) = await FindOrOpenContactManagerAsync(resetExisting: !scrollLeftSidebarDown, ct);
+            var (mgrHwnd, pid) = await FindOrOpenContactManagerAsync(resetExisting: !scrollLeftSidebarDown, scanLog, ct);
             if (mgrHwnd == nint.Zero)
             {
                 throw new InvalidOperationException("未找到微信「通讯录管理」窗口。请确认个人微信已登录并处于桌面可见状态后再试。");
             }
 
             NormalizeWindowSize(mgrHwnd, StandardMgrLogicalWidth, StandardMgrLogicalHeight, offsetX: 60, offsetY: 50);
-            await Task.Delay(350, ct);
+            await Task.Delay(380, ct);
 
             if (!Win32WindowHelper.GetVisibleWindowRect(mgrHwnd, out var rect))
             {
                 throw new InvalidOperationException("无法获取「通讯录管理」窗口坐标。");
+            }
+
+            void LogScan(string text)
+            {
+                AppServices.Logs.Info("TAG", text);
+                scanLog?.Report(text);
             }
 
             if (scrollLeftSidebarDown)
@@ -101,22 +110,59 @@ namespace Client.Services
                 await Task.Delay(350, ct);
             }
 
-            var tags = await ScanTagsFromManagerWindowAsync(mgrHwnd, ct);
-            if (tags.Count == 0)
+            var (tags, sawNewTagBtn, sidebarDebugLines) = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
+            bool hasCountedTags = tags.Any(t => t.Count >= 0);
+
+            // If no real tags found (or "标签" section appears collapsed), locate "标签" via OCR and click its exact text center!
+            if (!scrollLeftSidebarDown && (!hasCountedTags && !sawNewTagBtn))
             {
-                // Expand collapsed "标签" header if needed
-                using var checkBmp = CaptureWindowSafe(mgrHwnd);
-                var checkOcr = await AppServices.Ocr.RapidEngine.RecognizeAsync(checkBmp, ct);
-                var labelLine = checkOcr.Lines.FirstOrDefault(l =>
-                    l.Bounds.X < checkBmp.PixelWidth * 0.22 &&
-                    l.Text.Trim() is "标签" or "标鉴");
-                if (labelLine is not null)
+                LogScan($"首次扫描未见已展开的标签列表（左侧栏识别到 {sidebarDebugLines.Count} 行），尝试 OCR 定位「标签」文字中心并点击展开...");
+
+                for (int expandTry = 0; expandTry < 2; expandTry++)
                 {
-                    int clickX = rect.Left + (int)Math.Round(labelLine.Bounds.X + labelLine.Bounds.Width / 2.0);
-                    int clickY = rect.Top + (int)Math.Round(labelLine.Bounds.Y + labelLine.Bounds.Height / 2.0);
-                    Win32WindowHelper.LeftClickAt(clickX, clickY);
+                    ct.ThrowIfCancellationRequested();
+                    _ = Win32WindowHelper.EnsureWindowTrulyActive(mgrHwnd);
+                    await Task.Delay(120, ct);
+
+                    using var checkBmp = CaptureVisibleWindow(mgrHwnd, out rect);
+                    var checkOcr = await AppServices.Ocr.RapidEngine.RecognizeAsync(checkBmp, ct);
+                    var labelLine = FindTagHeaderLine(checkOcr, checkBmp.PixelWidth, checkBmp.PixelHeight);
+
+                    if (labelLine is null)
+                    {
+                        LogScan($"第 {expandTry + 1} 次未在左侧栏识别到「标签」标题（左侧栏文本：{string.Join(" / ", sidebarDebugLines.Take(8))}）");
+                        break;
+                    }
+
+                    double rx = rect.Width / (double)Math.Max(1, checkBmp.PixelWidth);
+                    double ry = rect.Height / (double)Math.Max(1, checkBmp.PixelHeight);
+                    int clickX = rect.Left + (int)Math.Round((labelLine.Bounds.X + labelLine.Bounds.Width / 2.0) * rx);
+                    int clickY = rect.Top + (int)Math.Round((labelLine.Bounds.Y + labelLine.Bounds.Height / 2.0) * ry);
+
+                    var diag = Win32WindowHelper.LeftClickAt(clickX, clickY, mgrHwnd, $"展开「标签」#{expandTry + 1}");
+                    LogScan($"🖱 点击「{labelLine.Text.Trim()}」文字中心 -> {diag.Summary}");
+                    await Task.Delay(480, ct);
+
+                    (tags, sawNewTagBtn, sidebarDebugLines) = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
+                    hasCountedTags = tags.Any(t => t.Count >= 0);
+                    if (hasCountedTags || sawNewTagBtn)
+                    {
+                        LogScan($"✓ 已成功展开「标签」，识别到 {tags.Count} 个标签。");
+                        break;
+                    }
+
+                    // Fallback: direct window message click at the exact OCR text center
+                    bool okPost = Win32WindowHelper.PostWindowLeftClickAt(mgrHwnd, clickX, clickY, out int postErr);
+                    LogScan($"🖱 追加窗口消息点击「标签」中心 ({clickX},{clickY}) -> ok={okPost}, err={postErr}");
                     await Task.Delay(450, ct);
-                    tags = await ScanTagsFromManagerWindowAsync(mgrHwnd, ct);
+
+                    (tags, sawNewTagBtn, sidebarDebugLines) = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
+                    hasCountedTags = tags.Any(t => t.Count >= 0);
+                    if (hasCountedTags || sawNewTagBtn)
+                    {
+                        LogScan($"✓ 窗口消息点击后已展开「标签」，识别到 {tags.Count} 个标签。");
+                        break;
+                    }
                 }
             }
 
@@ -763,8 +809,17 @@ namespace Client.Services
             return list;
         }
 
-        private async Task<(nint Hwnd, int Pid)> FindOrOpenContactManagerAsync(bool resetExisting, CancellationToken ct)
+        private async Task<(nint Hwnd, int Pid)> FindOrOpenContactManagerAsync(
+            bool resetExisting,
+            IProgress<string>? scanLog,
+            CancellationToken ct)
         {
+            void LogStep(string msg)
+            {
+                AppServices.Logs.Info("TAG", msg);
+                scanLog?.Report(msg);
+            }
+
             var (existingHwnd, existingPid) = FindContactManagerWindow();
             if (existingHwnd != nint.Zero)
             {
@@ -796,10 +851,11 @@ namespace Client.Services
 
             var mainWin = ensured.Window;
 
-            // Detect Windows UIPI elevation mismatch (WeChat running as Admin while Client is standard user)
-            if (Win32WindowHelper.IsTargetProcessElevatedMismatch(mainWin.Hwnd))
+            // Detect Windows UIPI elevation mismatch (including ERROR_ACCESS_DENIED on OpenProcessToken!)
+            string? privilegeErr = Win32WindowHelper.GetPrivilegeMismatchDetail(mainWin.Hwnd);
+            if (privilegeErr is not null)
             {
-                throw new InvalidOperationException("检测到微信正以管理员权限运行，Windows 安全机制会拦截自动点击。请以管理员身份运行本工作台，或以普通权限重启微信后再试。");
+                throw new InvalidOperationException(privilegeErr);
             }
 
             NormalizeWindowSize(mainWin.Hwnd, StandardMainLogicalWidth, StandardMainLogicalHeight, offsetX: 36, offsetY: 32);
@@ -845,12 +901,18 @@ namespace Client.Services
                         }
                     }
 
-                    AppServices.Logs.Info("TAG", $"微信主窗口可见区域 {mainRect.Width}×{mainRect.Height} (DPI={dpi}, 识别到左侧栏图标 {railIcons.Count} 个)");
+                    LogStep($"微信主窗口可见区域 ({mainRect.Left},{mainRect.Top}) {mainRect.Width}×{mainRect.Height} | DPI={dpi} (scale={scale:0.00}) | 视觉识别左侧栏图标 {railIcons.Count} 个");
+                    for (int ri = 0; ri < Math.Min(railIcons.Count, 5); ri++)
+                    {
+                        var ic = railIcons[ri];
+                        LogStep($"  · 左侧栏图标[{ri}] 相对中心=({ic.CenterX},{ic.CenterY}) 尺寸={ic.Width}×{ic.Height}");
+                    }
 
                     foreach (var cand in contactCandidates)
                     {
                         ct.ThrowIfCancellationRequested();
-                        Win32WindowHelper.LeftClickAt(cand.X, cand.Y, mainWin.Hwnd);
+                        var diag = Win32WindowHelper.LeftClickAt(cand.X, cand.Y, mainWin.Hwnd, $"左侧通讯录[{cand.Source}]");
+                        LogStep($"🖱 点击左侧通讯录 [{cand.Source}] -> {diag.Summary}");
                         await Task.Delay(420, ct);
 
                         using var verifyBmp = CaptureVisibleWindow(mainWin.Hwnd, out mainRect);
@@ -858,25 +920,34 @@ namespace Client.Services
                         if (IsOnContactsTab(verifyOcr, verifyBmp.PixelWidth, verifyBmp.PixelHeight))
                         {
                             onContacts = true;
-                            AppServices.Logs.Info("TAG", $"已通过 {cand.Source} ({cand.X},{cand.Y}) 成功切换到微信「通讯录」页");
+                            LogStep($"✓ 已切换到微信「通讯录」页 ({cand.Source})");
                             break;
                         }
 
                         // If visually detected icon didn't switch on first hardware click, try direct window click once
                         if (cand.Source == "visual-rail-2")
                         {
-                            Win32WindowHelper.PostWindowLeftClickAt(mainWin.Hwnd, cand.X, cand.Y);
+                            bool okPost = Win32WindowHelper.PostWindowLeftClickAt(mainWin.Hwnd, cand.X, cand.Y, out int postErr);
+                            LogStep($"🖱 窗口消息兜底点击左侧通讯录 ({cand.X},{cand.Y}) -> ok={okPost}, err={postErr}");
+                            if (postErr == 5)
+                            {
+                                throw new InvalidOperationException("Windows 权限隔离 (UIPI/ACCESS_DENIED) 拦截了自动点击：请以「管理员身份」运行本工作台，或关闭微信后以普通权限重启微信。");
+                            }
                             await Task.Delay(380, ct);
                             using var retryBmp = CaptureVisibleWindow(mainWin.Hwnd, out mainRect);
                             var retryOcr = await AppServices.Ocr.RapidEngine.RecognizeAsync(retryBmp, ct);
                             if (IsOnContactsTab(retryOcr, retryBmp.PixelWidth, retryBmp.PixelHeight))
                             {
                                 onContacts = true;
-                                AppServices.Logs.Info("TAG", $"已通过窗口消息兜底 {cand.Source} ({cand.X},{cand.Y}) 切换到「通讯录」页");
+                                LogStep($"✓ 已通过窗口消息切换到「通讯录」页");
                                 break;
                             }
                         }
                     }
+                }
+                else
+                {
+                    LogStep($"微信主窗口 ({mainRect.Left},{mainRect.Top}) {mainRect.Width}×{mainRect.Height} (DPI={dpi}) 已处于「通讯录」页");
                 }
             }
 
@@ -897,6 +968,7 @@ namespace Client.Services
                 // If "通讯录管理" wasn't found yet, scroll the Contacts list strongly to the very top first
                 if (btnPos is null)
                 {
+                    LogStep($"第 {attempt + 1} 轮未在顶部看到「通讯录管理」，向上滚动联系人列表归顶...");
                     for (int s = 0; s < 5; s++)
                     {
                         Win32WindowHelper.ScrollWheelAt(listScrollX, listScrollY, +18);
@@ -911,31 +983,44 @@ namespace Client.Services
 
                 int clickX = btnPos?.X ?? (mainRect.Left + (int)Math.Round(178 * scale));
                 int clickY = btnPos?.Y ?? (mainRect.Top + (int)Math.Round((attempt == 0 ? 86 : 102) * scale));
-                AppServices.Logs.Info("TAG", $"第 {attempt + 1} 次点击「通讯录管理」({clickX},{clickY})，定位方式={btnPos?.Method ?? "fallback"}");
-
-                // Attempt 1: guaranteed window activation + hardware SendInput click (60ms press hold)
-                Win32WindowHelper.LeftClickAt(clickX, clickY, mainWin.Hwnd);
+                var clickDiag = Win32WindowHelper.LeftClickAt(clickX, clickY, mainWin.Hwnd, $"通讯录管理#{attempt + 1}[{btnPos?.Method ?? "fallback"}]");
+                LogStep($"🖱 第 {attempt + 1} 次点击「通讯录管理」[{btnPos?.Method ?? "fallback"}] -> {clickDiag.Summary}");
 
                 for (int i = 0; i < 8; i++)
                 {
                     await Task.Delay(220, ct);
                     var found = FindContactManagerWindow();
-                    if (found.Hwnd != nint.Zero) return found;
+                    if (found.Hwnd != nint.Zero)
+                    {
+                        LogStep($"✓ 已检测到「通讯录管理」窗口 (HWND=0x{found.Hwnd:X})");
+                        return found;
+                    }
                 }
 
-                // If button hovered but Qt didn't open the window on the first click (e.g. first click only focused
-                // the inactive Qt window or SendInput was ignored), send a direct WM_LBUTTONDOWN/UP message at the same spot!
-                AppServices.Logs.Info("TAG", $"第 {attempt + 1} 次硬件点击后未检测到窗口，追加直接窗口消息点击 ({clickX},{clickY})...");
-                Win32WindowHelper.PostWindowLeftClickAt(mainWin.Hwnd, clickX, clickY);
+                // If button hovered but Qt didn't open the window on the first click, send direct WM_LBUTTONDOWN/UP
+                // AND inspect lastError == 5 (ERROR_ACCESS_DENIED) to catch UIPI blocks with 100% certainty!
+                bool okMsg = Win32WindowHelper.PostWindowLeftClickAt(mainWin.Hwnd, clickX, clickY, out int postErr);
+                LogStep($"🖱 追加窗口消息点击「通讯录管理」({clickX},{clickY}) -> ok={okMsg}, err={postErr}");
+                if (postErr == 5)
+                {
+                    throw new InvalidOperationException("Windows 权限隔离 (UIPI/ACCESS_DENIED) 拦截了自动点击：请右键「以管理员身份运行」本工作台，或彻底退出微信后以普通权限重开微信。");
+                }
 
                 for (int i = 0; i < 6; i++)
                 {
                     await Task.Delay(220, ct);
                     var found = FindContactManagerWindow();
-                    if (found.Hwnd != nint.Zero) return found;
+                    if (found.Hwnd != nint.Zero)
+                    {
+                        LogStep($"✓ 窗口消息点击后检测到「通讯录管理」窗口 (HWND=0x{found.Hwnd:X})");
+                        return found;
+                    }
                 }
             }
-            return (nint.Zero, 0);
+            bool fgNow = Win32WindowHelper.GetForegroundWindow() == mainWin.Hwnd;
+            throw new InvalidOperationException(
+                $"已尝试点击微信「通讯录管理」3 次但窗口未弹出（微信前景激活={(fgNow ? "是" : "否")}）。\n" +
+                "若看到鼠标已悬停变色但无法点开，常见原因：① 微信以管理员权限运行（请右键以管理员身份运行本工作台，或普通权限重启微信）；② 杀毒/安全软件拦截了模拟点击（请将工作台加入白名单）。");
         }
 
         private static bool IsOnContactsTab(OcrRecognitionResult ocr, int bmpW, int bmpH)
@@ -1087,26 +1172,66 @@ namespace Client.Services
             _ = Win32WindowHelper.NormalizeWindowOnCurrentMonitor(hWnd, logicalW, logicalH, offsetX, offsetY);
         }
 
-        private async Task<List<WeChatTagItem>> ScanTagsFromManagerWindowAsync(nint mgrHwnd, CancellationToken ct)
+        private static bool IsTagSectionHeader(string rawText)
+        {
+            if (string.IsNullOrWhiteSpace(rawText)) return false;
+            string s = rawText.Trim();
+            if (s.Contains("新建标签", StringComparison.Ordinal) ||
+                s.Contains("无标签", StringComparison.Ordinal) ||
+                s.Contains("添加标签", StringComparison.Ordinal))
+            {
+                return false;
+            }
+            // Strip spaces, chevrons, triangles, arrows & punctuation that OCR often appends next to "标签"
+            string clean = s
+                .Replace(" ", "")
+                .Trim('>', '<', 'v', 'V', '^', '∨', '∧', '›', '‹', '»', '▾', '▸', '▼', '▶', '·', '.', '-', '_', ':', '：');
+            return clean is "标签" or "标鉴" or "标签管理" or "标" ||
+                   (clean.StartsWith("标签", StringComparison.Ordinal) && clean.Length <= 4);
+        }
+
+        private static OcrLineResult? FindTagHeaderLine(OcrRecognitionResult ocr, int bmpW, int bmpH)
+        {
+            double sidebarMaxX = bmpW * 0.28;
+            return ocr.Lines
+                .Where(l => l.Bounds.X < sidebarMaxX && l.Bounds.Y > bmpH * 0.05 && l.Bounds.Y < bmpH * 0.85)
+                .OrderBy(l => l.Bounds.Y)
+                .FirstOrDefault(l => IsTagSectionHeader(l.Text));
+        }
+
+        private async Task<(List<WeChatTagItem> Tags, bool SawNewTagBtn, List<string> SidebarLines)> ScanTagsFromManagerWindowDetailedAsync(nint mgrHwnd, CancellationToken ct)
         {
             using var bmp = CaptureWindowSafe(mgrHwnd);
             var ocr = await AppServices.Ocr.RapidEngine.RecognizeAsync(bmp, ct);
 
-            int sidebarMaxX = (int)(bmp.PixelWidth * 0.225);
+            int sidebarMaxX = (int)(bmp.PixelWidth * 0.24);
             var leftLines = ocr.Lines.Where(l => l.Bounds.X < sidebarMaxX).OrderBy(l => l.Bounds.Y).ToList();
-            var tagHeader = leftLines.FirstOrDefault(l => l.Text.Trim() is "标签" or "标鉴");
+            var sidebarDebug = leftLines.Select(l => l.Text.Trim()).Where(t => !string.IsNullOrEmpty(t)).ToList();
+
+            var tagHeader = FindTagHeaderLine(ocr, bmp.PixelWidth, bmp.PixelHeight);
             double minTagY = tagHeader is not null ? tagHeader.Bounds.Y + tagHeader.Bounds.Height : bmp.PixelHeight * 0.26;
 
             var tags = new List<WeChatTagItem>();
             var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            bool sawNewTagBtn = false;
 
             foreach (var line in leftLines)
             {
                 if (line.Bounds.Y < minTagY) continue;
                 string txt = line.Text.Trim();
                 if (string.IsNullOrEmpty(txt)) continue;
-                if (txt.Contains("新建标签", StringComparison.Ordinal) || txt.Contains("最近群聊", StringComparison.Ordinal)) break;
-                if (txt is "朋友权限" or "筛选" or "通讯录管理") continue;
+                if (txt.Contains("新建标签", StringComparison.Ordinal))
+                {
+                    sawNewTagBtn = true;
+                    break;
+                }
+                if (txt.Contains("最近群聊", StringComparison.Ordinal)) break;
+                if (txt is "朋友权限" or "筛选" or "通讯录管理" or "仅聊天" or "不看他" or "不让他看" ||
+                    txt.StartsWith("聊天、朋友圈", StringComparison.Ordinal) ||
+                    IsTagSectionHeader(txt))
+                {
+                    continue;
+                }
 
                 var m = TagWithCountRegex().Match(txt);
                 string tagName;
@@ -1136,7 +1261,7 @@ namespace Client.Services
                 });
             }
 
-            return tags;
+            return (tags, sawNewTagBtn, sidebarDebug);
         }
 
         private async Task<(int X, int Y)?> FindTagClickPositionAsync(nint mgrHwnd, Win32WindowHelper.RECT mgrRect, WeChatTagItem tag, CancellationToken ct)

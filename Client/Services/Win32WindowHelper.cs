@@ -296,31 +296,63 @@ namespace Client.Services
             return GetWindowRect(hWnd, out rect);
         }
 
+        private const int ERROR_ACCESS_DENIED = 5;
+
         internal static bool IsTargetProcessElevatedMismatch(nint targetHwnd)
+        {
+            return GetPrivilegeMismatchDetail(targetHwnd) is not null;
+        }
+
+        internal static string? GetPrivilegeMismatchDetail(nint targetHwnd)
         {
             try
             {
-                if (!IsWindow(targetHwnd)) return false;
+                if (!IsWindow(targetHwnd)) return null;
                 _ = GetWindowThreadProcessId(targetHwnd, out uint targetPid);
-                if (targetPid == 0) return false;
+                if (targetPid == 0) return null;
 
-                bool selfElevated = IsProcessElevated((uint)Environment.ProcessId);
-                if (selfElevated) return false;
-                return IsProcessElevated(targetPid);
+                bool selfElevated = TryCheckProcessElevated((uint)Environment.ProcessId, out bool selfDenied);
+                if (selfElevated) return null;
+
+                bool targetElevated = TryCheckProcessElevated(targetPid, out bool targetDenied);
+                if (targetElevated || targetDenied)
+                {
+                    return $"检测到微信 (PID {targetPid}) 正以「管理员权限」运行，而当前工作台为普通权限（{(targetDenied ? "OpenProcessToken=ACCESS_DENIED" : "TokenIsElevated=1")}）。" +
+                           "Windows 安全机制 (UIPI) 会允许鼠标移动到微信按钮上触发悬停高亮，但会静默拦截所有模拟点击。\n" +
+                           "解决方法：① 彻底退出微信后重新普通打开微信；或 ② 右键「以管理员身份运行」本工作台后再试。";
+                }
+                return null;
             }
             catch
             {
-                return false;
+                return null;
             }
         }
 
-        private static bool IsProcessElevated(uint pid)
+        private static bool TryCheckProcessElevated(uint pid, out bool accessDenied)
         {
+            accessDenied = false;
             nint proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-            if (proc == nint.Zero) return false;
+            if (proc == nint.Zero)
+            {
+                if (Marshal.GetLastWin32Error() == ERROR_ACCESS_DENIED)
+                {
+                    accessDenied = true;
+                }
+                return false;
+            }
             try
             {
-                if (!OpenProcessToken(proc, TOKEN_QUERY, out nint token)) return false;
+                if (!OpenProcessToken(proc, TOKEN_QUERY, out nint token))
+                {
+                    // A Medium-integrity process calling OpenProcessToken on a High-integrity (Admin) process
+                    // receives ERROR_ACCESS_DENIED (5). That itself confirms the target process is elevated!
+                    if (Marshal.GetLastWin32Error() == ERROR_ACCESS_DENIED)
+                    {
+                        accessDenied = true;
+                    }
+                    return false;
+                }
                 try
                 {
                     if (GetTokenInformation(token, TokenElevation, out var elev, Marshal.SizeOf<TOKEN_ELEVATION>(), out _))
@@ -488,13 +520,13 @@ namespace Client.Services
         [DllImport("user32.dll")]
         internal static extern bool SetCursorPos(int x, int y);
 
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int vKey);
 
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         private static extern bool PostMessage(nint hWnd, uint msg, nuint wParam, nint lParam);
 
         internal static void CloseWindowGracefully(nint hWnd)
@@ -581,7 +613,7 @@ namespace Client.Services
             return ok;
         }
 
-        private static void MoveCursorAbsolute(int screenX, int screenY)
+        private static bool TryComputeVirtualDesktopNormalized(int screenX, int screenY, out int normX, out int normY)
         {
             int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
             int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
@@ -589,12 +621,23 @@ namespace Client.Services
             int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
             if (vw > 1 && vh > 1)
             {
-                int normX = (int)Math.Round((screenX - vx) * 65535.0 / (vw - 1));
-                int normY = (int)Math.Round((screenY - vy) * 65535.0 / (vh - 1));
+                normX = Math.Clamp((int)Math.Round((screenX - vx) * 65535.0 / (vw - 1)), 0, 65535);
+                normY = Math.Clamp((int)Math.Round((screenY - vy) * 65535.0 / (vh - 1)), 0, 65535);
+                return true;
+            }
+            normX = 0;
+            normY = 0;
+            return false;
+        }
+
+        private static void MoveCursorAbsolute(int screenX, int screenY)
+        {
+            if (TryComputeVirtualDesktopNormalized(screenX, screenY, out int normX, out int normY))
+            {
                 var move = new INPUT[1];
                 move[0].type = INPUT_MOUSE;
-                move[0].u.mi.dx = Math.Clamp(normX, 0, 65535);
-                move[0].u.mi.dy = Math.Clamp(normY, 0, 65535);
+                move[0].u.mi.dx = normX;
+                move[0].u.mi.dy = normY;
                 move[0].u.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
                 _ = SendInput(1, move, Marshal.SizeOf<INPUT>());
             }
@@ -608,43 +651,86 @@ namespace Client.Services
             MoveCursorAbsolute(screenX, screenY);
             Thread.Sleep(65);
 
+            bool hasNorm = TryComputeVirtualDesktopNormalized(screenX, screenY, out int normX, out int normY);
+            uint posFlags = hasNorm ? (MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK) : 0;
+
             var down = new INPUT[1];
             down[0].type = INPUT_MOUSE;
-            down[0].u.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+            down[0].u.mi.dx = normX;
+            down[0].u.mi.dy = normY;
+            down[0].u.mi.dwFlags = posFlags | MOUSEEVENTF_LEFTDOWN;
             uint sentDown = SendInput(1, down, Marshal.SizeOf<INPUT>());
+            int errDown = sentDown == 0 ? Marshal.GetLastWin32Error() : 0;
 
-            Thread.Sleep(Math.Max(45, holdMs));
+            Thread.Sleep(Math.Max(50, holdMs));
 
             var up = new INPUT[1];
             up[0].type = INPUT_MOUSE;
-            up[0].u.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+            up[0].u.mi.dx = normX;
+            up[0].u.mi.dy = normY;
+            up[0].u.mi.dwFlags = posFlags | MOUSEEVENTF_LEFTUP;
             uint sentUp = SendInput(1, up, Marshal.SizeOf<INPUT>());
+            int errUp = sentUp == 0 ? Marshal.GetLastWin32Error() : 0;
 
-            return sentDown == 1 && sentUp == 1;
+            if (sentDown != 1 || sentUp != 1)
+            {
+                AppServices.Logs.Warn("WIN32", $"SendInput 点击异常: sentDown={sentDown}(err={errDown}), sentUp={sentUp}(err={errUp}) at ({screenX},{screenY})");
+                return false;
+            }
+            return true;
         }
 
-        internal static void PostWindowLeftClickAt(nint fallbackHwnd, int screenX, int screenY)
+        internal static bool PostWindowLeftClickAt(nint fallbackHwnd, int screenX, int screenY, out int lastError)
         {
+            lastError = 0;
             nint target = WindowFromPoint(new POINT { X = screenX, Y = screenY });
             if (target == nint.Zero || !IsWindow(target)) target = fallbackHwnd;
-            if (target == nint.Zero || !IsWindow(target)) return;
+            if (target == nint.Zero || !IsWindow(target)) return false;
 
             var pt = new POINT { X = screenX, Y = screenY };
-            if (!ScreenToClient(target, ref pt)) return;
+            if (!ScreenToClient(target, ref pt)) return false;
 
             nint lParam = new(((pt.Y & 0xFFFF) << 16) | (pt.X & 0xFFFF));
-            _ = PostMessage(target, WM_MOUSEMOVE, 0, lParam);
+            bool okMove = PostMessage(target, WM_MOUSEMOVE, 0, lParam);
+            if (!okMove) lastError = Marshal.GetLastWin32Error();
             Thread.Sleep(35);
-            _ = PostMessage(target, WM_LBUTTONDOWN, MK_LBUTTON, lParam);
+            bool okDown = PostMessage(target, WM_LBUTTONDOWN, MK_LBUTTON, lParam);
+            if (!okDown) lastError = Marshal.GetLastWin32Error();
             Thread.Sleep(55);
-            _ = PostMessage(target, WM_LBUTTONUP, 0, lParam);
+            bool okUp = PostMessage(target, WM_LBUTTONUP, 0, lParam);
+            if (!okUp) lastError = Marshal.GetLastWin32Error();
+
+            if (!okDown || !okUp)
+            {
+                AppServices.Logs.Warn("WIN32", $"PostMessage 点击失败: okDown={okDown}, okUp={okUp}, err={lastError} (err=5 代表权限不足/UIPI拦截)");
+                return false;
+            }
+            return true;
         }
 
-        internal static void LeftClickAt(int screenX, int screenY, nint expectedTargetHwnd = 0)
+        internal sealed record ClickDiagnostic(
+            int RequestedX,
+            int RequestedY,
+            int ActualCursorX,
+            int ActualCursorY,
+            bool ForegroundMatched,
+            bool HitTargetProcess,
+            string HitWindowClass,
+            uint HitPid,
+            uint SendDown,
+            uint SendUp,
+            int LastError)
         {
+            public string Summary =>
+                $"坐标=({RequestedX},{RequestedY}) 实落=({ActualCursorX},{ActualCursorY}) | 命中={HitWindowClass}(PID {HitPid}, 匹配={(HitTargetProcess ? "是" : "否")}) | 前景={(ForegroundMatched ? "是" : "否")} | SendInput={SendDown}/{SendUp}(err={LastError})";
+        }
+
+        internal static ClickDiagnostic LeftClickAt(int screenX, int screenY, nint expectedTargetHwnd = 0, string? debugLabel = null)
+        {
+            bool active = true;
             if (expectedTargetHwnd != nint.Zero && IsWindow(expectedTargetHwnd))
             {
-                bool active = EnsureWindowTrulyActive(expectedTargetHwnd);
+                active = EnsureWindowTrulyActive(expectedTargetHwnd);
                 if (!IsPointOwnedByWindowProcess(screenX, screenY, expectedTargetHwnd))
                 {
                     nint blocker = WindowFromPoint(new POINT { X = screenX, Y = screenY });
@@ -652,19 +738,75 @@ namespace Client.Services
                     AppServices.Logs.Warn("WIN32", $"点击坐标 ({screenX},{screenY}) 被窗口 {blockerCls} 遮挡，重新置顶目标窗口...");
                     _ = ForceBringToForeground(expectedTargetHwnd);
                     Thread.Sleep(100);
-                }
-                else if (!active)
-                {
-                    AppServices.Logs.Warn("WIN32", $"目标窗口未能获取系统前台焦点，将继续尝试硬件点击与窗口消息兜底 ({screenX},{screenY})");
+                    active = GetForegroundWindow() == expectedTargetHwnd;
                 }
             }
 
-            bool hardwareOk = SendHardwareLeftClick(screenX, screenY, holdMs: 60);
-            if (!hardwareOk && expectedTargetHwnd != nint.Zero)
+            MoveCursorAbsolute(screenX, screenY);
+            _ = GetCursorPos(out var actualPt);
+
+            // Inspect which window & process sits directly under the click point BEFORE flashing overlay
+            nint hitHwnd = WindowFromPoint(new POINT { X = screenX, Y = screenY });
+            uint hitPid = 0;
+            string hitCls = "none";
+            if (hitHwnd != nint.Zero)
             {
-                AppServices.Logs.Warn("WIN32", $"SendInput 返回 0（可能被系统拦截），改用 WM_LBUTTONDOWN/UP 兜底点击 ({screenX},{screenY})");
-                PostWindowLeftClickAt(expectedTargetHwnd, screenX, screenY);
+                _ = GetWindowThreadProcessId(hitHwnd, out hitPid);
+                hitCls = GetWindowClassName(GetAncestor(hitHwnd, GA_ROOT));
             }
+            bool hitTarget = true;
+            if (expectedTargetHwnd != nint.Zero && IsWindow(expectedTargetHwnd))
+            {
+                _ = GetWindowThreadProcessId(expectedTargetHwnd, out uint expPid);
+                hitTarget = expPid != 0 && hitPid == expPid;
+            }
+
+            // Show click-through visual target reticle right at the click point!
+            ClickVisualOverlay.FlashAt(screenX, screenY, isWarning: !hitTarget || !active);
+
+            Thread.Sleep(65);
+
+            bool hasNorm = TryComputeVirtualDesktopNormalized(screenX, screenY, out int normX, out int normY);
+            uint posFlags = hasNorm ? (MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK) : 0;
+
+            var down = new INPUT[1];
+            down[0].type = INPUT_MOUSE;
+            down[0].u.mi.dx = normX;
+            down[0].u.mi.dy = normY;
+            down[0].u.mi.dwFlags = posFlags | MOUSEEVENTF_LEFTDOWN;
+            uint sentDown = SendInput(1, down, Marshal.SizeOf<INPUT>());
+            int lastErr = sentDown == 0 ? Marshal.GetLastWin32Error() : 0;
+
+            Thread.Sleep(65);
+
+            var up = new INPUT[1];
+            up[0].type = INPUT_MOUSE;
+            up[0].u.mi.dx = normX;
+            up[0].u.mi.dy = normY;
+            up[0].u.mi.dwFlags = posFlags | MOUSEEVENTF_LEFTUP;
+            uint sentUp = SendInput(1, up, Marshal.SizeOf<INPUT>());
+            if (sentUp == 0 && lastErr == 0) lastErr = Marshal.GetLastWin32Error();
+
+            var diag = new ClickDiagnostic(
+                screenX, screenY, actualPt.X, actualPt.Y,
+                active, hitTarget, hitCls, hitPid,
+                sentDown, sentUp, lastErr);
+
+            string prefix = string.IsNullOrWhiteSpace(debugLabel) ? "点击" : debugLabel;
+            if (sentDown == 1 && sentUp == 1 && hitTarget)
+            {
+                AppServices.Logs.Info("CLICK", $"{prefix} | {diag.Summary}");
+            }
+            else
+            {
+                AppServices.Logs.Warn("CLICK", $"{prefix} [异常] | {diag.Summary}");
+                if ((sentDown != 1 || sentUp != 1) && expectedTargetHwnd != nint.Zero)
+                {
+                    _ = PostWindowLeftClickAt(expectedTargetHwnd, screenX, screenY, out _);
+                }
+            }
+
+            return diag;
         }
 
         internal static void ScrollWheelAt(int screenX, int screenY, int notches)

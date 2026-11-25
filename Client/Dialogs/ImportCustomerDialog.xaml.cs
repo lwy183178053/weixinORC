@@ -680,7 +680,8 @@ namespace Client.Dialogs
             if (_logBuilder.Length > 0) _logBuilder.AppendLine();
             _logBuilder.Append($"[{DateTime.Now:HH:mm:ss}] {line}");
             LiveLogText.Text = _logBuilder.ToString();
-            LogScrollViewer.ChangeView(null, LogScrollViewer.ScrollableHeight + 100, null);
+            LogScrollViewer.UpdateLayout();
+            LogScrollViewer.ChangeView(null, LogScrollViewer.ScrollableHeight, null, disableAnimation: true);
         }
     }
 }

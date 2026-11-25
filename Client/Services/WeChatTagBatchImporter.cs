@@ -89,7 +89,7 @@ namespace Client.Services
             }
 
             NormalizeWindowSize(mgrHwnd, StandardMgrLogicalWidth, StandardMgrLogicalHeight, offsetX: 60, offsetY: 50);
-            await Task.Delay(380, ct);
+            await Task.Delay(620, ct);
 
             if (!Win32WindowHelper.GetVisibleWindowRect(mgrHwnd, out var rect))
             {
@@ -107,16 +107,16 @@ namespace Client.Services
                 int leftX = rect.Left + (int)(rect.Width * 0.11);
                 int leftY = rect.Top + (int)(rect.Height * 0.55);
                 Win32WindowHelper.ScrollWheelAt(leftX, leftY, -5);
-                await Task.Delay(350, ct);
+                await Task.Delay(380, ct);
             }
 
-            var (tags, sawNewTagBtn, sidebarDebugLines) = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
-            bool hasCountedTags = tags.Any(t => t.Count >= 0);
+            var scan = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
+            LogScan($"左侧栏扫描（{scan.SidebarWidth}×{scan.WindowHeight}，{scan.SidebarLines.Count} 行）：[{string.Join(" | ", scan.SidebarLines.Take(16))}]");
 
-            // If no real tags found (or "标签" section appears collapsed), locate "标签" via OCR and click its exact text center!
-            if (!scrollLeftSidebarDown && (!hasCountedTags && !sawNewTagBtn))
+            // Only click "标签" to expand when the section is genuinely collapsed (neither tags nor "无标签"/"新建标签" appeared!)
+            if (!scrollLeftSidebarDown && scan.Tags.Count == 0 && !scan.IsTagSectionExpanded)
             {
-                LogScan($"首次扫描未见已展开的标签列表（左侧栏识别到 {sidebarDebugLines.Count} 行），尝试 OCR 定位「标签」文字中心并点击展开...");
+                LogScan("检测到左侧「标签」尚未展开，尝试点击「标签」文字中心展开...");
 
                 for (int expandTry = 0; expandTry < 2; expandTry++)
                 {
@@ -124,48 +124,47 @@ namespace Client.Services
                     _ = Win32WindowHelper.EnsureWindowTrulyActive(mgrHwnd);
                     await Task.Delay(120, ct);
 
-                    using var checkBmp = CaptureVisibleWindow(mgrHwnd, out rect);
-                    var checkOcr = await AppServices.Ocr.RapidEngine.RecognizeAsync(checkBmp, ct);
-                    var labelLine = FindTagHeaderLine(checkOcr, checkBmp.PixelWidth, checkBmp.PixelHeight);
-
-                    if (labelLine is null)
+                    if (scan.TagHeaderScreenCenter is null)
                     {
-                        LogScan($"第 {expandTry + 1} 次未在左侧栏识别到「标签」标题（左侧栏文本：{string.Join(" / ", sidebarDebugLines.Take(8))}）");
+                        LogScan($"第 {expandTry + 1} 次未在左侧栏识别到「标签」标题行，无法自动点击展开。");
                         break;
                     }
 
-                    double rx = rect.Width / (double)Math.Max(1, checkBmp.PixelWidth);
-                    double ry = rect.Height / (double)Math.Max(1, checkBmp.PixelHeight);
-                    int clickX = rect.Left + (int)Math.Round((labelLine.Bounds.X + labelLine.Bounds.Width / 2.0) * rx);
-                    int clickY = rect.Top + (int)Math.Round((labelLine.Bounds.Y + labelLine.Bounds.Height / 2.0) * ry);
+                    int clickX = scan.TagHeaderScreenCenter.Value.X;
+                    int clickY = scan.TagHeaderScreenCenter.Value.Y;
+                    int prevLineCount = scan.SidebarLines.Count;
 
                     var diag = Win32WindowHelper.LeftClickAt(clickX, clickY, mgrHwnd, $"展开「标签」#{expandTry + 1}");
-                    LogScan($"🖱 点击「{labelLine.Text.Trim()}」文字中心 -> {diag.Summary}");
-                    await Task.Delay(480, ct);
+                    LogScan($"🖱 点击「{scan.TagHeaderText}」文字中心 -> {diag.Summary}");
+                    await Task.Delay(680, ct);
 
-                    (tags, sawNewTagBtn, sidebarDebugLines) = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
-                    hasCountedTags = tags.Any(t => t.Count >= 0);
-                    if (hasCountedTags || sawNewTagBtn)
+                    scan = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
+                    LogScan($"展开后重扫（{scan.SidebarLines.Count} 行）：[{string.Join(" | ", scan.SidebarLines.Take(16))}]");
+                    if (scan.Tags.Count > 0 || scan.IsTagSectionExpanded)
                     {
-                        LogScan($"✓ 已成功展开「标签」，识别到 {tags.Count} 个标签。");
+                        LogScan($"✓ 已成功展开「标签」，识别到 {scan.Tags.Count} 个标签。");
                         break;
                     }
 
-                    // Fallback: direct window message click at the exact OCR text center
-                    bool okPost = Win32WindowHelper.PostWindowLeftClickAt(mgrHwnd, clickX, clickY, out int postErr);
-                    LogScan($"🖱 追加窗口消息点击「标签」中心 ({clickX},{clickY}) -> ok={okPost}, err={postErr}");
-                    await Task.Delay(450, ct);
-
-                    (tags, sawNewTagBtn, sidebarDebugLines) = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
-                    hasCountedTags = tags.Any(t => t.Count >= 0);
-                    if (hasCountedTags || sawNewTagBtn)
+                    // Only send PostMessage fallback if the sidebar did not change at all (so we never accidentally collapse an expanding list!)
+                    if (scan.SidebarLines.Count == prevLineCount)
                     {
-                        LogScan($"✓ 窗口消息点击后已展开「标签」，识别到 {tags.Count} 个标签。");
-                        break;
+                        bool okPost = Win32WindowHelper.PostWindowLeftClickAt(mgrHwnd, clickX, clickY, out int postErr);
+                        LogScan($"🖱 追加窗口消息点击「标签」中心 ({clickX},{clickY}) -> ok={okPost}, err={postErr}");
+                        await Task.Delay(650, ct);
+
+                        scan = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
+                        LogScan($"兜底重扫（{scan.SidebarLines.Count} 行）：[{string.Join(" | ", scan.SidebarLines.Take(16))}]");
+                        if (scan.Tags.Count > 0 || scan.IsTagSectionExpanded)
+                        {
+                            LogScan($"✓ 窗口消息点击后已展开「标签」，识别到 {scan.Tags.Count} 个标签。");
+                            break;
+                        }
                     }
                 }
             }
 
+            var tags = scan.Tags;
             string msg = tags.Count > 0
                 ? $"已归位打开「通讯录管理」（{StandardMgrLogicalWidth}×{StandardMgrLogicalHeight}），扫描到 {tags.Count} 个标签。"
                 : "已定位「通讯录管理」窗口，但左侧未识别到带人数的标签（请确认左侧已展开「标签」或手动补充标签名）。";
@@ -1199,33 +1198,111 @@ namespace Client.Services
                 .FirstOrDefault(l => IsTagSectionHeader(l.Text));
         }
 
-        private async Task<(List<WeChatTagItem> Tags, bool SawNewTagBtn, List<string> SidebarLines)> ScanTagsFromManagerWindowDetailedAsync(nint mgrHwnd, CancellationToken ct)
+        private sealed record SidebarScanResult(
+            List<WeChatTagItem> Tags,
+            bool IsTagSectionExpanded,
+            List<string> SidebarLines,
+            (int X, int Y)? TagHeaderScreenCenter,
+            string TagHeaderText,
+            int SidebarWidth,
+            int WindowHeight);
+
+        private sealed record MergedSidebarRow(string Text, double Left, double Top, double Right, double Bottom)
         {
-            using var bmp = CaptureWindowSafe(mgrHwnd);
-            var ocr = await AppServices.Ocr.RapidEngine.RecognizeAsync(bmp, ct);
+            public double CenterX => (Left + Right) / 2.0;
+            public double CenterY => (Top + Bottom) / 2.0;
+        }
 
-            int sidebarMaxX = (int)(bmp.PixelWidth * 0.24);
-            var leftLines = ocr.Lines.Where(l => l.Bounds.X < sidebarMaxX).OrderBy(l => l.Bounds.Y).ToList();
-            var sidebarDebug = leftLines.Select(l => l.Text.Trim()).Where(t => !string.IsNullOrEmpty(t)).ToList();
+        private async Task<SidebarScanResult> ScanTagsFromManagerWindowDetailedAsync(nint mgrHwnd, CancellationToken ct)
+        {
+            // Hide any active click reticle and ensure Contact Manager is visible on top before capturing
+            ClickVisualOverlay.HideImmediately();
+            _ = Win32WindowHelper.ForceBringToForeground(mgrHwnd);
+            await Task.Delay(55, ct);
 
-            var tagHeader = FindTagHeaderLine(ocr, bmp.PixelWidth, bmp.PixelHeight);
-            double minTagY = tagHeader is not null ? tagHeader.Bounds.Y + tagHeader.Bounds.Height : bmp.PixelHeight * 0.26;
+            if (!Win32WindowHelper.GetVisibleWindowRect(mgrHwnd, out var rect) || rect.Width <= 0 || rect.Height <= 0)
+            {
+                return new SidebarScanResult([], false, [], null, string.Empty, 0, 0);
+            }
+
+            uint dpi = Win32WindowHelper.GetDpiForWindow(mgrHwnd);
+            double scale = dpi > 0 ? dpi / 96.0 : 1.0;
+
+            // Crop ONLY the left sidebar (26% of window width) so RapidOCR focuses 100% on crisp small sidebar text
+            // without being diluted by 60+ dense contact table cells on the right!
+            int sidebarW = Math.Clamp((int)Math.Round(rect.Width * 0.26), 160, rect.Width);
+            using var sidebarBmp = Win32WindowHelper.CaptureScreenRectToSoftwareBitmap(rect.Left, rect.Top, sidebarW, rect.Height);
+            var ocr = await AppServices.Ocr.RapidEngine.RecognizeAsync(sidebarBmp, ct);
+
+            // Merge horizontally-split tokens on the same visual row (e.g. black "家人" + gray "(18)" -> "家人 (18)")
+            double rowMergeTol = Math.Max(10.0, 12.0 * scale);
+            var rawClusters = new List<List<OcrLineResult>>();
+            foreach (var line in ocr.Lines.OrderBy(l => l.Bounds.Y).ThenBy(l => l.Bounds.X))
+            {
+                if (string.IsNullOrWhiteSpace(line.Text)) continue;
+                double cy = line.Bounds.Y + line.Bounds.Height / 2.0;
+                var cluster = rawClusters.FirstOrDefault(c =>
+                    Math.Abs(c.Average(x => x.Bounds.Y + x.Bounds.Height / 2.0) - cy) <= rowMergeTol);
+                if (cluster is not null)
+                {
+                    cluster.Add(line);
+                }
+                else
+                {
+                    rawClusters.Add([line]);
+                }
+            }
+
+            var rows = new List<MergedSidebarRow>(rawClusters.Count);
+            foreach (var c in rawClusters)
+            {
+                var ordered = c.OrderBy(x => x.Bounds.X).ToList();
+                string joined = string.Join(" ", ordered.Select(x => x.Text.Trim())).Trim();
+                rows.Add(new MergedSidebarRow(
+                    joined,
+                    ordered.Min(x => x.Bounds.X),
+                    ordered.Min(x => x.Bounds.Y),
+                    ordered.Max(x => x.Bounds.X + x.Bounds.Width),
+                    ordered.Max(x => x.Bounds.Y + x.Bounds.Height)));
+            }
+            rows.Sort((a, b) => a.CenterY.CompareTo(b.CenterY));
+
+            var sidebarDebug = rows.Select(r => r.Text).ToList();
+            double rx = sidebarW / (double)Math.Max(1, sidebarBmp.PixelWidth);
+            double ry = rect.Height / (double)Math.Max(1, sidebarBmp.PixelHeight);
+
+            var tagHeader = rows.FirstOrDefault(r =>
+                r.Top > sidebarBmp.PixelHeight * 0.05 &&
+                r.Top < sidebarBmp.PixelHeight * 0.85 &&
+                IsTagSectionHeader(r.Text));
+
+            (int X, int Y)? headerCenter = tagHeader is not null
+                ? (rect.Left + (int)Math.Round(tagHeader.CenterX * rx), rect.Top + (int)Math.Round(tagHeader.CenterY * ry))
+                : null;
+
+            double minTagY = tagHeader is not null ? tagHeader.Bottom : sidebarBmp.PixelHeight * 0.22;
 
             var tags = new List<WeChatTagItem>();
             var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            bool sawNewTagBtn = false;
+            bool sawUntaggedOrNewTag = false;
 
-            foreach (var line in leftLines)
+            foreach (var row in rows)
             {
-                if (line.Bounds.Y < minTagY) continue;
-                string txt = line.Text.Trim();
+                if (row.Top < minTagY) continue;
+                string txt = row.Text.Trim();
                 if (string.IsNullOrEmpty(txt)) continue;
+
                 if (txt.Contains("新建标签", StringComparison.Ordinal))
                 {
-                    sawNewTagBtn = true;
+                    sawUntaggedOrNewTag = true;
                     break;
                 }
                 if (txt.Contains("最近群聊", StringComparison.Ordinal)) break;
+                if (txt.StartsWith("无标签", StringComparison.Ordinal))
+                {
+                    sawUntaggedOrNewTag = true;
+                    continue;
+                }
                 if (txt is "朋友权限" or "筛选" or "通讯录管理" or "仅聊天" or "不看他" or "不让他看" ||
                     txt.StartsWith("聊天、朋友圈", StringComparison.Ordinal) ||
                     IsTagSectionHeader(txt))
@@ -1255,35 +1332,36 @@ namespace Client.Services
                 {
                     Name = tagName,
                     Count = count,
-                    RelativeX = (line.Bounds.X + line.Bounds.Width / 2.0) / bmp.PixelWidth,
-                    RelativeY = (line.Bounds.Y + line.Bounds.Height / 2.0) / bmp.PixelHeight,
+                    RelativeX = (row.CenterX * rx) / Math.Max(1.0, rect.Width),
+                    RelativeY = (row.CenterY * ry) / Math.Max(1.0, rect.Height),
                     IsSelected = count > 0
                 });
             }
 
-            return (tags, sawNewTagBtn, sidebarDebug);
+            bool isExpanded = sawUntaggedOrNewTag || tags.Any(t => t.Count >= 0);
+            return new SidebarScanResult(
+                tags,
+                isExpanded,
+                sidebarDebug,
+                headerCenter,
+                tagHeader?.Text ?? string.Empty,
+                sidebarW,
+                rect.Height);
         }
 
         private async Task<(int X, int Y)?> FindTagClickPositionAsync(nint mgrHwnd, Win32WindowHelper.RECT mgrRect, WeChatTagItem tag, CancellationToken ct)
         {
-            using var bmp = CaptureWindowSafe(mgrHwnd);
-            var ocr = await AppServices.Ocr.RapidEngine.RecognizeAsync(bmp, ct);
+            var scan = await ScanTagsFromManagerWindowDetailedAsync(mgrHwnd, ct);
+            var matched = scan.Tags.FirstOrDefault(t =>
+                t.Name.Equals(tag.Name, StringComparison.OrdinalIgnoreCase) ||
+                t.Name.StartsWith(tag.Name, StringComparison.OrdinalIgnoreCase) ||
+                tag.Name.StartsWith(t.Name, StringComparison.OrdinalIgnoreCase));
 
-            int sidebarMaxX = (int)(bmp.PixelWidth * 0.225);
-            var matched = ocr.Lines
-                .Where(l => l.Bounds.X < sidebarMaxX)
-                .FirstOrDefault(l =>
-                {
-                    string clean = TagWithCountRegex().Replace(l.Text.Trim(), "$1").Trim();
-                    return clean.Equals(tag.Name, StringComparison.OrdinalIgnoreCase) ||
-                           l.Text.Trim().StartsWith(tag.Name, StringComparison.OrdinalIgnoreCase);
-                });
-
-            if (matched is not null)
+            if (matched is not null && matched.RelativeX > 0 && matched.RelativeY > 0)
             {
                 return (
-                    mgrRect.Left + (int)Math.Round(matched.Bounds.X + matched.Bounds.Width / 2.0),
-                    mgrRect.Top + (int)Math.Round(matched.Bounds.Y + matched.Bounds.Height / 2.0)
+                    mgrRect.Left + (int)Math.Round(matched.RelativeX * mgrRect.Width),
+                    mgrRect.Top + (int)Math.Round(matched.RelativeY * mgrRect.Height)
                 );
             }
 
@@ -1424,6 +1502,7 @@ namespace Client.Services
 
         private static SoftwareBitmap CaptureWindowSafe(nint hWnd)
         {
+            ClickVisualOverlay.HideImmediately();
             if (Win32WindowHelper.GetVisibleWindowRect(hWnd, out var r) && r.Width > 0 && r.Height > 0)
             {
                 return Win32WindowHelper.CaptureScreenRectToSoftwareBitmap(r.Left, r.Top, r.Width, r.Height);

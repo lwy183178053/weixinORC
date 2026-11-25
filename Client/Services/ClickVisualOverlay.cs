@@ -31,7 +31,7 @@ namespace Client.Services
         private const uint PM_REMOVE = 0x0001;
         private const string WindowClassName = "WeixinOrcClickOverlayClass";
 
-        private sealed record FlashRequest(int ScreenX, int ScreenY, bool IsWarning, long TimestampMs);
+        private sealed record FlashRequest(int ScreenX, int ScreenY, bool IsWarning, long TimestampMs, bool ClearOnly = false);
 
         private static readonly ConcurrentQueue<FlashRequest> Queue = new();
         private static readonly AutoResetEvent WakeSignal = new(false);
@@ -45,6 +45,16 @@ namespace Client.Services
             if (!IsEnabled) return;
             EnsureThreadStarted();
             Queue.Enqueue(new FlashRequest(screenX, screenY, isWarning, Environment.TickCount64));
+            WakeSignal.Set();
+        }
+
+        /// <summary>
+        /// Immediately hides the overlay before screen capture so the reticle never obscures OCR text.
+        /// </summary>
+        internal static void HideImmediately()
+        {
+            if (!_started) return;
+            Queue.Enqueue(new FlashRequest(0, 0, false, Environment.TickCount64, ClearOnly: true));
             WakeSignal.Set();
         }
 
@@ -77,7 +87,7 @@ namespace Client.Services
             {
                 while (Queue.TryDequeue(out var next))
                 {
-                    active = next;
+                    active = next.ClearOnly ? null : next;
                 }
 
                 if (active is null)

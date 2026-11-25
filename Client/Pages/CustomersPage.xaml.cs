@@ -19,22 +19,34 @@ namespace Client.Pages
 {
     public sealed partial class CustomersPage : Page
     {
+        private const string UntagGroupName = "未分组";
+        private static readonly char[] TagSeparators = [',', '，', '、', ';', '；', '|', '/'];
+
         private List<CustomerDto> _allCustomers = [];
+        private List<CustomerDto> _filteredCustomers = [];
         private CustomerDto? _selectedCustomer;
+        private readonly ObservableCollection<CustomerListRow> _customerRows = [];
+        private readonly HashSet<string> _collapsedTags = new(StringComparer.CurrentCultureIgnoreCase);
+        private readonly HashSet<long> _selectedCustomerIds = [];
         private readonly ObservableCollection<ChatBubbleItem> _currentMessages = [];
         private readonly ObservableCollection<AiChatMessageItem> _aiChatMessages = [];
         private readonly HashSet<long> _locallyDeletedMessageIds = [];
         private CustomerAiWorkspaceData? _currentAiWorkspace;
         private CancellationTokenSource? _avatarHydrationCts;
         private string _activeRightTab = "profile";
+        private bool _isCustomerMultiSelectMode;
         private bool _isMultiSelectMode;
         private bool _isAiSummaryBusy;
         private bool _isAiChatBusy;
-        private bool _isEditing;
 
         public CustomersPage()
         {
             InitializeComponent();
+            foreach (string tag in AppServices.Settings.Current.CollapsedCustomerTags)
+            {
+                if (!string.IsNullOrWhiteSpace(tag)) _collapsedTags.Add(tag);
+            }
+            CustomersListView.ItemsSource = _customerRows;
             MessagesListView.ItemsSource = _currentMessages;
             AiChatListView.ItemsSource = _aiChatMessages;
             _ = ThreePaneResizeController.Attach(
@@ -85,10 +97,8 @@ namespace Client.Pages
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             if (CustomersListView is null) return;
-            ApplyFilter(_selectedCustomer?.Id);
+            ApplyFilter(_selectedCustomer?.Id, forceReloadDetail: false);
         }
-
-        private static readonly string[] FollowStatusOptions = ["未设置", "新线索", "跟进中", "高意向", "已报价", "已成交", "暂缓/流失"];
 
         private async Task LoadCustomersAsync(long? selectId = null)
         {
@@ -96,7 +106,9 @@ namespace Client.Pages
             if (result.IsSuccess && result.Data is not null)
             {
                 _allCustomers = result.Data.Items;
-                ApplyFilter(selectId);
+                var validIds = _allCustomers.Select(c => c.Id).ToHashSet();
+                _selectedCustomerIds.RemoveWhere(id => !validIds.Contains(id));
+                ApplyFilter(selectId, forceReloadDetail: true);
                 StartAvatarHydration(_allCustomers);
             }
             else
@@ -128,6 +140,7 @@ namespace Client.Pages
                     if (img is not null && !ct.IsCancellationRequested)
                     {
                         c.AvatarImage = img;
+                        NotifyCustomerRowAvatarUpdated(c.Id);
                         if (_selectedCustomer?.Id == c.Id)
                         {
                             ApplyProfileAvatarVisual(c);
@@ -144,11 +157,33 @@ namespace Client.Pages
             }
         }
 
-        private void ApplyFilter(long? preferredSelectId = null)
+        private void NotifyCustomerRowAvatarUpdated(long customerId)
+        {
+            foreach (var row in _customerRows)
+            {
+                if (!row.IsGroupHeader && row.Customer?.Id == customerId)
+                {
+                    row.NotifyAvatarChanged();
+                }
+            }
+        }
+
+        private static string GetPrimaryTag(CustomerDto c)
+        {
+            if (string.IsNullOrWhiteSpace(c.Tags)) return UntagGroupName;
+            foreach (string raw in c.Tags.Split(TagSeparators, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string trimmed = raw.Trim();
+                if (!string.IsNullOrEmpty(trimmed)) return trimmed;
+            }
+            return UntagGroupName;
+        }
+
+        private void ApplyFilter(long? preferredSelectId = null, bool forceReloadDetail = false)
         {
             string q = SearchBox.Text.Trim();
-            var filtered = string.IsNullOrEmpty(q)
-                ? _allCustomers
+            _filteredCustomers = string.IsNullOrEmpty(q)
+                ? [.. _allCustomers]
                 : _allCustomers.Where(c =>
                     c.WechatRemark.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     c.WechatName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
@@ -158,33 +193,176 @@ namespace Client.Pages
                     c.Note.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     c.Phone.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
 
-            CustomersListView.ItemsSource = filtered;
-            EmptyListHint.Visibility = filtered.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
-            if (filtered.Count > 0)
+            CustomerDto? nextSelected = null;
+            if (_filteredCustomers.Count > 0)
             {
-                int idx = preferredSelectId.HasValue
-                    ? filtered.FindIndex(c => c.Id == preferredSelectId.Value)
-                    : 0;
-                CustomersListView.SelectedIndex = idx >= 0 ? idx : 0;
+                if (preferredSelectId.HasValue)
+                {
+                    nextSelected = _filteredCustomers.FirstOrDefault(c => c.Id == preferredSelectId.Value);
+                }
+                nextSelected ??= _selectedCustomer is not null
+                    ? _filteredCustomers.FirstOrDefault(c => c.Id == _selectedCustomer.Id)
+                    : null;
+                nextSelected ??= _filteredCustomers[0];
             }
-            else
+
+            bool selectionChanged = _selectedCustomer?.Id != nextSelected?.Id;
+            _selectedCustomer = nextSelected;
+
+            RebuildCustomerRows(expandAllForSearch: !string.IsNullOrEmpty(q));
+            EmptyListHint.Visibility = _filteredCustomers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            UpdateCustomerMultiSelectSummary();
+
+            if (selectionChanged || forceReloadDetail)
             {
-                _selectedCustomer = null;
-                SetEditMode(false);
-                UpdateSelectedCustomerUi();
+                _ = ActivateSelectedCustomerAsync(nextSelected);
             }
         }
 
-        private async void CustomersListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void RebuildCustomerRows(bool expandAllForSearch)
         {
-            _selectedCustomer = CustomersListView.SelectedItem as CustomerDto;
+            _customerRows.Clear();
+            if (_filteredCustomers.Count == 0) return;
+
+            var groups = _filteredCustomers
+                .GroupBy(GetPrimaryTag, StringComparer.CurrentCultureIgnoreCase)
+                .OrderBy(g => string.Equals(g.Key, UntagGroupName, StringComparison.Ordinal) ? 1 : 0)
+                .ThenBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase);
+
+            foreach (var group in groups)
+            {
+                string tagName = group.Key;
+                var members = group.ToList();
+                bool collapsed = !expandAllForSearch && _collapsedTags.Contains(tagName);
+                bool allInGroupSelected = members.Count > 0 && members.All(m => _selectedCustomerIds.Contains(m.Id));
+
+                _customerRows.Add(new CustomerListRow
+                {
+                    IsGroupHeader = true,
+                    TagName = tagName,
+                    GroupCount = members.Count,
+                    IsCollapsed = collapsed,
+                    IsMultiSelectMode = _isCustomerMultiSelectMode,
+                    IsGroupAllSelected = allInGroupSelected
+                });
+
+                if (collapsed) continue;
+
+                foreach (var c in members)
+                {
+                    _customerRows.Add(new CustomerListRow
+                    {
+                        IsGroupHeader = false,
+                        TagName = tagName,
+                        Customer = c,
+                        IsMultiSelectMode = _isCustomerMultiSelectMode,
+                        IsChecked = _selectedCustomerIds.Contains(c.Id),
+                        IsActive = _selectedCustomer?.Id == c.Id
+                    });
+                }
+            }
+        }
+
+        private void UpdateActiveRowHighlight()
+        {
+            long? activeId = _selectedCustomer?.Id;
+            foreach (var row in _customerRows)
+            {
+                if (!row.IsGroupHeader)
+                {
+                    row.IsActive = activeId.HasValue && row.Customer?.Id == activeId.Value;
+                }
+            }
+        }
+
+        private void SaveCollapsedTags()
+        {
+            AppServices.Settings.Current.CollapsedCustomerTags = _collapsedTags.ToList();
+            AppServices.Settings.Save();
+        }
+
+        private void ToggleTagGroupCollapsedInPlace(CustomerListRow headerRow)
+        {
+            int headerIdx = _customerRows.IndexOf(headerRow);
+            if (headerIdx < 0) return;
+
+            bool collapsing = _collapsedTags.Add(headerRow.TagName);
+            if (!collapsing)
+            {
+                _collapsedTags.Remove(headerRow.TagName);
+            }
+            SaveCollapsedTags();
+
+            headerRow.IsCollapsed = collapsing;
+
+            if (collapsing)
+            {
+                // Remove only the child customer rows directly under this header (no full list reset!)
+                int nextIdx = headerIdx + 1;
+                while (nextIdx < _customerRows.Count && !_customerRows[nextIdx].IsGroupHeader)
+                {
+                    _customerRows.RemoveAt(nextIdx);
+                }
+            }
+            else
+            {
+                // Insert only this group's customer rows right under the header
+                var members = _filteredCustomers
+                    .Where(c => string.Equals(GetPrimaryTag(c), headerRow.TagName, StringComparison.CurrentCultureIgnoreCase))
+                    .ToList();
+                int insertIdx = headerIdx + 1;
+                foreach (var c in members)
+                {
+                    _customerRows.Insert(insertIdx++, new CustomerListRow
+                    {
+                        IsGroupHeader = false,
+                        TagName = headerRow.TagName,
+                        Customer = c,
+                        IsMultiSelectMode = _isCustomerMultiSelectMode,
+                        IsChecked = _selectedCustomerIds.Contains(c.Id),
+                        IsActive = _selectedCustomer?.Id == c.Id
+                    });
+                }
+            }
+        }
+
+        private async void CustomersListView_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is not CustomerListRow row) return;
+
+            if (row.IsGroupHeader)
+            {
+                if (!string.IsNullOrWhiteSpace(SearchBox.Text)) return;
+                ToggleTagGroupCollapsedInPlace(row);
+                return;
+            }
+
+            if (row.Customer is not { } customer) return;
+
+            if (_isCustomerMultiSelectMode)
+            {
+                bool nowChecked = !_selectedCustomerIds.Contains(customer.Id);
+                if (nowChecked) _selectedCustomerIds.Add(customer.Id);
+                else _selectedCustomerIds.Remove(customer.Id);
+                row.IsChecked = nowChecked;
+                SyncGroupSelectionStates();
+                UpdateCustomerMultiSelectSummary();
+                return;
+            }
+
+            if (_selectedCustomer?.Id == customer.Id) return;
+            _selectedCustomer = customer;
+            UpdateActiveRowHighlight();
+            await ActivateSelectedCustomerAsync(customer);
+        }
+
+        private async Task ActivateSelectedCustomerAsync(CustomerDto? selected)
+        {
             SetMultiSelectMode(false);
-            SetEditMode(false);
             ProfileStatusBanner.Visibility = Visibility.Collapsed;
             UpdateSelectedCustomerUi();
 
-            if (_selectedCustomer is { } selected)
+            if (selected is not null)
             {
                 LoadCustomerAiWorkspace(selected);
                 try { await LoadCustomerMessagesAsync(selected); }
@@ -200,6 +378,158 @@ namespace Client.Pages
                 EmptyChatTitle.Text = "暂无聊天记录";
                 EmptyChatHint.Visibility = Visibility.Visible;
             }
+        }
+
+        // ---- Left Sidebar Customer Multi-Select & Tag Group Actions ----
+
+        private void SetCustomerMultiSelectMode(bool enabled)
+        {
+            _isCustomerMultiSelectMode = enabled;
+            CustomerMultiSelectBar.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+            MultiSelectCustomersIcon.Foreground = (Brush)Application.Current.Resources[enabled ? "BrandPrimaryBrush" : "TextSecondaryBrush"];
+            ToolTipService.SetToolTip(MultiSelectCustomersButton, enabled ? "退出多选模式" : "多选批量删除客户");
+
+            if (!enabled)
+            {
+                _selectedCustomerIds.Clear();
+            }
+
+            foreach (var row in _customerRows)
+            {
+                row.IsMultiSelectMode = enabled;
+                if (!enabled)
+                {
+                    row.IsChecked = false;
+                    row.IsGroupAllSelected = false;
+                }
+            }
+
+            if (enabled) SyncGroupSelectionStates();
+            UpdateCustomerMultiSelectSummary();
+        }
+
+        private void SyncGroupSelectionStates()
+        {
+            var byTag = _filteredCustomers
+                .GroupBy(GetPrimaryTag, StringComparer.CurrentCultureIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.CurrentCultureIgnoreCase);
+
+            foreach (var row in _customerRows)
+            {
+                if (row.IsGroupHeader)
+                {
+                    row.IsGroupAllSelected = byTag.TryGetValue(row.TagName, out var list)
+                        && list.Count > 0
+                        && list.All(c => _selectedCustomerIds.Contains(c.Id));
+                }
+                else if (row.Customer is { } c)
+                {
+                    row.IsChecked = _selectedCustomerIds.Contains(c.Id);
+                }
+            }
+        }
+
+        private void UpdateCustomerMultiSelectSummary()
+        {
+            int selectedCount = _filteredCustomers.Count(c => _selectedCustomerIds.Contains(c.Id));
+            SelectedCustomersCountText.Text = $"已选 {selectedCount}";
+            DeleteSelectedCustomersButton.IsEnabled = selectedCount > 0;
+            DeleteSelectedCustomersButton.Content = selectedCount > 0 ? $"删除({selectedCount})" : "删除";
+            SelectAllCustomersButton.Content = _filteredCustomers.Count > 0 && selectedCount == _filteredCustomers.Count
+                ? "全不选"
+                : "全选";
+        }
+
+        private void MultiSelectCustomersButton_Click(object sender, RoutedEventArgs e) =>
+            SetCustomerMultiSelectMode(!_isCustomerMultiSelectMode);
+
+        private void ExitCustomerMultiSelectButton_Click(object sender, RoutedEventArgs e) =>
+            SetCustomerMultiSelectMode(false);
+
+        private void SelectAllCustomersButton_Click(object sender, RoutedEventArgs e)
+        {
+            bool selectAll = _filteredCustomers.Any(c => !_selectedCustomerIds.Contains(c.Id));
+            foreach (var c in _filteredCustomers)
+            {
+                if (selectAll) _selectedCustomerIds.Add(c.Id);
+                else _selectedCustomerIds.Remove(c.Id);
+            }
+            SyncGroupSelectionStates();
+            UpdateCustomerMultiSelectSummary();
+        }
+
+        private void CustomerRowCheckBox_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not CheckBox cb || cb.DataContext is not CustomerListRow row || row.Customer is null) return;
+            if (cb.IsChecked == true) _selectedCustomerIds.Add(row.Customer.Id);
+            else _selectedCustomerIds.Remove(row.Customer.Id);
+            row.IsChecked = cb.IsChecked == true;
+            SyncGroupSelectionStates();
+            UpdateCustomerMultiSelectSummary();
+        }
+
+        private void GroupHeaderCheckBox_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not CheckBox cb || cb.DataContext is not CustomerListRow row) return;
+            bool checkGroup = cb.IsChecked == true;
+            foreach (var c in _filteredCustomers.Where(c => string.Equals(GetPrimaryTag(c), row.TagName, StringComparison.CurrentCultureIgnoreCase)))
+            {
+                if (checkGroup) _selectedCustomerIds.Add(c.Id);
+                else _selectedCustomerIds.Remove(c.Id);
+            }
+            SyncGroupSelectionStates();
+            UpdateCustomerMultiSelectSummary();
+        }
+
+        private void SelectTagGroupMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not CustomerListRow row) return;
+            if (!_isCustomerMultiSelectMode) SetCustomerMultiSelectMode(true);
+            foreach (var c in _filteredCustomers.Where(c => string.Equals(GetPrimaryTag(c), row.TagName, StringComparison.CurrentCultureIgnoreCase)))
+            {
+                _selectedCustomerIds.Add(c.Id);
+            }
+            SyncGroupSelectionStates();
+            UpdateCustomerMultiSelectSummary();
+        }
+
+        private void ExpandAllGroupsMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            _collapsedTags.Clear();
+            SaveCollapsedTags();
+            RebuildCustomerRows(expandAllForSearch: !string.IsNullOrWhiteSpace(SearchBox.Text));
+        }
+
+        private void CollapseAllGroupsMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (var c in _filteredCustomers)
+            {
+                _collapsedTags.Add(GetPrimaryTag(c));
+            }
+            SaveCollapsedTags();
+            RebuildCustomerRows(expandAllForSearch: !string.IsNullOrWhiteSpace(SearchBox.Text));
+        }
+
+        private void MultiSelectCustomerRowMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not CustomerListRow row || row.Customer is null) return;
+            if (!_isCustomerMultiSelectMode) SetCustomerMultiSelectMode(true);
+            _selectedCustomerIds.Add(row.Customer.Id);
+            SyncGroupSelectionStates();
+            UpdateCustomerMultiSelectSummary();
+        }
+
+        private async void DeleteCustomerRowMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not CustomerListRow row || row.Customer is null) return;
+            await ConfirmAndDeleteCustomersAsync([row.Customer]);
+        }
+
+        private async void DeleteSelectedCustomersButton_Click(object sender, RoutedEventArgs e)
+        {
+            var targets = _filteredCustomers.Where(c => _selectedCustomerIds.Contains(c.Id)).ToList();
+            if (targets.Count == 0) return;
+            await ConfirmAndDeleteCustomersAsync(targets);
         }
 
         private void UpdateSelectedCustomerUi()
@@ -286,14 +616,9 @@ namespace Client.Pages
             ViewTagsText.Text = string.IsNullOrWhiteSpace(c.Tags) ? "-" : c.Tags;
             ViewDescriptionText.Text = string.IsNullOrWhiteSpace(c.Description) ? "-" : c.Description;
 
-            bool hasSystemIds = !string.IsNullOrWhiteSpace(c.LocalKey) || !string.IsNullOrWhiteSpace(c.NativeId);
-            ViewSystemIdsPanel.Visibility = hasSystemIds ? Visibility.Visible : Visibility.Collapsed;
-            ViewLocalKeyText.Text = string.IsNullOrWhiteSpace(c.LocalKey) ? "-" : c.LocalKey;
-            ViewNativeIdText.Text = string.IsNullOrWhiteSpace(c.NativeId) ? "-" : c.NativeId;
-
             if (string.IsNullOrWhiteSpace(c.Note))
             {
-                ViewEmployeeNoteText.Text = "暂无员工备注，点击「编辑」即可补充客户意向与跟进内容。";
+                ViewEmployeeNoteText.Text = "暂无员工备注，点击上方编辑图标即可补充客户意向与跟进内容。";
                 ViewEmployeeNoteText.Foreground = (Brush)Application.Current.Resources["TextMutedBrush"];
             }
             else
@@ -301,8 +626,6 @@ namespace Client.Pages
                 ViewEmployeeNoteText.Text = c.Note;
                 ViewEmployeeNoteText.Foreground = (Brush)Application.Current.Resources["TextPrimaryBrush"];
             }
-
-            PopulateEditBoxes(c);
         }
 
         private void ApplyProfileAvatarVisual(CustomerDto c)
@@ -333,6 +656,7 @@ namespace Client.Pages
                 if (img is not null)
                 {
                     c.AvatarImage = img;
+                    NotifyCustomerRowAvatarUpdated(c.Id);
                     if (_selectedCustomer?.Id == c.Id)
                     {
                         ApplyProfileAvatarVisual(c);
@@ -345,135 +669,57 @@ namespace Client.Pages
             }
         }
 
-        private void PopulateEditBoxes(CustomerDto c)
+        private async void EditProfileButton_Click(object sender, RoutedEventArgs e)
         {
-            EditRemarkBox.Text = c.WechatRemark;
-            EditNameBox.Text = c.WechatName;
-            EditAccountBox.Text = c.WechatAccount;
-            EditGenderBox.SelectedIndex = c.Gender switch
-            {
-                "男" => 1,
-                "女" => 2,
-                _ => 0
-            };
-            EditRegionBox.Text = c.Region;
-            EditPhoneBox.Text = c.Phone;
-            EditSignatureBox.Text = c.Signature;
-            EditSourceBox.Text = c.Source;
-            EditAddedDateBox.Text = c.AddedDate;
+            var target = _selectedCustomer;
+            if (target is null || !AppServices.TryBeginModalDialog()) return;
 
-            int statusIdx = Array.FindIndex(FollowStatusOptions, s => s == c.FollowStatus);
-            EditFollowStatusBox.SelectedIndex = statusIdx >= 0 ? statusIdx : 0;
-            EditTagsBox.Text = c.Tags;
-            EditDescriptionBox.Text = c.Description;
-            EditEmployeeNoteBox.Text = c.Note;
-            EditLocalKeyBox.Text = c.LocalKey;
-            EditNativeIdBox.Text = c.NativeId;
-        }
-
-        private void SetEditMode(bool editing)
-        {
-            _isEditing = editing;
-            ViewActionsBar.Visibility = editing ? Visibility.Collapsed : Visibility.Visible;
-            EditActionsBar.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
-            ProfileViewModePanel.Visibility = editing ? Visibility.Collapsed : Visibility.Visible;
-            ProfileEditModePanel.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        private void EditProfileButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_selectedCustomer is null) return;
-            PopulateEditBoxes(_selectedCustomer);
-            ProfileStatusBanner.Visibility = Visibility.Collapsed;
-            SetEditMode(true);
-        }
-
-        private void CancelEditButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_selectedCustomer is not null)
-            {
-                PopulateEditBoxes(_selectedCustomer);
-            }
-            SetEditMode(false);
-        }
-
-        private async void SaveProfileButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_selectedCustomer is null) return;
-
-            string remark = EditRemarkBox.Text.Trim();
-            string name = EditNameBox.Text.Trim();
-            string account = EditAccountBox.Text.Trim();
-            if (string.IsNullOrEmpty(remark) && string.IsNullOrEmpty(name) && string.IsNullOrEmpty(account))
-            {
-                ShowProfileStatus("微信备注、微信昵称和微信号不能同时为空。", isError: true);
-                return;
-            }
-
-            SaveProfileButton.IsEnabled = false;
             try
             {
-                string gender = EditGenderBox.SelectedIndex switch
+                var dialog = new EditCustomerDialog(target)
                 {
-                    1 => "男",
-                    2 => "女",
-                    _ => string.Empty
+                    XamlRoot = XamlRoot
                 };
-                string followStatus = EditFollowStatusBox.SelectedIndex > 0 && EditFollowStatusBox.SelectedIndex < FollowStatusOptions.Length
-                    ? FollowStatusOptions[EditFollowStatusBox.SelectedIndex]
-                    : string.Empty;
+                await dialog.ShowAsync();
 
-                var res = await AppServices.Backend.UpdateCustomerAsync(_selectedCustomer.Id, new CreateCustomerRequest
+                if (dialog.SavedCustomer is { } saved)
                 {
-                    WechatRemark = remark,
-                    WechatName = name,
-                    WechatAccount = account,
-                    Gender = gender,
-                    Region = EditRegionBox.Text.Trim(),
-                    Phone = EditPhoneBox.Text.Trim(),
-                    Signature = EditSignatureBox.Text.Trim(),
-                    Source = EditSourceBox.Text.Trim(),
-                    AddedDate = EditAddedDateBox.Text.Trim(),
-                    FollowStatus = followStatus,
-                    Tags = EditTagsBox.Text.Trim(),
-                    Description = EditDescriptionBox.Text.Trim(),
-                    Note = EditEmployeeNoteBox.Text.Trim(),
-                    LocalKey = EditLocalKeyBox.Text.Trim(),
-                    NativeId = EditNativeIdBox.Text.Trim()
-                });
-
-                if (res.IsSuccess && res.Data is not null)
-                {
-                    long id = res.Data.Id;
-                    SetEditMode(false);
-                    await LoadCustomersAsync(id);
+                    await LoadCustomersAsync(saved.Id);
                     ShowProfileStatus("✓ 客户资料与员工备注已保存。");
                 }
-                else
-                {
-                    ShowProfileStatus($"保存失败：{res.ErrorMessage}", isError: true);
-                }
+            }
+            catch (Exception ex)
+            {
+                ShowProfileStatus($"打开编辑弹窗失败：{ex.Message}", isError: true);
             }
             finally
             {
-                SaveProfileButton.IsEnabled = true;
+                AppServices.EndModalDialog();
             }
         }
 
         private async void DeleteCustomerButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_selectedCustomer is null || !AppServices.TryBeginModalDialog()) return;
-            var target = _selectedCustomer;
+            if (_selectedCustomer is null) return;
+            await ConfirmAndDeleteCustomersAsync([_selectedCustomer]);
+        }
+
+        private async Task ConfirmAndDeleteCustomersAsync(List<CustomerDto> targets)
+        {
+            if (targets.Count == 0 || !AppServices.TryBeginModalDialog()) return;
 
             try
             {
+                bool isBatch = targets.Count > 1;
                 var confirm = new ContentDialog
                 {
                     XamlRoot = XamlRoot,
                     RequestedTheme = AppServices.Settings.CurrentElementTheme,
-                    Title = "确认删除客户",
-                    Content = $"确定要删除客户「{target.DisplayName}」及其全部聊天记录吗？删除后无法恢复。",
-                    PrimaryButtonText = "确认删除",
+                    Title = isBatch ? "确认批量删除客户" : "确认删除客户",
+                    Content = isBatch
+                        ? $"确定要删除已选中的 {targets.Count} 位客户及其全部聊天记录吗？删除后无法恢复。"
+                        : $"确定要删除客户「{targets[0].DisplayName}」及其全部聊天记录吗？删除后无法恢复。",
+                    PrimaryButtonText = isBatch ? $"确认删除 ({targets.Count})" : "确认删除",
                     CloseButtonText = "取消",
                     DefaultButton = ContentDialogButton.Close,
                     PrimaryButtonStyle = (Style)Application.Current.Resources["DangerOutlineButtonStyle"]
@@ -482,19 +728,50 @@ namespace Client.Pages
                 var choice = await confirm.ShowAsync();
                 if (choice != ContentDialogResult.Primary) return;
 
-                var res = await AppServices.Backend.DeleteCustomerAsync(target.Id);
-                if (res.IsSuccess)
+                int deleted = 0;
+                int failed = 0;
+                string lastError = string.Empty;
+                var deletedIds = new HashSet<long>();
+
+                foreach (var target in targets)
                 {
-                    SetEditMode(false);
-                    await LoadCustomersAsync();
-                    if (_selectedCustomer is not null)
+                    var res = await AppServices.Backend.DeleteCustomerAsync(target.Id);
+                    if (res.IsSuccess)
                     {
-                        ShowProfileStatus($"已删除客户「{target.DisplayName}」。");
+                        deleted++;
+                        deletedIds.Add(target.Id);
+                        _selectedCustomerIds.Remove(target.Id);
+                    }
+                    else
+                    {
+                        failed++;
+                        lastError = res.ErrorMessage;
                     }
                 }
-                else
+
+                if (_isCustomerMultiSelectMode && deleted > 0)
                 {
-                    ShowProfileStatus($"删除失败：{res.ErrorMessage}", isError: true);
+                    SetCustomerMultiSelectMode(false);
+                }
+
+                long? keepId = _selectedCustomer is not null && !deletedIds.Contains(_selectedCustomer.Id)
+                    ? _selectedCustomer.Id
+                    : null;
+
+                await LoadCustomersAsync(keepId);
+
+                if (_selectedCustomer is not null)
+                {
+                    if (failed == 0)
+                    {
+                        ShowProfileStatus(isBatch
+                            ? $"✓ 已批量删除 {deleted} 位客户。"
+                            : $"已删除客户「{targets[0].DisplayName}」。");
+                    }
+                    else
+                    {
+                        ShowProfileStatus($"已删除 {deleted} 位客户，{failed} 位失败：{lastError}", isError: true);
+                    }
                 }
             }
             catch (Exception ex)
@@ -510,18 +787,12 @@ namespace Client.Pages
         private async void AddCustomerButton_Click(object sender, RoutedEventArgs e)
         {
             try { await ShowImportDialogAsync(autoPasteClipboard: false); }
-            catch (Exception ex) { ShowProfileStatus($"打开导入窗口失败：{ex.Message}", isError: true); }
-        }
-
-        private async void BatchTagImportButton_Click(object sender, RoutedEventArgs e)
-        {
-            try { await ShowBatchTagImportDialogAsync(); }
-            catch (Exception ex) { ShowProfileStatus($"打开批量导入失败：{ex.Message}", isError: true); }
+            catch (Exception ex) { ShowProfileStatus($"打开添加客户窗口失败：{ex.Message}", isError: true); }
         }
 
         private async void PasteAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
         {
-            if (AppServices.IsModalDialogOpen || _isEditing) return;
+            if (AppServices.IsModalDialogOpen) return;
             if (OcrService.HasClipboardBitmapFast())
             {
                 args.Handled = true;
@@ -539,7 +810,6 @@ namespace Client.Pages
         private async Task ShowImportDialogAsync(bool autoPasteClipboard)
         {
             if (!AppServices.TryBeginModalDialog()) return;
-            bool openBatchAfter = false;
             try
             {
                 var dialog = new ImportCustomerDialog { XamlRoot = XamlRoot };
@@ -549,40 +819,17 @@ namespace Client.Pages
                 }
 
                 await dialog.ShowAsync();
-                if (dialog.RequestedBatchTagImport)
-                {
-                    openBatchAfter = true;
-                }
-                else if (dialog.CreatedCustomer is { } created)
+                if (dialog.CreatedCustomer is { } created)
                 {
                     await LoadCustomersAsync(created.Id);
                     ShowProfileStatus(dialog.WasOverwritten
                         ? $"✓ 已覆盖更新客户「{created.DisplayName}」。"
                         : $"✓ 已成功导入新客户「{created.DisplayName}」。");
                 }
-            }
-            finally
-            {
-                AppServices.EndModalDialog();
-            }
-
-            if (openBatchAfter)
-            {
-                await ShowBatchTagImportDialogAsync();
-            }
-        }
-
-        private async Task ShowBatchTagImportDialogAsync()
-        {
-            if (!AppServices.TryBeginModalDialog()) return;
-            try
-            {
-                var dialog = new BatchTagImportDialog { XamlRoot = XamlRoot };
-                await dialog.ShowAsync();
-                if (dialog.TotalImportedOrUpdated > 0)
+                else if (dialog.TotalBatchImportedOrUpdated > 0)
                 {
                     await LoadCustomersAsync(_selectedCustomer?.Id);
-                    ShowProfileStatus($"✓ 微信标签批量导入完成，共新增/更新 {dialog.TotalImportedOrUpdated} 位客户。");
+                    ShowProfileStatus($"✓ 微信标签批量导入完成，共新增/更新 {dialog.TotalBatchImportedOrUpdated} 位客户。");
                 }
             }
             finally
@@ -1149,6 +1396,7 @@ namespace Client.Pages
                 {
                     target.AvatarUrl = string.Empty;
                     target.AvatarImage = null;
+                    NotifyCustomerRowAvatarUpdated(target.Id);
                     if (_selectedCustomer?.Id == target.Id)
                     {
                         ApplyProfileAvatarVisual(target);
@@ -1176,6 +1424,7 @@ namespace Client.Pages
                 target.AvatarUrl = res.Data.AvatarUrl;
                 var img = await AvatarImageService.BytesToBitmapImageAsync(pngBytes);
                 target.AvatarImage = img;
+                NotifyCustomerRowAvatarUpdated(target.Id);
                 if (_selectedCustomer?.Id == target.Id)
                 {
                     ApplyProfileAvatarVisual(target);

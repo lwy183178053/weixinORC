@@ -71,8 +71,8 @@
 
                         <Button x:Name="NavOcrBtn" Height="38" Padding="11,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" Click="GuideNav_Click" CornerRadius="8" Tag="ocr">
                             <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
-                                <FontIcon x:Name="NavOcrIcon" FontSize="14" Glyph="&#xE8FE;" />
-                                <TextBlock x:Name="NavOcrText" FontSize="13" Text="窗口识别" />
+                                <FontIcon x:Name="NavOcrIcon" FontSize="14" Glyph="&#xE7F4;" />
+                                <TextBlock x:Name="NavOcrText" FontSize="13" Text="微信监控" />
                             </StackPanel>
                         </Button>
 
@@ -182,26 +182,18 @@
                     <StackPanel x:Name="PanelCustomers" Spacing="14" Visibility="Collapsed">
                         <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                             <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="单条截图导入" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 在客户页点击搜索框旁的「+」，或在截好微信资料页后直接按 Ctrl+V，即可弹出识别窗口。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 自动提取微信昵称、备注、微信号、性别、地区、电话、签名、标签、来源、添加时间并精准裁剪头像。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 若系统已存在同微信号客户，会弹出确认提示，可选择「覆盖已有客户」（保留原员工备注）或「仍要新建」。" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
-                            <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信标签批量导入" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 点击客户列表上方的批量导入图标，可自动定位微信「通讯录管理」窗口并扫描左侧标签列表。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 勾选需要导入的标签后点击开始，自动逐人采集资料与头像；移动鼠标或按 Esc 可随时安全停止。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 支持两种去重策略：「去重跳过」会自动补全缺失的头像或空白字段而不覆盖已有备注；「覆盖更新」会同步更新识别字段并保留员工备注。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="统一添加客户入口（截图新建 / 标签批量导入）" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 点击客户列表搜索框旁的「+」，可在弹窗顶部自由切换「截图识别 / 手动新建」与「按微信标签批量导入」两种方式。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 单条模式：截微信资料页后直接按 Ctrl+V，自动提取资料、性别并精准裁剪头像；重复客户支持「覆盖已有」或「仍要新建」。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 批量模式：自动唤起微信并打开「通讯录管理」扫描标签，勾选标签后自动逐人采集并按微信号去重；移动鼠标或按 Esc 可随时熔断停止。" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
 
                         <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                             <StackPanel Spacing="9">
                                 <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="右侧三选项卡与资料维护" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 基本资料：点击头像可粘贴、上传或清除头像；底部的「编辑资料」「删除客户」按钮可维护完整档案、跟进状态与专属备注。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 左侧分组与批量管理：客户列表自动按标签分类并支持点击分组折叠/展开；点击搜索栏旁的多选图标或右键客户/分组，可批量勾选并一键删除。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 基本资料：点击头像可粘贴、上传或清除头像；点击头像与姓名右下角的编辑/删除小图标，可在弹窗中分页编辑「基本资料」与「员工备注」。" TextWrapping="Wrap" />
                                 <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• AI 总结 / AI 对话：可一键汇总客户画像，或围绕当前客户开展讨论（对话上下文仅保存于本地）。" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
@@ -246,21 +238,21 @@
                         </Border>
                     </StackPanel>
 
-                    <!-- 5. WINDOW OCR -->
+                    <!-- 5. WECHAT MONITOR -->
                     <StackPanel x:Name="PanelOcr" Spacing="14" Visibility="Collapsed">
                         <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                             <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信窗口检测与控制" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 自动枚举当前电脑运行的个人微信与企业微信窗口，勾选「全部窗口」也可查看其他桌面窗口。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 选中窗口后可点击左下角「显示窗口」将其唤起到前台，或点击「隐藏暂停」安全最小化窗口。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信存活监听与启停控制" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 自动实时监听个人微信（3.x / 4.x）与企业微信存活状态，展示进程 PID、版本号、内存占用、运行时长、窗口句柄与登录状态。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 支持一键启动/唤起微信、安全重启微信以及自定义微信程序路径；所有上线、退出与窗口变化均会自动记录在实时事件栏。" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
 
                         <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                             <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="截取识别与人工核验入库" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 支持「截取窗口识别」「粘贴截图」「导入图片」三种方式，识别完成后可在预览画布上查看文本定位框。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 右侧可在「字段核验」与「识别文本」之间切换，支持一键复制全文或核对字段后直接保存到客户档案。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="自动唤起与窗口 OCR 诊断" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 在标签批量导入或执行窗口诊断时，若微信处于最小化、系统托盘隐藏或未运行状态，系统会自动唤起或启动微信，无需手动切换。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 选中任意微信窗口可一键唤起前台、最小化，或执行「截图诊断」快速确认当前页面是否处于已登录、待扫码或掉线状态。" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
                     </StackPanel>

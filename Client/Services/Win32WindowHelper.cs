@@ -147,7 +147,19 @@ namespace Client.Services
         [DllImport("comdlg32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern bool GetOpenFileName(ref OPENFILENAME lpofn);
 
-        internal static string? PickImageFilePath(nint ownerHwnd)
+        internal static string? PickImageFilePath(nint ownerHwnd) =>
+            PickFilePath(
+                ownerHwnd,
+                "图片文件 (*.png;*.jpg;*.jpeg;*.bmp)\0*.png;*.jpg;*.jpeg;*.bmp\0所有文件 (*.*)\0*.*\0\0",
+                "选择需要识别的图片");
+
+        internal static string? PickExecutableFilePath(nint ownerHwnd) =>
+            PickFilePath(
+                ownerHwnd,
+                "微信程序 (Weixin.exe;WeChat.exe)\0Weixin.exe;WeChat.exe\0可执行文件 (*.exe)\0*.exe\0\0",
+                "选择微信主程序 (Weixin.exe / WeChat.exe)");
+
+        private static string? PickFilePath(nint ownerHwnd, string filter, string title)
         {
             const int maxChars = 4096;
             nint fileBuffer = Marshal.AllocHGlobal(maxChars * sizeof(char));
@@ -159,11 +171,11 @@ namespace Client.Services
                 {
                     lStructSize = Marshal.SizeOf<OPENFILENAME>(),
                     hwndOwner = ownerHwnd,
-                    lpstrFilter = "图片文件 (*.png;*.jpg;*.jpeg;*.bmp)\0*.png;*.jpg;*.jpeg;*.bmp\0所有文件 (*.*)\0*.*\0\0",
+                    lpstrFilter = filter,
                     nFilterIndex = 1,
                     lpstrFile = fileBuffer,
                     nMaxFile = maxChars,
-                    lpstrTitle = "选择需要识别的图片",
+                    lpstrTitle = title,
                     Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR
                 };
 
@@ -212,6 +224,61 @@ namespace Client.Services
         internal static extern bool SetForegroundWindow(nint hWnd);
 
         [DllImport("user32.dll")]
+        internal static extern nint GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern bool BringWindowToTop(nint hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        internal static bool ForceBringToForeground(nint hWnd)
+        {
+            if (!IsWindow(hWnd)) return false;
+
+            if (IsIconic(hWnd))
+            {
+                _ = ShowWindow(hWnd, SW_RESTORE);
+            }
+            else if (!IsWindowVisible(hWnd))
+            {
+                _ = ShowWindow(hWnd, SW_SHOW);
+                _ = ShowWindow(hWnd, SW_RESTORE);
+            }
+
+            nint fg = GetForegroundWindow();
+            uint curThread = GetCurrentThreadId();
+            uint fgThread = fg != nint.Zero ? GetWindowThreadProcessId(fg, out _) : 0;
+            uint targetThread = GetWindowThreadProcessId(hWnd, out _);
+
+            bool attachedFg = false;
+            bool attachedTarget = false;
+            try
+            {
+                if (fgThread != 0 && fgThread != curThread)
+                {
+                    attachedFg = AttachThreadInput(curThread, fgThread, true);
+                }
+                if (targetThread != 0 && targetThread != curThread)
+                {
+                    attachedTarget = AttachThreadInput(curThread, targetThread, true);
+                }
+
+                _ = BringWindowToTop(hWnd);
+                _ = SetForegroundWindow(hWnd);
+                return IsWindowVisible(hWnd) && !IsIconic(hWnd);
+            }
+            finally
+            {
+                if (attachedTarget) _ = AttachThreadInput(curThread, targetThread, false);
+                if (attachedFg) _ = AttachThreadInput(curThread, fgThread, false);
+            }
+        }
+
+        [DllImport("user32.dll")]
         internal static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
 
         [DllImport("user32.dll")]
@@ -242,7 +309,7 @@ namespace Client.Services
         internal static bool MoveAndResizeWindow(nint hWnd, int x, int y, int width, int height)
         {
             if (!IsWindow(hWnd)) return false;
-            _ = ShowWindow(hWnd, SW_RESTORE);
+            _ = ForceBringToForeground(hWnd);
             bool ok = SetWindowPos(hWnd, nint.Zero, x, y, width, height, SWP_SHOWWINDOW);
             _ = SetForegroundWindow(hWnd);
             return ok;
@@ -416,9 +483,15 @@ namespace Client.Services
                 throw new InvalidOperationException("目标窗口句柄已失效，请刷新窗口列表。");
             }
 
+            if (IsIconic(hWnd) || !IsWindowVisible(hWnd))
+            {
+                _ = ForceBringToForeground(hWnd);
+                Thread.Sleep(260);
+            }
+
             if (IsIconic(hWnd))
             {
-                throw new InvalidOperationException("目标窗口当前处于最小化状态，请先点击“显示窗口”后再执行截图识别。");
+                throw new InvalidOperationException("目标窗口仍处于最小化状态，无法截取画面。");
             }
 
             if (!GetWindowRect(hWnd, out RECT rect) || rect.Width <= 0 || rect.Height <= 0)

@@ -9,392 +9,565 @@
     xmlns:models="using:Client.Models"
     mc:Ignorable="d">
 
-    <Grid x:Name="RootThreePaneGrid" Background="{StaticResource AppSurfaceBrush}">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition x:Name="LeftPaneColumn" Width="268" MinWidth="220" />
-            <ColumnDefinition Width="6" />
-            <ColumnDefinition x:Name="CenterPaneColumn" Width="*" MinWidth="450" />
-            <ColumnDefinition Width="6" />
-            <ColumnDefinition x:Name="RightPaneColumn" Width="368" MinWidth="290" />
-        </Grid.ColumnDefinitions>
+    <Grid Background="{StaticResource AppCanvasBgBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-        <!-- Column 0: WeChat Window Monitor Sidebar -->
+        <!-- Row 0: Top Global Control Bar (Each global action appears ONCE) -->
         <Border
-            Grid.Column="0"
-            Background="{StaticResource AppSurfaceBrush}">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+            Grid.Row="0"
+            Padding="18,11"
+            Background="{StaticResource AppSurfaceBrush}"
+            BorderBrush="{StaticResource AppBorderBrush}"
+            BorderThickness="0,0,0,1">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
 
-                <Grid Grid.Row="0" Padding="14,14,14,8">
-                    <TextBlock FontSize="14.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信窗口监控" />
-                    <Border HorizontalAlignment="Right" Padding="7,2" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="10">
-                        <TextBlock x:Name="WindowCountPill" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="0" />
-                    </Border>
-                </Grid>
-
-                <StackPanel Grid.Row="1" Padding="14,4,14,10" Spacing="8">
-                    <Grid ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBox
-                            x:Name="WindowSearchBox"
-                            Height="34"
-                            Padding="10,6"
-                            FontSize="12.5"
-                            PlaceholderText="筛选窗口标题或进程..."
-                            Style="{StaticResource SoftTextBoxStyle}"
-                            TextChanged="WindowSearchBox_TextChanged" />
-                        <Button
-                            Grid.Column="1"
-                            Width="34"
-                            Height="34"
-                            Padding="0"
-                            Click="RefreshWindowsButton_Click"
-                            CornerRadius="7"
-                            Style="{StaticResource PrimaryVioletButtonStyle}"
-                            ToolTipService.ToolTip="刷新窗口列表">
-                            <FontIcon FontSize="14" Foreground="#FFFFFF" Glyph="&#xE72C;" />
-                        </Button>
-                    </Grid>
-
-                    <CheckBox
-                        x:Name="ShowAllWindowsCheck"
-                        MinHeight="24"
-                        Checked="ShowAllWindowsCheck_Changed"
-                        Unchecked="ShowAllWindowsCheck_Changed">
-                        <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Text="包含全部桌面窗口（无微信时调试）" />
-                    </CheckBox>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <Ellipse x:Name="HeaderStatusDot" Width="10" Height="10" Fill="{StaticResource TextMutedBrush}" />
+                    <StackPanel Spacing="1">
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock FontSize="15.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信程序监控" />
+                            <Border x:Name="HeaderStatusPill" Padding="8,2" Background="{StaticResource AppInputBgBrush}" CornerRadius="9">
+                                <TextBlock x:Name="HeaderStatusLabel" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="检测中..." />
+                            </Border>
+                        </StackPanel>
+                        <TextBlock x:Name="LastCheckText" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="实时监听已开启（每 2 秒同步进程与窗口状态）" />
+                    </StackPanel>
                 </StackPanel>
 
-                <Grid Grid.Row="2">
-                    <TextBlock
-                        x:Name="EmptyWindowListHint"
-                        Margin="20,28"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Top"
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <ToggleSwitch
+                        x:Name="AutoMonitorToggle"
+                        MinWidth="0"
+                        Margin="0,0,4,0"
+                        IsOn="True"
+                        OffContent="已暂停"
+                        OnContent="实时监听"
+                        Toggled="AutoMonitorToggle_Toggled" />
+                    <Button
+                        x:Name="RefreshNowButton"
+                        Width="32"
+                        Height="32"
+                        Padding="0"
+                        Click="RefreshNowButton_Click"
+                        CornerRadius="7"
+                        Style="{StaticResource SecondaryOutlineButtonStyle}"
+                        ToolTipService.ToolTip="立即检测一次">
+                        <FontIcon FontSize="13" Glyph="&#xE72C;" />
+                    </Button>
+                    <Button
+                        x:Name="ConfigPathButton"
+                        Height="32"
+                        Padding="11,0"
+                        Click="ConfigPathButton_Click"
+                        Content="配置路径"
                         FontSize="12"
-                        Foreground="{StaticResource TextMutedBrush}"
-                        Text="未检测到运行中的微信/企业微信，可勾选上方“包含全部桌面窗口”或直接粘贴/导入截图。"
-                        TextAlignment="Center"
-                        TextWrapping="Wrap"
-                        Visibility="Collapsed" />
-
-                    <ListView
-                        x:Name="WindowsListView"
-                        Padding="8,0,8,8"
-                        SelectionChanged="WindowsListView_SelectionChanged"
-                        SelectionMode="Single">
-                        <ListView.ItemTemplate>
-                            <DataTemplate x:DataType="models:WeChatWindowInfo">
-                                <Border Padding="6,8" CornerRadius="6">
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Border
-                                            Grid.Column="0"
-                                            VerticalAlignment="Top"
-                                            Margin="0,2,0,0"
-                                            Padding="5,2"
-                                            Background="{StaticResource BrandSoftBgBrush}"
-                                            CornerRadius="4">
-                                            <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind ShortTag}" />
-                                        </Border>
-                                        <StackPanel Grid.Column="1" Spacing="2">
-                                            <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayTitle}" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind SummaryLine}" TextTrimming="CharacterEllipsis" />
-                                        </StackPanel>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
-                </Grid>
-
-                <Border
-                    Grid.Row="3"
-                    Padding="12"
-                    Background="{StaticResource AppCanvasBgBrush}"
-                    BorderBrush="{StaticResource AppBorderSubtleBrush}"
-                    BorderThickness="0,1,0,0">
-                    <Grid ColumnSpacing="8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Button
-                            x:Name="ShowWindowButton"
-                            Grid.Column="0"
-                            Height="34"
-                            HorizontalAlignment="Stretch"
-                            Click="ShowWindowButton_Click"
-                            Content="显示窗口"
-                            FontSize="12.5"
-                            IsEnabled="False"
-                            Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                        <Button
-                            x:Name="HideWindowButton"
-                            Grid.Column="1"
-                            Height="34"
-                            HorizontalAlignment="Stretch"
-                            Click="HideWindowButton_Click"
-                            Content="隐藏暂停"
-                            FontSize="12.5"
-                            IsEnabled="False"
-                            Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                    </Grid>
-                </Border>
+                        Style="{StaticResource SecondaryOutlineButtonStyle}"
+                        ToolTipService.ToolTip="手动指定 Weixin.exe / WeChat.exe 路径" />
+                    <Button
+                        x:Name="LaunchWeChatButton"
+                        Height="32"
+                        Padding="13,0"
+                        Click="LaunchWeChatButton_Click"
+                        Content="启动微信"
+                        FontSize="12"
+                        Style="{StaticResource PrimaryVioletButtonStyle}" />
+                    <Button
+                        x:Name="RestartWeChatButton"
+                        Height="32"
+                        Padding="12,0"
+                        Click="RestartWeChatButton_Click"
+                        Content="重启微信"
+                        FontSize="12"
+                        IsEnabled="False"
+                        Style="{StaticResource DangerOutlineButtonStyle}" />
+                </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Column 1: Left Vertical Splitter -->
-        <controls:VerticalResizeSplitter x:Name="LeftPaneSplitter" Grid.Column="1" />
+        <!-- Row 1: Action Feedback Banner (Collapsible) -->
+        <Border
+            x:Name="StatusBanner"
+            Grid.Row="1"
+            Margin="16,10,16,0"
+            Padding="12,8"
+            Background="{StaticResource BrandSoftBgBrush}"
+            BorderBrush="{StaticResource BrandSoftBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Visibility="Collapsed">
+            <Grid>
+                <TextBlock x:Name="StatusBannerText" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" />
+                <Button HorizontalAlignment="Right" Padding="6,2" Background="Transparent" BorderThickness="0" Click="CloseBannerButton_Click" Content="✕" FontSize="11" Foreground="{StaticResource TextMutedBrush}" />
+            </Grid>
+        </Border>
 
-        <!-- Column 2: Action Bar & RapidOCR Preview Stage -->
-        <Grid Grid.Column="2" Background="{StaticResource AppSurfaceBrush}">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
+        <!-- Row 2: 4-Metric Compact KPI Summary Strip -->
+        <Grid Grid.Row="2" Padding="16,12,16,8" ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-            <Border
-                Grid.Row="0"
-                Padding="16,12"
-                Background="{StaticResource AppSurfaceBrush}"
-                BorderBrush="{StaticResource AppBorderSubtleBrush}"
-                BorderThickness="0,0,0,1">
-                <Grid ColumnSpacing="10">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <Border Padding="8,5" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="6">
-                            <TextBlock FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="窗口识别" />
-                        </Border>
-                    </StackPanel>
-
-                    <TextBlock
-                        x:Name="PreviewMetaText"
-                        Grid.Column="1"
-                        VerticalAlignment="Center"
-                        FontSize="12"
-                        Foreground="{StaticResource TextMutedBrush}"
-                        Text="选择左侧窗口截图，或粘贴剪贴板截图 / 导入本地图片"
-                        TextTrimming="CharacterEllipsis" />
-
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <Button
-                            x:Name="CaptureAndOcrButton"
-                            Height="34"
-                            Click="CaptureAndOcrButton_Click"
-                            Content="截取窗口识别"
-                            FontSize="12.5"
-                            IsEnabled="False"
-                            Style="{StaticResource PrimaryVioletButtonStyle}" />
-                        <Button
-                            x:Name="PasteClipboardButton"
-                            Height="34"
-                            Click="PasteClipboardButton_Click"
-                            Content="粘贴截图"
-                            FontSize="12.5"
-                            Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                        <Button
-                            x:Name="LoadImageButton"
-                            Height="34"
-                            Click="LoadImageButton_Click"
-                            Content="导入图片"
-                            FontSize="12.5"
-                            Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                    </StackPanel>
-                </Grid>
+            <Border Grid.Column="0" Padding="13,10" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="9">
+                <StackPanel Spacing="3">
+                    <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="程序存活状态" />
+                    <TextBlock x:Name="KpiAliveText" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="未运行" />
+                    <TextBlock x:Name="KpiAliveSubText" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Text="0 个进程" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
             </Border>
 
-            <Border
-                x:Name="StatusBanner"
-                Grid.Row="1"
-                Margin="16,12,16,0"
-                Padding="12,8"
-                Background="{StaticResource BrandSoftBgBrush}"
-                BorderBrush="{StaticResource BrandSoftBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="8"
-                Visibility="Collapsed">
-                <Grid>
-                    <TextBlock x:Name="StatusBannerText" VerticalAlignment="Center" FontSize="12.5" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" />
-                    <Button HorizontalAlignment="Right" Padding="6,2" Background="Transparent" BorderThickness="0" Click="CloseBannerButton_Click" Content="✕" FontSize="11" Foreground="{StaticResource TextMutedBrush}" />
-                </Grid>
+            <Border Grid.Column="1" Padding="13,10" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="9">
+                <StackPanel Spacing="3">
+                    <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="登录状态与账号" />
+                    <TextBlock x:Name="KpiLoginText" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="未登录" />
+                    <TextBlock x:Name="KpiLoginSubText" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Text="批量导入前会自动唤起微信" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
             </Border>
 
-            <Grid Grid.Row="2" Padding="16">
-                <Border Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
+            <Border Grid.Column="2" Padding="13,10" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="9">
+                <StackPanel Spacing="3">
+                    <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="活跃窗口数" />
+                    <TextBlock x:Name="KpiWindowsText" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="0 个窗口" />
+                    <TextBlock x:Name="KpiWindowsSubText" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Text="主窗口 0 · 其余 0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="3" Padding="13,10" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="9">
+                <StackPanel Spacing="3">
+                    <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="微信版本与安装路径" />
+                    <TextBlock x:Name="KpiVersionText" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="未检测到" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="KpiPathSubText" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Text="点击右上角「配置路径」指定程序" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- Row 3: Two-Pane Monitor Body (Left: Processes + Windows + Events | Right: Window Detail & OCR Diagnosis) -->
+        <Grid Grid.Row="3" Padding="16,4,16,14" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="460" />
+                <ColumnDefinition Width="410" MinWidth="340" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Left Column: Processes, Windows & Event Log -->
+            <Grid Grid.Column="0" RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" MaxHeight="220" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="148" />
+                </Grid.RowDefinitions>
+
+                <!-- Card 1: Running WeChat Processes (PID, Version, Memory, Threads, Uptime, Path) -->
+                <Border
+                    Grid.Row="0"
+                    Background="{StaticResource AppSurfaceBrush}"
+                    BorderBrush="{StaticResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
 
-                        <Border
-                            Grid.Row="0"
-                            Padding="14,8"
-                            Background="{StaticResource AppSurfaceBrush}"
-                            BorderBrush="{StaticResource AppBorderSubtleBrush}"
-                            BorderThickness="0,0,0,1"
-                            CornerRadius="10,10,0,0">
+                        <Border Grid.Row="0" Padding="14,9" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
                             <Grid>
-                                <TextBlock x:Name="EngineNoteText" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis" />
-                                <CheckBox
-                                    x:Name="ShowOverlayCheck"
-                                    HorizontalAlignment="Right"
-                                    MinHeight="24"
-                                    IsChecked="True"
-                                    Checked="ShowOverlayCheck_Changed"
-                                    Unchecked="ShowOverlayCheck_Changed">
-                                    <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Text="显示识别区域框" />
-                                </CheckBox>
+                                <TextBlock VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信进程明细（PID / 版本 / 内存 / 运行时长）" />
+                                <Border HorizontalAlignment="Right" Padding="7,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8">
+                                    <TextBlock x:Name="ProcessCountPill" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="0" />
+                                </Border>
                             </Grid>
                         </Border>
 
-                        <Grid Grid.Row="1" Padding="14">
-                            <StackPanel x:Name="EmptyPreviewHint" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
-                                <Border Width="56" Height="56" HorizontalAlignment="Center" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="14">
-                                    <FontIcon FontSize="24" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8FE;" />
-                                </Border>
-                                <TextBlock HorizontalAlignment="Center" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="窗口识别已就绪" />
-                                <TextBlock MaxWidth="360" HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="选中左侧微信窗口点击“截取窗口识别”，或点“粘贴截图” / “导入图片”快速识别客户资料。" TextAlignment="Center" TextWrapping="Wrap" />
-                            </StackPanel>
+                        <Grid Grid.Row="1">
+                            <TextBlock
+                                x:Name="EmptyProcessHint"
+                                Margin="14,18"
+                                HorizontalAlignment="Center"
+                                FontSize="12"
+                                Foreground="{StaticResource TextMutedBrush}"
+                                Text="当前未检测到运行中的微信或企业微信进程。" />
 
-                            <Viewbox x:Name="PreviewViewbox" Stretch="Uniform" Visibility="Collapsed">
-                                <Grid x:Name="PreviewSurface">
-                                    <Image x:Name="PreviewImage" Stretch="Fill" />
-                                    <Canvas x:Name="OverlayCanvas" IsHitTestVisible="False" />
-                                </Grid>
-                            </Viewbox>
+                            <ListView x:Name="ProcessesListView" MaxHeight="172" Padding="8,4" SelectionMode="None">
+                                <ListView.ItemContainerTransitions>
+                                    <TransitionCollection />
+                                </ListView.ItemContainerTransitions>
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="Padding" Value="0,3" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="models:WeChatProcessInfo">
+                                        <Border Padding="10,7" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="7">
+                                            <StackPanel Spacing="3">
+                                                <Grid ColumnSpacing="6">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                        <Border Padding="6,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="4">
+                                                            <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind DisplayType}" />
+                                                        </Border>
+                                                        <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind ProcessName}" />
+                                                        <Border Padding="5,1" Background="{StaticResource AppInputBgBrush}" CornerRadius="4">
+                                                            <TextBlock FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind RoleTag, Mode=OneWay}" />
+                                                        </Border>
+                                                    </StackPanel>
+                                                    <Border HorizontalAlignment="Right" Padding="7,1" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
+                                                        <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandHighlightTextBrush}" Text="{x:Bind LoginStateLabel, Mode=OneWay}" />
+                                                    </Border>
+                                                </Grid>
+                                                <TextBlock FontFamily="Consolas" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind MetricsSummary, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" IsTextSelectionEnabled="True" Text="{x:Bind PathDisplay, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
                         </Grid>
                     </Grid>
                 </Border>
-            </Grid>
-        </Grid>
 
-        <!-- Column 3: Right Vertical Splitter -->
-        <controls:VerticalResizeSplitter x:Name="RightPaneSplitter" Grid.Column="3" />
+                <!-- Card 2: Detected WeChat Windows (Selectable) -->
+                <Border
+                    Grid.Row="1"
+                    Background="{StaticResource AppSurfaceBrush}"
+                    BorderBrush="{StaticResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
 
-        <!-- Column 4: Inspector Panel -->
-        <Border Grid.Column="4" Background="{StaticResource AppSurfaceBrush}">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
+                        <Border Grid.Row="0" Padding="14,9" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
+                            <Grid>
+                                <TextBlock VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信窗口列表（点击查看详情与诊断）" />
+                                <Border HorizontalAlignment="Right" Padding="7,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8">
+                                    <TextBlock x:Name="WindowCountPill" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="0" />
+                                </Border>
+                            </Grid>
+                        </Border>
 
-                <Border Grid.Row="0" Padding="16,10,16,0" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
-                    <StackPanel Orientation="Horizontal" Spacing="20">
-                        <Button Padding="0,0,0,10" Background="Transparent" BorderThickness="0" Click="InspectorTab_Click" Tag="verify">
-                            <StackPanel Spacing="6">
-                                <TextBlock x:Name="TabVerifyText" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="状态与人工核验" />
-                                <Border x:Name="TabVerifyUnderline" Height="2" Background="{StaticResource BrandPrimaryBrush}" CornerRadius="1" />
-                            </StackPanel>
-                        </Button>
-                        <Button Padding="0,0,0,10" Background="Transparent" BorderThickness="0" Click="InspectorTab_Click" Tag="lines">
-                            <StackPanel Spacing="6">
-                                <TextBlock x:Name="TabLinesText" FontSize="13" Foreground="{StaticResource TextSecondaryBrush}" Text="识别文本 (0)" />
-                                <Border x:Name="TabLinesUnderline" Height="2" Background="Transparent" CornerRadius="1" />
-                            </StackPanel>
-                        </Button>
-                    </StackPanel>
+                        <Grid Grid.Row="1">
+                            <TextBlock
+                                x:Name="EmptyWindowHint"
+                                Margin="20,28"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Foreground="{StaticResource TextMutedBrush}"
+                                Text="当前无可见或托盘中的微信窗口；若需打开，点击右上角「启动微信」即可。"
+                                TextAlignment="Center"
+                                TextWrapping="Wrap" />
+
+                            <ListView
+                                x:Name="WindowsListView"
+                                Padding="8,6"
+                                SelectionChanged="WindowsListView_SelectionChanged"
+                                SelectionMode="Single">
+                                <ListView.ItemContainerTransitions>
+                                    <TransitionCollection />
+                                </ListView.ItemContainerTransitions>
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="Padding" Value="0,2" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="models:WeChatWindowInfo">
+                                        <Border Padding="10,7" CornerRadius="7">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <Border Grid.Column="0" VerticalAlignment="Center" Padding="6,2" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="5">
+                                                    <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind WindowRole, Mode=OneWay}" />
+                                                </Border>
+
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                                    <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayTitle, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock FontFamily="Consolas" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind SummaryLine, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+
+                                                <Border Grid.Column="2" VerticalAlignment="Center" Padding="7,2" Background="{StaticResource AppInputBgBrush}" CornerRadius="8">
+                                                    <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind StateLabel, Mode=OneWay}" />
+                                                </Border>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                    </Grid>
                 </Border>
 
-                <ScrollViewer x:Name="VerifyPanel" Grid.Row="1" Padding="16">
-                    <StackPanel Spacing="12">
-                        <Border Padding="12" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
-                            <StackPanel Spacing="6">
-                                <Grid>
-                                    <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="界面状态判定" />
-                                    <Border x:Name="StatePillBorder" HorizontalAlignment="Right" Padding="8,2" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="10">
-                                        <TextBlock x:Name="InferredStateText" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="待识别" />
-                                    </Border>
-                                </Grid>
-                                <TextBlock x:Name="InferredReasonText" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Text="执行一次识别后自动判定微信状态。" TextWrapping="Wrap" />
-                                <TextBlock x:Name="OcrTimingText" FontFamily="Consolas" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="耗时: - · 文本行: 0" />
-                            </StackPanel>
-                        </Border>
+                <!-- Card 3: Live Status Transition Events -->
+                <Border
+                    Grid.Row="2"
+                    Background="{StaticResource AppSurfaceBrush}"
+                    BorderBrush="{StaticResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
 
-                        <Border Padding="14" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
-                            <StackPanel Spacing="9">
-                                <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="客户资料人工核验与入库" />
-                                <Grid ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="CandidateRemarkBox" Grid.Column="0" Header="微信备注" PlaceholderText="微信备注名" Style="{StaticResource SoftTextBoxStyle}" />
-                                    <TextBox x:Name="CandidateNameBox" Grid.Column="1" Header="微信昵称" PlaceholderText="自动提取或手填" Style="{StaticResource SoftTextBoxStyle}" />
-                                </Grid>
-                                <TextBox x:Name="CandidateAccountBox" Header="微信号" PlaceholderText="核验后绑定" Style="{StaticResource SoftTextBoxStyle}" />
-                                <Grid ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="CandidateRegionBox" Grid.Column="0" Header="地区" PlaceholderText="如 江苏 常州" Style="{StaticResource SoftTextBoxStyle}" />
-                                    <TextBox x:Name="CandidatePhoneBox" Grid.Column="1" Header="电话" PlaceholderText="手机号" Style="{StaticResource SoftTextBoxStyle}" />
-                                </Grid>
-                                <TextBox x:Name="CandidateSignatureBox" Header="个性签名" PlaceholderText="自动提取" Style="{StaticResource SoftTextBoxStyle}" />
-                                <TextBox x:Name="CandidateSourceBox" Header="来源" PlaceholderText="如 通过搜索手机号添加" Style="{StaticResource SoftTextBoxStyle}" />
-                                <TextBox x:Name="CandidateNoteBox" Header="员工备注" PlaceholderText="补充跟进备注" Style="{StaticResource SoftTextBoxStyle}" />
+                        <Border Grid.Row="0" Padding="14,7" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
+                            <Grid>
+                                <TextBlock VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="实时状态变动记录" />
                                 <Button
-                                    x:Name="SaveCustomerButton"
-                                    Height="38"
-                                    Margin="0,4,0,0"
-                                    HorizontalAlignment="Stretch"
-                                    Click="SaveCustomerButton_Click"
-                                    Content="人工确认并保存到客户档案"
-                                    Style="{StaticResource PrimaryVioletButtonStyle}" />
-                            </StackPanel>
+                                    HorizontalAlignment="Right"
+                                    Height="22"
+                                    Padding="8,0"
+                                    Click="ClearEventsButton_Click"
+                                    Content="清空"
+                                    FontSize="11"
+                                    Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                            </Grid>
                         </Border>
-                    </StackPanel>
-                </ScrollViewer>
 
-                <Grid x:Name="LinesPanel" Grid.Row="1" Padding="14" RowSpacing="10" Visibility="Collapsed">
+                        <ListView x:Name="EventsListView" Grid.Row="1" Padding="10,4" SelectionMode="None">
+                            <ListView.ItemContainerTransitions>
+                                <TransitionCollection />
+                            </ListView.ItemContainerTransitions>
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Padding" Value="0,2" />
+                                    <Setter Property="MinHeight" Value="0" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="models:WeChatMonitorEvent">
+                                    <TextBlock FontFamily="Consolas" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind DisplayLine}" TextWrapping="Wrap" />
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Right Column: Selected Window Properties & On-Demand OCR State Diagnosis -->
+            <Border
+                Grid.Column="1"
+                Background="{StaticResource AppSurfaceBrush}"
+                BorderBrush="{StaticResource AppBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="10">
+                <Grid>
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <Grid Grid.Row="0">
-                        <TextBlock x:Name="OcrStatsText" VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="共 0 行识别结果" />
-                        <Button HorizontalAlignment="Right" Height="30" Padding="10,0" Click="CopyAllTextButton_Click" Content="复制全文" FontSize="12" Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                    </Grid>
-
-                    <Border Grid.Row="1" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
-                        <ListView x:Name="OcrLinesListView" SelectionMode="None">
-                            <ListView.ItemTemplate>
-                                <DataTemplate x:DataType="models:OcrLineResult">
-                                    <Border Padding="4,8" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
-                                        <StackPanel Spacing="4">
-                                            <TextBlock FontSize="12.5" Foreground="{StaticResource TextPrimaryBrush}" IsTextSelectionEnabled="True" Text="{x:Bind Text}" TextWrapping="Wrap" />
-                                            <Border HorizontalAlignment="Left" Padding="6,1" Background="{StaticResource AppInputBgBrush}" CornerRadius="4">
-                                                <TextBlock FontFamily="Consolas" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind BoundsLabel}" />
-                                            </Border>
-                                        </StackPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
+                    <!-- Window-level Actions (ONLY here, NEVER duplicated) -->
+                    <Border Grid.Row="0" Padding="14,10" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
+                        <Grid ColumnSpacing="6">
+                            <TextBlock VerticalAlignment="Center" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="选中窗口与诊断" />
+                            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="6">
+                                <Button
+                                    x:Name="ShowWindowButton"
+                                    Height="28"
+                                    Padding="9,0"
+                                    Click="ShowWindowButton_Click"
+                                    Content="唤起前台"
+                                    FontSize="11.5"
+                                    IsEnabled="False"
+                                    Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                                <Button
+                                    x:Name="HideWindowButton"
+                                    Height="28"
+                                    Padding="9,0"
+                                    Click="HideWindowButton_Click"
+                                    Content="最小化"
+                                    FontSize="11.5"
+                                    IsEnabled="False"
+                                    Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                                <Button
+                                    x:Name="DiagnoseWindowButton"
+                                    Height="28"
+                                    Padding="10,0"
+                                    Click="DiagnoseWindowButton_Click"
+                                    Content="截图诊断"
+                                    FontSize="11.5"
+                                    IsEnabled="False"
+                                    Style="{StaticResource PrimaryVioletButtonStyle}"
+                                    ToolTipService.ToolTip="自动唤起并截取该窗口执行 OCR 状态诊断（登录/掉线检测）" />
+                            </StackPanel>
+                        </Grid>
                     </Border>
+
+                    <!-- Selected Window Technical Details -->
+                    <Border Grid.Row="1" Margin="12,10,12,0" Padding="12,10" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="8">
+                        <StackPanel Spacing="6">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="62" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="窗口标题" />
+                                <TextBlock x:Name="DetailTitleText" Grid.Column="1" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="未选择窗口" TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="62" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="进程 PID" />
+                                <TextBlock x:Name="DetailPidText" Grid.Column="1" FontFamily="Consolas" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" IsTextSelectionEnabled="True" Text="-" />
+                            </Grid>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="62" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="窗口句柄" />
+                                <TextBlock x:Name="DetailHwndText" Grid.Column="1" FontFamily="Consolas" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" IsTextSelectionEnabled="True" Text="-" />
+                            </Grid>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="62" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="窗口类名" />
+                                <TextBlock x:Name="DetailClassText" Grid.Column="1" FontFamily="Consolas" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" IsTextSelectionEnabled="True" Text="-" TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="62" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="尺寸状态" />
+                                <TextBlock x:Name="DetailSizeStateText" Grid.Column="1" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="-" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Diagnostic Preview & OCR Text Tabs -->
+                    <Grid Grid.Row="2" Margin="12,10,12,12" RowSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <!-- OCR Diagnosis Verdict Strip -->
+                        <Border Grid.Row="0" Padding="10,8" Background="{StaticResource BrandCardTintBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="8">
+                            <StackPanel Spacing="4">
+                                <Grid>
+                                    <TextBlock VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="OCR 界面诊断结论" />
+                                    <Border x:Name="DiagStatePillBorder" HorizontalAlignment="Right" Padding="7,2" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8">
+                                        <TextBlock x:Name="DiagStateText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="待诊断" />
+                                    </Border>
+                                </Grid>
+                                <TextBlock x:Name="DiagReasonText" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="点击「截图诊断」将自动唤起选中窗口并校验是否已登录或掉线。" TextWrapping="Wrap" />
+                                <TextBlock x:Name="DiagTimingText" FontFamily="Consolas" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="识别引擎：就绪" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 2-Tab Strip: Preview | Raw Text -->
+                        <Grid Grid.Row="1">
+                            <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                                <Button Padding="0,0,0,5" Background="Transparent" BorderThickness="0" Click="DiagTab_Click" Tag="preview">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock x:Name="TabPreviewText" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="画面预览" />
+                                        <Border x:Name="TabPreviewLine" Height="2" Background="{StaticResource BrandPrimaryBrush}" CornerRadius="1" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Padding="0,0,0,5" Background="Transparent" BorderThickness="0" Click="DiagTab_Click" Tag="lines">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock x:Name="TabLinesText" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Text="识别文本 (0)" />
+                                        <Border x:Name="TabLinesLine" Height="2" Background="Transparent" CornerRadius="1" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+
+                            <CheckBox
+                                x:Name="ShowOverlayCheck"
+                                HorizontalAlignment="Right"
+                                MinWidth="0"
+                                MinHeight="0"
+                                IsChecked="True"
+                                Checked="ShowOverlayCheck_Changed"
+                                Unchecked="ShowOverlayCheck_Changed">
+                                <TextBlock FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="标注框" />
+                            </CheckBox>
+
+                            <Button
+                                x:Name="CopyAllTextButton"
+                                HorizontalAlignment="Right"
+                                Height="24"
+                                Padding="8,0"
+                                Click="CopyAllTextButton_Click"
+                                Content="复制文本"
+                                FontSize="11"
+                                Style="{StaticResource SecondaryOutlineButtonStyle}"
+                                Visibility="Collapsed" />
+                        </Grid>
+
+                        <!-- Preview / Text Content -->
+                        <Border Grid.Row="2" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
+                            <Grid>
+                                <!-- Tab 1: Image Preview -->
+                                <Grid x:Name="PreviewTabContainer" Padding="10">
+                                    <StackPanel x:Name="EmptyPreviewHint" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+                                        <FontIcon FontSize="22" Foreground="{StaticResource TextMutedBrush}" Glyph="&#xE7F4;" />
+                                        <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="暂未执行窗口诊断截图" />
+                                    </StackPanel>
+
+                                    <Viewbox x:Name="PreviewViewbox" Stretch="Uniform" Visibility="Collapsed">
+                                        <Grid x:Name="PreviewSurface">
+                                            <Image x:Name="PreviewImage" Stretch="Fill" />
+                                            <Canvas x:Name="OverlayCanvas" IsHitTestVisible="False" />
+                                        </Grid>
+                                    </Viewbox>
+                                </Grid>
+
+                                <!-- Tab 2: Recognized OCR Lines -->
+                                <ListView x:Name="OcrLinesListView" Padding="8,4" SelectionMode="None" Visibility="Collapsed">
+                                    <ListView.ItemContainerStyle>
+                                        <Style TargetType="ListViewItem">
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Padding" Value="0,3" />
+                                            <Setter Property="MinHeight" Value="0" />
+                                        </Style>
+                                    </ListView.ItemContainerStyle>
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="models:OcrLineResult">
+                                            <Border Padding="6,5" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="5">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock FontSize="12" Foreground="{StaticResource TextPrimaryBrush}" IsTextSelectionEnabled="True" Text="{x:Bind Text}" TextWrapping="Wrap" />
+                                                    <TextBlock FontFamily="Consolas" FontSize="10" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind BoundsLabel}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Grid>
-            </Grid>
-        </Border>
+            </Border>
+        </Grid>
     </Grid>
 </Page>

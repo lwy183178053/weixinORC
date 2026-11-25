@@ -24,24 +24,25 @@
             <ColumnDefinition x:Name="RightPaneColumn" Width="356" MinWidth="290" />
         </Grid.ColumnDefinitions>
 
-        <!-- Column 0: WeChat-style Customer List Sidebar -->
+        <!-- Column 0: WeChat-style Tag-Grouped Customer List Sidebar -->
         <Border
             Grid.Column="0"
             Background="{StaticResource AppSurfaceAltBrush}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="56" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <!-- Search + Top-Left "+" Popup Import Button -->
+                <!-- Search + Compact Multi-Select & Unified Add Customer Button -->
                 <Border
                     Grid.Row="0"
-                    Padding="12,0"
+                    Padding="10,0"
                     Background="{StaticResource AppSurfaceBrush}"
                     BorderBrush="{StaticResource AppBorderBrush}"
                     BorderThickness="0,0,0,1">
-                    <Grid ColumnSpacing="6" VerticalAlignment="Center">
+                    <Grid ColumnSpacing="5" VerticalAlignment="Center">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -49,39 +50,86 @@
                         </Grid.ColumnDefinitions>
                         <TextBox
                             x:Name="SearchBox"
-                            Height="34"
-                            Padding="10,6"
-                            FontSize="12.5"
-                            PlaceholderText="搜索客户昵称、微信号..."
+                            Height="32"
+                            Padding="8,5"
+                            FontSize="12"
+                            PlaceholderText="搜索客户/标签..."
                             Style="{StaticResource SoftTextBoxStyle}"
                             TextChanged="SearchBox_TextChanged" />
                         <Button
+                            x:Name="MultiSelectCustomersButton"
                             Grid.Column="1"
-                            Width="34"
-                            Height="34"
+                            Width="30"
+                            Height="30"
                             Padding="0"
-                            Click="BatchTagImportButton_Click"
-                            CornerRadius="7"
+                            Click="MultiSelectCustomersButton_Click"
+                            CornerRadius="6"
                             Style="{StaticResource SecondaryOutlineButtonStyle}"
-                            ToolTipService.ToolTip="按微信标签批量导入（通讯录管理）">
-                            <FontIcon FontSize="13.5" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8EC;" />
+                            ToolTipService.ToolTip="多选批量删除客户">
+                            <FontIcon x:Name="MultiSelectCustomersIcon" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Glyph="&#xE762;" />
                         </Button>
                         <Button
                             Grid.Column="2"
-                            Width="34"
-                            Height="34"
+                            Width="30"
+                            Height="30"
                             Padding="0"
                             Click="AddCustomerButton_Click"
-                            CornerRadius="7"
+                            CornerRadius="6"
                             Style="{StaticResource PrimaryVioletButtonStyle}"
-                            ToolTipService.ToolTip="新建客户 / 截图识别导入">
-                            <FontIcon FontSize="14" Foreground="#FFFFFF" Glyph="&#xE710;" />
+                            ToolTipService.ToolTip="添加客户（截图识别 / 微信标签批量导入）">
+                            <FontIcon FontSize="13" Foreground="#FFFFFF" Glyph="&#xE710;" />
                         </Button>
                     </Grid>
                 </Border>
 
-                <!-- Customer Conversation List -->
-                <Grid Grid.Row="1">
+                <!-- Compact Batch Delete Bar (Visible in Customer Multi-Select Mode) -->
+                <Border
+                    x:Name="CustomerMultiSelectBar"
+                    Grid.Row="1"
+                    Padding="8,5"
+                    Background="{StaticResource BrandSoftBgBrush}"
+                    BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                    BorderThickness="0,0,0,1"
+                    Visibility="Collapsed">
+                    <Grid ColumnSpacing="4">
+                        <TextBlock
+                            x:Name="SelectedCustomersCountText"
+                            VerticalAlignment="Center"
+                            FontSize="11.5"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource BrandHighlightTextBrush}"
+                            Text="已选 0" />
+                        <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="4">
+                            <Button
+                                x:Name="SelectAllCustomersButton"
+                                Height="24"
+                                Padding="7,0"
+                                Click="SelectAllCustomersButton_Click"
+                                Content="全选"
+                                FontSize="11"
+                                Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                            <Button
+                                x:Name="DeleteSelectedCustomersButton"
+                                Height="24"
+                                Padding="7,0"
+                                Click="DeleteSelectedCustomersButton_Click"
+                                Content="删除"
+                                FontSize="11"
+                                IsEnabled="False"
+                                Style="{StaticResource DangerOutlineButtonStyle}" />
+                            <Button
+                                Height="24"
+                                Padding="7,0"
+                                Click="ExitCustomerMultiSelectButton_Click"
+                                Content="取消"
+                                FontSize="11"
+                                Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Tag-Grouped Collapsible Customer List -->
+                <Grid Grid.Row="2">
                     <StackPanel
                         x:Name="EmptyListHint"
                         Margin="20,44"
@@ -102,58 +150,172 @@
 
                     <ListView
                         x:Name="CustomersListView"
-                        Padding="6,6"
-                        SelectionChanged="CustomersListView_SelectionChanged"
-                        SelectionMode="Single">
+                        Padding="6,4"
+                        IsItemClickEnabled="True"
+                        ItemClick="CustomersListView_ItemClick"
+                        SelectionMode="None">
+                        <ListView.ItemContainerTransitions>
+                            <TransitionCollection />
+                        </ListView.ItemContainerTransitions>
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Margin" Value="0" />
+                                <Setter Property="MinHeight" Value="0" />
+                                <Setter Property="MinWidth" Value="0" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
                         <ListView.ItemTemplate>
-                            <DataTemplate x:DataType="models:CustomerDto">
-                                <Grid Padding="6,9" ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="42" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-
+                            <DataTemplate x:DataType="models:CustomerListRow">
+                                <Grid>
+                                    <!-- Tag Group Header Row -->
                                     <Border
-                                        Grid.Column="0"
-                                        Width="40"
-                                        Height="40"
-                                        Background="{StaticResource BrandSoftBgBrush}"
-                                        BorderBrush="{StaticResource BrandSoftBorderBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="8">
-                                        <Grid>
-                                            <TextBlock
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"
-                                                FontSize="15"
-                                                FontWeight="Bold"
-                                                Foreground="{StaticResource BrandPrimaryBrush}"
-                                                Text="{x:Bind AvatarInitial}"
-                                                Visibility="{x:Bind AvatarInitialVisibility, Mode=OneWay}" />
-                                            <Image
-                                                Source="{x:Bind AvatarImage, Mode=OneWay}"
-                                                Stretch="UniformToFill"
-                                                Visibility="{x:Bind AvatarImageVisibility, Mode=OneWay}" />
-                                        </Grid>
-                                    </Border>
-
-                                    <Grid Grid.Column="1" RowSpacing="3">
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
-
-                                        <Grid Grid.Row="0">
+                                        Margin="0,4,0,1"
+                                        Padding="6,4"
+                                        Background="Transparent"
+                                        CornerRadius="6"
+                                        Visibility="{x:Bind GroupHeaderVisibility}">
+                                        <Border.ContextFlyout>
+                                            <MenuFlyout>
+                                                <MenuFlyoutItem Click="SelectTagGroupMenuItem_Click" Text="勾选此标签下全部客户">
+                                                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE762;" /></MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutSeparator />
+                                                <MenuFlyoutItem Click="ExpandAllGroupsMenuItem_Click" Text="展开全部标签">
+                                                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE70D;" /></MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutItem Click="CollapseAllGroupsMenuItem_Click" Text="折叠全部标签">
+                                                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE76C;" /></MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                            </MenuFlyout>
+                                        </Border.ContextFlyout>
+                                        <Grid ColumnSpacing="5">
                                             <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayName}" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeShort}" />
-                                        </Grid>
 
-                                        <TextBlock Grid.Row="1" FontSize="12" Foreground="{StaticResource TextMutedBrush}" MaxLines="1" Text="{x:Bind PreviewLine}" TextTrimming="CharacterEllipsis" />
-                                    </Grid>
+                                            <CheckBox
+                                                Grid.Column="0"
+                                                MinWidth="0"
+                                                MinHeight="0"
+                                                Padding="0"
+                                                VerticalAlignment="Center"
+                                                Click="GroupHeaderCheckBox_Click"
+                                                IsChecked="{x:Bind IsGroupAllSelected, Mode=OneWay}"
+                                                Visibility="{x:Bind GroupCheckVisibility, Mode=OneWay}" />
+
+                                            <FontIcon
+                                                Grid.Column="1"
+                                                VerticalAlignment="Center"
+                                                FontSize="9.5"
+                                                Foreground="{StaticResource TextMutedBrush}"
+                                                Glyph="{x:Bind ChevronGlyph, Mode=OneWay}" />
+
+                                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                                <FontIcon FontSize="10" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8EC;" />
+                                                <TextBlock
+                                                    FontSize="11.5"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{StaticResource TextSecondaryBrush}"
+                                                    Text="{x:Bind TagName}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+
+                                            <Border
+                                                Grid.Column="3"
+                                                Padding="5,1"
+                                                VerticalAlignment="Center"
+                                                Background="{StaticResource AppBorderSubtleBrush}"
+                                                CornerRadius="8">
+                                                <TextBlock FontSize="10" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind GroupCountText}" />
+                                            </Border>
+                                        </Grid>
+                                    </Border>
+
+                                    <!-- Compact Customer Row -->
+                                    <Border
+                                        Margin="0,1"
+                                        Padding="6,6"
+                                        Background="{x:Bind RowBackground, Mode=OneWay}"
+                                        BorderBrush="{x:Bind RowBorderBrush, Mode=OneWay}"
+                                        BorderThickness="1"
+                                        CornerRadius="7"
+                                        Visibility="{x:Bind CustomerRowVisibility}">
+                                        <Border.ContextFlyout>
+                                            <MenuFlyout>
+                                                <MenuFlyoutItem Click="MultiSelectCustomerRowMenuItem_Click" Text="多选批量管理">
+                                                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE762;" /></MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutSeparator />
+                                                <MenuFlyoutItem Click="DeleteCustomerRowMenuItem_Click" Foreground="{StaticResource DangerTextBrush}" Text="删除此客户">
+                                                    <MenuFlyoutItem.Icon><FontIcon Foreground="{StaticResource DangerTextBrush}" Glyph="&#xE74D;" /></MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                            </MenuFlyout>
+                                        </Border.ContextFlyout>
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="34" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <CheckBox
+                                                Grid.Column="0"
+                                                MinWidth="0"
+                                                MinHeight="0"
+                                                Padding="0"
+                                                VerticalAlignment="Center"
+                                                Click="CustomerRowCheckBox_Click"
+                                                IsChecked="{x:Bind IsChecked, Mode=TwoWay}"
+                                                Visibility="{x:Bind CustomerCheckVisibility, Mode=OneWay}" />
+
+                                            <Border
+                                                Grid.Column="1"
+                                                Width="34"
+                                                Height="34"
+                                                Background="{StaticResource BrandSoftBgBrush}"
+                                                BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="7">
+                                                <Grid>
+                                                    <TextBlock
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        FontSize="13.5"
+                                                        FontWeight="Bold"
+                                                        Foreground="{StaticResource BrandPrimaryBrush}"
+                                                        Text="{x:Bind AvatarInitial}"
+                                                        Visibility="{x:Bind AvatarInitialVisibility, Mode=OneWay}" />
+                                                    <Image
+                                                        Source="{x:Bind AvatarImage, Mode=OneWay}"
+                                                        Stretch="UniformToFill"
+                                                        Visibility="{x:Bind AvatarImageVisibility, Mode=OneWay}" />
+                                                </Grid>
+                                            </Border>
+
+                                            <Grid Grid.Column="2" VerticalAlignment="Center" RowSpacing="2">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+
+                                                <Grid Grid.Row="0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayName}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Grid.Column="1" Margin="4,0,0,0" VerticalAlignment="Center" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeShort}" />
+                                                </Grid>
+
+                                                <TextBlock Grid.Row="1" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" MaxLines="1" Text="{x:Bind PreviewLine}" TextTrimming="CharacterEllipsis" />
+                                            </Grid>
+                                        </Grid>
+                                    </Border>
                                 </Grid>
                             </DataTemplate>
                         </ListView.ItemTemplate>
@@ -493,14 +655,9 @@
                     <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="在左侧选择客户即可查看基本资料、一键 AI 总结或与 AI 讨论跟进方案。" TextAlignment="Center" TextWrapping="Wrap" />
                 </StackPanel>
 
-                <!-- TAB 1: 基本资料 (Scrollable profile + bottom Edit/Delete bar) -->
+                <!-- TAB 1: 基本资料 (Clean view card; edit opens modal dialog) -->
                 <Grid x:Name="ProfileTabContainer" Grid.Row="1" Visibility="Collapsed">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <ScrollViewer x:Name="ProfileContentScroll" Grid.Row="0" Padding="16,14">
+                    <ScrollViewer x:Name="ProfileContentScroll" Padding="16,14">
                     <StackPanel Spacing="14">
                         <!-- Feedback Banner -->
                         <Border x:Name="ProfileStatusBanner" Padding="10,7" Background="{StaticResource SuccessBgBrush}" CornerRadius="7" Visibility="Collapsed">
@@ -576,7 +733,39 @@
                                     </Border>
                                 </StackPanel>
                                 <TextBlock x:Name="ProfileHeaderAccountText" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Text="微信号：-" TextTrimming="CharacterEllipsis" />
-                                <TextBlock x:Name="ProfileHeaderRegionText" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="地区：-" TextTrimming="CharacterEllipsis" />
+                                <Grid ColumnSpacing="6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="ProfileHeaderRegionText" Grid.Column="0" VerticalAlignment="Center" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="地区：-" TextTrimming="CharacterEllipsis" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Bottom" Orientation="Horizontal" Spacing="5">
+                                        <Button
+                                            x:Name="EditProfileButton"
+                                            Width="26"
+                                            Height="26"
+                                            Padding="0"
+                                            Click="EditProfileButton_Click"
+                                            CornerRadius="6"
+                                            IsEnabled="False"
+                                            Style="{StaticResource SecondaryOutlineButtonStyle}"
+                                            ToolTipService.ToolTip="编辑客户资料与备注">
+                                            <FontIcon FontSize="11.5" Glyph="&#xE70F;" />
+                                        </Button>
+                                        <Button
+                                            x:Name="DeleteCustomerButton"
+                                            Width="26"
+                                            Height="26"
+                                            Padding="0"
+                                            Click="DeleteCustomerButton_Click"
+                                            CornerRadius="6"
+                                            IsEnabled="False"
+                                            Style="{StaticResource DangerOutlineButtonStyle}"
+                                            ToolTipService.ToolTip="删除客户">
+                                            <FontIcon FontSize="11.5" Glyph="&#xE74D;" />
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
                             </StackPanel>
                         </Grid>
 
@@ -679,233 +868,25 @@
                                 <TextBlock x:Name="ViewDescriptionText" Grid.Column="1" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" IsTextSelectionEnabled="True" Text="-" TextWrapping="Wrap" />
                             </Grid>
 
-                            <StackPanel x:Name="ViewSystemIdsPanel" Spacing="6" Visibility="Collapsed">
-                                <Border Height="1" Margin="0,2" Background="{StaticResource AppBorderSubtleBrush}" />
-                                <Grid ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="64" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="本地键" />
-                                    <TextBlock x:Name="ViewLocalKeyText" Grid.Column="1" FontFamily="Consolas" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" IsTextSelectionEnabled="True" Text="-" TextWrapping="Wrap" />
-                                </Grid>
-                                <Grid ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="64" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="原生 ID" />
-                                    <TextBlock x:Name="ViewNativeIdText" Grid.Column="1" FontFamily="Consolas" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" IsTextSelectionEnabled="True" Text="-" TextWrapping="Wrap" />
-                                </Grid>
-                            </StackPanel>
-
                             <Border Height="1" Margin="0,3" Background="{StaticResource AppBorderSubtleBrush}" />
 
                             <!-- Dedicated Bottom Employee Follow-up Notes Card (Read Mode) -->
                             <Border Padding="14" Background="{StaticResource BrandCardTintBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
                                 <StackPanel Spacing="8">
-                                    <Grid>
-                                        <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="员工跟进备注" />
-                                        <Border HorizontalAlignment="Right" Padding="7,2" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="8">
-                                            <TextBlock FontSize="10.5" Foreground="{StaticResource BrandPrimaryBrush}" Text="员工专属" />
-                                        </Border>
-                                    </Grid>
+                                    <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="员工跟进备注" />
                                     <TextBlock
                                         x:Name="ViewEmployeeNoteText"
                                         FontSize="13"
                                         Foreground="{StaticResource TextSecondaryBrush}"
                                         IsTextSelectionEnabled="True"
                                         LineHeight="20"
-                                        Text="暂无员工备注，点击「编辑」即可补充客户意向与跟进内容。"
+                                        Text="暂无员工备注，点击上方编辑图标即可补充客户意向与跟进内容。"
                                         TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
-                        </StackPanel>
-
-                        <!-- EDIT MODE: Full Editable Fields + Avatar Capture Bar + Employee Notes -->
-                        <StackPanel x:Name="ProfileEditModePanel" Spacing="9" Visibility="Collapsed">
-                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="正在编辑客户资料与头像" />
-
-                            <!-- Quick Avatar Action Strip -->
-                            <Border Padding="10" Background="{StaticResource AppCanvasBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="8">
-                                <StackPanel Spacing="6">
-                                    <TextBlock FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="更换客户头像" />
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Button Grid.Column="0" Height="28" Padding="6,0" HorizontalAlignment="Stretch" Click="PasteAvatar_Click" Content="粘贴图片" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                                        <Button Grid.Column="1" Height="28" Padding="6,0" HorizontalAlignment="Stretch" Click="UploadAvatar_Click" Content="本地上传" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-
-                            <TextBox x:Name="EditNameBox" Header="微信昵称" Style="{StaticResource SoftTextBoxStyle}" />
-                            <TextBox
-                                x:Name="EditRemarkBox"
-                                AcceptsReturn="True"
-                                Header="微信备注"
-                                MaxHeight="88"
-                                Style="{StaticResource SoftTextBoxStyle}"
-                                TextWrapping="Wrap" />
-
-                            <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="88" />
-                                </Grid.ColumnDefinitions>
-                                <TextBox x:Name="EditAccountBox" Grid.Column="0" Header="微信号" Style="{StaticResource SoftTextBoxStyle}" />
-                                <ComboBox x:Name="EditGenderBox" Grid.Column="1" HorizontalAlignment="Stretch" Header="性别" SelectedIndex="0">
-                                    <ComboBoxItem Content="未知" />
-                                    <ComboBoxItem Content="男" />
-                                    <ComboBoxItem Content="女" />
-                                </ComboBox>
-                            </Grid>
-
-                            <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBox x:Name="EditRegionBox" Grid.Column="0" Header="地区" Style="{StaticResource SoftTextBoxStyle}" />
-                                <TextBox x:Name="EditPhoneBox" Grid.Column="1" Header="电话" Style="{StaticResource SoftTextBoxStyle}" />
-                            </Grid>
-
-                            <TextBox x:Name="EditSignatureBox" Header="个性签名" Style="{StaticResource SoftTextBoxStyle}" TextWrapping="Wrap" />
-
-                            <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="112" />
-                                </Grid.ColumnDefinitions>
-                                <TextBox x:Name="EditSourceBox" Grid.Column="0" Header="来源" Style="{StaticResource SoftTextBoxStyle}" />
-                                <TextBox x:Name="EditAddedDateBox" Grid.Column="1" Header="添加时间" Style="{StaticResource SoftTextBoxStyle}" />
-                            </Grid>
-
-                            <Border Height="1" Margin="0,2" Background="{StaticResource AppBorderSubtleBrush}" />
-
-                            <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="112" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <ComboBox x:Name="EditFollowStatusBox" Grid.Column="0" HorizontalAlignment="Stretch" Header="跟进状态" SelectedIndex="0">
-                                    <ComboBoxItem Content="未设置" />
-                                    <ComboBoxItem Content="新线索" />
-                                    <ComboBoxItem Content="跟进中" />
-                                    <ComboBoxItem Content="高意向" />
-                                    <ComboBoxItem Content="已报价" />
-                                    <ComboBoxItem Content="已成交" />
-                                    <ComboBoxItem Content="暂缓/流失" />
-                                </ComboBox>
-                                <TextBox x:Name="EditTagsBox" Grid.Column="1" Header="客户标签" PlaceholderText="如 VIP、高意向" Style="{StaticResource SoftTextBoxStyle}" />
-                            </Grid>
-
-                            <TextBox
-                                x:Name="EditDescriptionBox"
-                                MinHeight="64"
-                                AcceptsReturn="True"
-                                Header="客户描述"
-                                PlaceholderText="公司、职位、业务背景等描述信息..."
-                                Style="{StaticResource SoftTextBoxStyle}"
-                                TextWrapping="Wrap" />
-
-                            <!-- Dedicated Bottom Employee Follow-up Notes Card (Edit Mode) -->
-                            <Border Margin="0,4,0,0" Padding="12" Background="{StaticResource BrandCardTintBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
-                                <StackPanel Spacing="6">
-                                    <Grid>
-                                        <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="员工跟进备注" />
-                                        <TextBlock HorizontalAlignment="Right" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="可随时补充跟进要点" />
-                                    </Grid>
-                                    <TextBox
-                                        x:Name="EditEmployeeNoteBox"
-                                        MinHeight="88"
-                                        AcceptsReturn="True"
-                                        Background="{StaticResource AppSurfaceBrush}"
-                                        Foreground="{StaticResource TextPrimaryBrush}"
-                                        BorderBrush="{StaticResource BrandSoftBorderBrush}"
-                                        CornerRadius="7"
-                                        Padding="10,8"
-                                        PlaceholderText="填写客户需求、报价记录、意向程度或下次跟进时间..."
-                                        TextWrapping="Wrap" />
-                                </StackPanel>
-                            </Border>
-
-                            <!-- Collapsible System IDs (local_key / native_id) -->
-                            <Expander HorizontalAlignment="Stretch" Header="高级标识（本地键 / 原生 ID）" IsExpanded="False">
-                                <StackPanel Padding="0,4" Spacing="8">
-                                    <TextBox x:Name="EditLocalKeyBox" Header="本地对象键 (local_key)" PlaceholderText="客户端本地检索键" Style="{StaticResource SoftTextBoxStyle}" />
-                                    <TextBox x:Name="EditNativeIdBox" Header="微信原生 ID (native_id)" PlaceholderText="默认留空，核验后绑定" Style="{StaticResource SoftTextBoxStyle}" />
-                                </StackPanel>
-                            </Expander>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
-
-                <!-- Bottom Action Bar strictly inside 基本资料 Tab -->
-                <Border
-                    Grid.Row="1"
-                    Padding="14,10"
-                    Background="{StaticResource AppSurfaceAltBrush}"
-                    BorderBrush="{StaticResource AppBorderBrush}"
-                    BorderThickness="0,1,0,0">
-                    <Grid>
-                        <!-- Read Mode: Edit & Delete -->
-                        <Grid x:Name="ViewActionsBar" ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Button
-                                x:Name="EditProfileButton"
-                                Grid.Column="0"
-                                Height="34"
-                                HorizontalAlignment="Stretch"
-                                Click="EditProfileButton_Click"
-                                Content="编辑资料"
-                                FontSize="12.5"
-                                IsEnabled="False"
-                                Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                            <Button
-                                x:Name="DeleteCustomerButton"
-                                Grid.Column="1"
-                                Height="34"
-                                HorizontalAlignment="Stretch"
-                                Click="DeleteCustomerButton_Click"
-                                Content="删除客户"
-                                FontSize="12.5"
-                                IsEnabled="False"
-                                Style="{StaticResource DangerOutlineButtonStyle}" />
-                        </Grid>
-
-                        <!-- Edit Mode: Cancel & Save -->
-                        <Grid x:Name="EditActionsBar" ColumnSpacing="10" Visibility="Collapsed">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Button
-                                x:Name="CancelEditButton"
-                                Grid.Column="0"
-                                Height="34"
-                                HorizontalAlignment="Stretch"
-                                Click="CancelEditButton_Click"
-                                Content="取消"
-                                FontSize="12.5"
-                                Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                            <Button
-                                x:Name="SaveProfileButton"
-                                Grid.Column="1"
-                                Height="34"
-                                HorizontalAlignment="Stretch"
-                                Click="SaveProfileButton_Click"
-                                Content="保存修改"
-                                FontSize="12.5"
-                                Style="{StaticResource PrimaryVioletButtonStyle}" />
-                        </Grid>
-                    </Grid>
-                </Border>
                 </Grid>
 
                 <!-- TAB 2: AI 总结 -->

@@ -10,6 +10,8 @@ namespace Client.Services
         public string Theme { get; set; } = "light";
         public string AccentPalette { get; set; } = "violet";
         public string BackendUrl { get; set; } = "http://127.0.0.1:28765";
+        public string WeChatExecutablePath { get; set; } = string.Empty;
+        public List<string> CollapsedCustomerTags { get; set; } = [];
     }
 
     public sealed class AppSettingsService
@@ -72,6 +74,7 @@ namespace Client.Services
             {
                 Current.AccentPalette = "violet";
             }
+            Current.CollapsedCustomerTags ??= [];
         }
 
         public void Save()

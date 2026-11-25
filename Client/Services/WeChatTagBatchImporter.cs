@@ -175,6 +175,8 @@ namespace Client.Services
                     };
                 }
 
+                // Automatically restore & pop up Contact Manager if minimized or behind other windows
+                _ = Win32WindowHelper.ForceBringToForeground(contactManagerHwnd);
                 NormalizeWindowSize(contactManagerHwnd, StandardMgrLogicalWidth, StandardMgrLogicalHeight, offsetX: 60, offsetY: 50);
                 await Task.Delay(350, ct);
 
@@ -766,7 +768,12 @@ namespace Client.Services
             var (existingHwnd, existingPid) = FindContactManagerWindow();
             if (existingHwnd != nint.Zero)
             {
-                if (!resetExisting) return (existingHwnd, existingPid);
+                if (!resetExisting)
+                {
+                    _ = Win32WindowHelper.ForceBringToForeground(existingHwnd);
+                    await Task.Delay(220, ct);
+                    return (existingHwnd, existingPid);
+                }
 
                 Win32WindowHelper.CloseWindowGracefully(existingHwnd);
                 for (int i = 0; i < 12; i++)
@@ -777,10 +784,17 @@ namespace Client.Services
                 await Task.Delay(180, ct);
             }
 
-            var windows = AppServices.WeChatWindows.EnumerateWindows(includeAllVisibleWindows: false);
-            var mainWin = windows.FirstOrDefault(w => w.AccountType == WeChatAccountType.Personal && w.Width >= 400);
-            if (mainWin is null) return (nint.Zero, 0);
+            // Automatically restore/pop up WeChat if minimized, hidden in tray, or not yet launched
+            var ensured = await AppServices.WeChatWindows.EnsurePersonalWeChatWindowReadyAsync(
+                autoLaunchIfClosed: true,
+                allowLoginPageSuccess: false,
+                ct: ct);
+            if (!ensured.Success || ensured.Window is null)
+            {
+                throw new InvalidOperationException(ensured.Message);
+            }
 
+            var mainWin = ensured.Window;
             NormalizeWindowSize(mainWin.Hwnd, StandardMainLogicalWidth, StandardMainLogicalHeight, offsetX: 40, offsetY: 40);
             await Task.Delay(380, ct);
 
@@ -837,16 +851,18 @@ namespace Client.Services
 
             Win32WindowHelper.EnumWindows((hWnd, lParam) =>
             {
-                if (!Win32WindowHelper.IsWindowVisible(hWnd) || Win32WindowHelper.IsIconic(hWnd)) return true;
+                if (!Win32WindowHelper.IsWindow(hWnd)) return true;
                 _ = Win32WindowHelper.GetWindowThreadProcessId(hWnd, out uint rawPid);
                 int pid = unchecked((int)rawPid);
                 if (!wechatPids.Contains(pid)) return true;
 
                 string title = Win32WindowHelper.GetWindowTitleText(hWnd);
                 string cls = Win32WindowHelper.GetWindowClassName(hWnd);
-                if (!Win32WindowHelper.GetWindowRect(hWnd, out var r) || r.Width < 420 || r.Height < 320) return true;
+                bool isMinimized = Win32WindowHelper.IsIconic(hWnd);
+                if (!Win32WindowHelper.GetWindowRect(hWnd, out var r)) return true;
+                if (!isMinimized && (r.Width < 420 || r.Height < 320)) return true;
 
-                if (title.Contains("通讯录", StringComparison.Ordinal) ||
+                if (title.Contains("通讯录管理", StringComparison.Ordinal) ||
                     cls.Contains("ContactManager", StringComparison.OrdinalIgnoreCase) ||
                     cls.Contains("ContactManage", StringComparison.OrdinalIgnoreCase))
                 {

@@ -87,7 +87,7 @@ namespace Client.Pages
                 "customers" => (typeof(CustomersPage), "客户档案"),
                 "groups" => (typeof(GroupsPage), "群组档案"),
                 "guide" => (typeof(GuidePage), "使用介绍"),
-                _ => (typeof(WeChatOcrPage), "窗口识别")
+                _ => (typeof(WeChatOcrPage), "微信监控")
             };
 
             ActiveTabTitleText.Text = title;

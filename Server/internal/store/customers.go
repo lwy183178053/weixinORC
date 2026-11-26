@@ -9,6 +9,7 @@ import (
 
 type Customer struct {
 	ID            int64  `json:"id"`
+	OwnerWxid     string `json:"owner_wxid"`
 	WechatRemark  string `json:"wechat_remark"`
 	WechatName    string `json:"wechat_name"`
 	WechatAccount string `json:"wechat_account"`
@@ -32,6 +33,7 @@ type Customer struct {
 }
 
 type CustomerInput struct {
+	OwnerWxid      string
 	WechatRemark   string
 	WechatName     string
 	WechatAccount  string
@@ -52,6 +54,7 @@ type CustomerInput struct {
 }
 
 type CustomerPatch struct {
+	OwnerWxid     *string
 	WechatRemark  *string
 	WechatName    *string
 	WechatAccount *string
@@ -79,11 +82,20 @@ func (s *Store) CreateCustomer(ctx context.Context, ownerID string, input Custom
 
 	if !input.AllowDuplicate && input.WechatAccount != "" {
 		var exists int
-		err := tx.QueryRowContext(
-			ctx,
-			`SELECT 1 FROM customers WHERE owner_id = ? AND wechat_account = ? LIMIT 1`,
-			ownerID, input.WechatAccount,
-		).Scan(&exists)
+		var err error
+		if input.OwnerWxid != "" {
+			err = tx.QueryRowContext(
+				ctx,
+				`SELECT 1 FROM customers WHERE owner_id = ? AND owner_wxid = ? AND wechat_account = ? LIMIT 1`,
+				ownerID, input.OwnerWxid, input.WechatAccount,
+			).Scan(&exists)
+		} else {
+			err = tx.QueryRowContext(
+				ctx,
+				`SELECT 1 FROM customers WHERE owner_id = ? AND wechat_account = ? LIMIT 1`,
+				ownerID, input.WechatAccount,
+			).Scan(&exists)
+		}
 		if err == nil {
 			return Customer{}, ErrConflict
 		}
@@ -95,12 +107,12 @@ func (s *Store) CreateCustomer(ctx context.Context, ownerID string, input Custom
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO customers (
-			owner_id, wechat_remark, wechat_name, wechat_account,
+			owner_id, owner_wxid, wechat_remark, wechat_name, wechat_account,
 			gender, avatar_url, description, tags, follow_status, local_key, native_id,
 			note, region, phone, signature, source, added_date,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ownerID, input.WechatRemark, input.WechatName, input.WechatAccount,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ownerID, input.OwnerWxid, input.WechatRemark, input.WechatName, input.WechatAccount,
 		input.Gender, input.AvatarURL, input.Description, input.Tags, input.FollowStatus, input.LocalKey, input.NativeID,
 		input.Note, input.Region, input.Phone, input.Signature, input.Source, input.AddedDate,
 		now, now,
@@ -119,6 +131,7 @@ func (s *Store) CreateCustomer(ctx context.Context, ownerID string, input Custom
 
 	return Customer{
 		ID:            id,
+		OwnerWxid:     input.OwnerWxid,
 		WechatRemark:  input.WechatRemark,
 		WechatName:    input.WechatName,
 		WechatAccount: input.WechatAccount,
@@ -141,7 +154,7 @@ func (s *Store) CreateCustomer(ctx context.Context, ownerID string, input Custom
 }
 
 const customerSelectCols = `
-	c.id, c.wechat_remark, c.wechat_name, c.wechat_account,
+	c.id, c.owner_wxid, c.wechat_remark, c.wechat_name, c.wechat_account,
 	c.gender, c.avatar_url, c.description, c.tags, c.follow_status, c.local_key, c.native_id,
 	c.note, c.region, c.phone, c.signature, c.source, c.added_date,
 	COALESCE((SELECT CASE WHEN m.content <> '' THEN m.content WHEN m.image_url <> '' THEN '[图片]' ELSE '' END FROM messages m WHERE m.owner_id = c.owner_id AND m.customer_id = c.id ORDER BY m.sent_at DESC, m.id DESC LIMIT 1), ''),
@@ -151,7 +164,7 @@ const customerSelectCols = `
 func scanCustomer(scanner rowScanner) (Customer, error) {
 	var c Customer
 	err := scanner.Scan(
-		&c.ID, &c.WechatRemark, &c.WechatName, &c.WechatAccount,
+		&c.ID, &c.OwnerWxid, &c.WechatRemark, &c.WechatName, &c.WechatAccount,
 		&c.Gender, &c.AvatarURL, &c.Description, &c.Tags, &c.FollowStatus, &c.LocalKey, &c.NativeID,
 		&c.Note, &c.Region, &c.Phone, &c.Signature, &c.Source, &c.AddedDate,
 		&c.LastMessage, &c.LastMessageAt,
@@ -183,7 +196,8 @@ func (s *Store) UpdateCustomer(ctx context.Context, ownerID string, id int64, pa
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	res, err := tx.ExecContext(ctx, `
 		UPDATE customers
-		SET wechat_remark  = COALESCE(?, wechat_remark),
+		SET owner_wxid     = COALESCE(?, owner_wxid),
+		    wechat_remark  = COALESCE(?, wechat_remark),
 		    wechat_name    = COALESCE(?, wechat_name),
 		    wechat_account = COALESCE(?, wechat_account),
 		    gender         = COALESCE(?, gender),
@@ -201,7 +215,7 @@ func (s *Store) UpdateCustomer(ctx context.Context, ownerID string, id int64, pa
 		    added_date     = COALESCE(?, added_date),
 		    updated_at     = ?
 		WHERE owner_id = ? AND id = ?`,
-		patch.WechatRemark, patch.WechatName, patch.WechatAccount,
+		patch.OwnerWxid, patch.WechatRemark, patch.WechatName, patch.WechatAccount,
 		patch.Gender, patch.AvatarURL, patch.Description, patch.Tags, patch.FollowStatus, patch.LocalKey, patch.NativeID,
 		patch.Note, patch.Region, patch.Phone, patch.Signature, patch.Source, patch.AddedDate,
 		now, ownerID, id,

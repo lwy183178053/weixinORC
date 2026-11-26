@@ -115,6 +115,10 @@ namespace Client.Services
         internal const ushort VK_ESCAPE = 0x1B;
         internal const ushort VK_HOME = 0x24;
         internal const ushort VK_A = 0x41;
+        internal const ushort VK_F = 0x46;
+        internal const ushort VK_V = 0x56;
+        private const uint CF_UNICODETEXT = 13;
+        private const uint GMEM_MOVEABLE = 0x0002;
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOACTIVATE = 0x0010;
@@ -157,6 +161,7 @@ namespace Client.Services
         private const uint BI_RGB = 0;
         private const uint DIB_RGB_COLORS = 0;
         private const int SRCCOPY = 0x00CC0020;
+        private const int CAPTUREBLT = 0x40000000;
         private const int OFN_FILEMUSTEXIST = 0x00001000;
         private const int OFN_PATHMUSTEXIST = 0x00000800;
         private const int OFN_NOCHANGEDIR = 0x00000008;
@@ -736,20 +741,29 @@ namespace Client.Services
                 $"坐标=({RequestedX},{RequestedY}) 实落=({ActualCursorX},{ActualCursorY}) | 命中={HitWindowClass}(PID {HitPid}, 匹配={(HitTargetProcess ? "是" : "否")}) | 前景={(ForegroundMatched ? "是" : "否")} | SendInput={SendDown}/{SendUp}(err={LastError})";
         }
 
-        internal static ClickDiagnostic LeftClickAt(int screenX, int screenY, nint expectedTargetHwnd = 0, string? debugLabel = null)
+        internal static ClickDiagnostic LeftClickAt(int screenX, int screenY, nint expectedTargetHwnd = 0, string? debugLabel = null, bool skipReactivate = false)
         {
             bool active = true;
             if (expectedTargetHwnd != nint.Zero && IsWindow(expectedTargetHwnd))
             {
-                active = EnsureWindowTrulyActive(expectedTargetHwnd);
-                if (!IsPointOwnedByWindowProcess(screenX, screenY, expectedTargetHwnd))
+                if (!skipReactivate)
                 {
-                    nint blocker = WindowFromPoint(new POINT { X = screenX, Y = screenY });
-                    string blockerCls = blocker != nint.Zero ? GetWindowClassName(GetAncestor(blocker, GA_ROOT)) : "none";
-                    AppServices.Logs.Warn("WIN32", $"点击坐标 ({screenX},{screenY}) 被窗口 {blockerCls} 遮挡，重新置顶目标窗口...");
-                    _ = ForceBringToForeground(expectedTargetHwnd);
-                    Thread.Sleep(100);
-                    active = GetForegroundWindow() == expectedTargetHwnd;
+                    active = EnsureWindowTrulyActive(expectedTargetHwnd);
+                    if (!IsPointOwnedByWindowProcess(screenX, screenY, expectedTargetHwnd))
+                    {
+                        nint blocker = WindowFromPoint(new POINT { X = screenX, Y = screenY });
+                        string blockerCls = blocker != nint.Zero ? GetWindowClassName(GetAncestor(blocker, GA_ROOT)) : "none";
+                        AppServices.Logs.Warn("WIN32", $"点击坐标 ({screenX},{screenY}) 被窗口 {blockerCls} 遮挡，重新置顶目标窗口...");
+                        _ = ForceBringToForeground(expectedTargetHwnd);
+                        Thread.Sleep(100);
+                        active = GetForegroundWindow() == expectedTargetHwnd;
+                    }
+                }
+                else
+                {
+                    // Clicking an active floating popup belonging to the same process (e.g. WeChat search dropdown):
+                    // do NOT reactivate main window, otherwise Qt dismisses the popup before the click lands!
+                    active = IsPointOwnedByWindowProcess(screenX, screenY, expectedTargetHwnd);
                 }
             }
 
@@ -1096,6 +1110,120 @@ namespace Client.Services
             _ = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
         }
 
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool OpenClipboard(nint hWndNewOwner);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool CloseClipboard();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool EmptyClipboard();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern nint SetClipboardData(uint uFormat, nint hMem);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern nint GetClipboardData(uint uFormat);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsClipboardFormatAvailable(uint format);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern nint GlobalAlloc(uint uFlags, nuint dwBytes);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern nint GlobalLock(nint hMem);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GlobalUnlock(nint hMem);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern nint GlobalFree(nint hMem);
+
+        /// <summary>
+        /// Thread-safe Win32 Unicode clipboard writer (works reliably from background automation threads
+        /// without requiring the WinRT UI Dispatcher thread).
+        /// </summary>
+        internal static bool SetClipboardUnicodeText(string text)
+        {
+            text ??= string.Empty;
+            for (int attempt = 0; attempt < 6; attempt++)
+            {
+                if (!OpenClipboard(nint.Zero))
+                {
+                    Thread.Sleep(25);
+                    continue;
+                }
+
+                nint hGlobal = nint.Zero;
+                try
+                {
+                    if (!EmptyClipboard()) return false;
+                    byte[] bytes = Encoding.Unicode.GetBytes(text + "\0");
+                    hGlobal = GlobalAlloc(GMEM_MOVEABLE, (nuint)bytes.Length);
+                    if (hGlobal == nint.Zero) return false;
+
+                    nint ptr = GlobalLock(hGlobal);
+                    if (ptr == nint.Zero) return false;
+                    try
+                    {
+                        Marshal.Copy(bytes, 0, ptr, bytes.Length);
+                    }
+                    finally
+                    {
+                        _ = GlobalUnlock(hGlobal);
+                    }
+
+                    if (SetClipboardData(CF_UNICODETEXT, hGlobal) == nint.Zero)
+                    {
+                        return false;
+                    }
+                    // Ownership transferred to Windows clipboard; do not free hGlobal
+                    hGlobal = nint.Zero;
+                    return true;
+                }
+                finally
+                {
+                    if (hGlobal != nint.Zero) _ = GlobalFree(hGlobal);
+                    _ = CloseClipboard();
+                }
+            }
+            return false;
+        }
+
+        internal static string? TryGetClipboardUnicodeText()
+        {
+            for (int attempt = 0; attempt < 4; attempt++)
+            {
+                if (!OpenClipboard(nint.Zero))
+                {
+                    Thread.Sleep(20);
+                    continue;
+                }
+                try
+                {
+                    if (!IsClipboardFormatAvailable(CF_UNICODETEXT)) return null;
+                    nint hData = GetClipboardData(CF_UNICODETEXT);
+                    if (hData == nint.Zero) return null;
+                    nint ptr = GlobalLock(hData);
+                    if (ptr == nint.Zero) return null;
+                    try
+                    {
+                        return Marshal.PtrToStringUni(ptr);
+                    }
+                    finally
+                    {
+                        _ = GlobalUnlock(hData);
+                    }
+                }
+                finally
+                {
+                    _ = CloseClipboard();
+                }
+            }
+            return null;
+        }
+
         internal static SoftwareBitmap CaptureScreenRectToSoftwareBitmap(int left, int top, int width, int height)
         {
             if (width <= 0 || height <= 0)
@@ -1105,7 +1233,7 @@ namespace Client.Services
 
             return CaptureDibToSoftwareBitmap(width, height, (screenDc, memDc, bitsPtr, pixels) =>
             {
-                _ = BitBlt(memDc, 0, 0, width, height, screenDc, left, top, SRCCOPY);
+                _ = BitBlt(memDc, 0, 0, width, height, screenDc, left, top, SRCCOPY | CAPTUREBLT);
                 Marshal.Copy(bitsPtr, pixels, 0, pixels.Length);
             });
         }

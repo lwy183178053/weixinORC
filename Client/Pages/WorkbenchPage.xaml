@@ -180,6 +180,18 @@
                                 <TextBlock x:Name="RailOcrLabel" HorizontalAlignment="Center" FontSize="9.5" Text="微信监听" />
                             </StackPanel>
                         </Button>
+
+                        <Button
+                            x:Name="RailAutoReplyButton"
+                            Click="RailNav_Click"
+                            Style="{StaticResource RailButtonStyle}"
+                            Tag="autoreply"
+                            ToolTipService.ToolTip="群 @ AI 自动回复配置、问答示例与诊断日志">
+                            <StackPanel HorizontalAlignment="Center" Spacing="2">
+                                <FontIcon x:Name="RailAutoReplyIcon" FontSize="15" Glyph="&#xE97A;" />
+                                <TextBlock x:Name="RailAutoReplyLabel" HorizontalAlignment="Center" FontSize="9.5" Text="自动回复" />
+                            </StackPanel>
+                        </Button>
                     </StackPanel>
 
                     <!-- Bottom Utility Cluster: Logout -> Theme Toggle -> Settings -->
@@ -221,7 +233,68 @@
                 </Grid>
             </Border>
 
-            <Frame x:Name="WorkspaceFrame" Grid.Column="1" />
+            <Grid Grid.Column="1">
+                <Frame x:Name="WorkspaceFrame" />
+
+                <!-- Global Floating Toast Notification (Non-blocking, single-slot deduplicated, auto-dismiss) -->
+                <Border
+                    x:Name="GlobalToastBorder"
+                    MaxWidth="560"
+                    MinWidth="220"
+                    Margin="20,12,20,0"
+                    Padding="14,9,10,9"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Background="{StaticResource SuccessBgBrush}"
+                    BorderBrush="{StaticResource SuccessTextBrush}"
+                    BorderThickness="1"
+                    Canvas.ZIndex="100"
+                    CornerRadius="10"
+                    Opacity="0"
+                    Translation="0,0,28"
+                    Visibility="Collapsed">
+                    <Border.Shadow>
+                        <ThemeShadow />
+                    </Border.Shadow>
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon
+                            x:Name="GlobalToastIcon"
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            FontSize="13.5"
+                            Foreground="{StaticResource SuccessTextBrush}"
+                            Glyph="&#xE73E;" />
+                        <TextBlock
+                            x:Name="GlobalToastText"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            FontSize="12.5"
+                            FontWeight="Medium"
+                            Foreground="{StaticResource TextPrimaryBrush}"
+                            MaxLines="3"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="Wrap" />
+                        <Button
+                            Grid.Column="2"
+                            Width="22"
+                            Height="22"
+                            Padding="0"
+                            VerticalAlignment="Center"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Click="DismissToastButton_Click"
+                            CornerRadius="5"
+                            ToolTipService.ToolTip="关闭提示">
+                            <FontIcon FontSize="9.5" Foreground="{StaticResource TextMutedBrush}" Glyph="&#xE8BB;" />
+                        </Button>
+                    </Grid>
+                </Border>
+            </Grid>
         </Grid>
 
         <!-- Row 2: Bottom Status Bar -->

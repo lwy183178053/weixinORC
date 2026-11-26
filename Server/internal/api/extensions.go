@@ -22,13 +22,19 @@ import (
 type upsertWeChatAccountRequest struct {
 	AccountType string `json:"account_type"`
 	WechatID    string `json:"wechat_id"`
+	Alias       string `json:"alias"`
 	Nickname    string `json:"nickname"`
+	Region      string `json:"region"`
+	Signature   string `json:"signature"`
 	Status      string `json:"status"`
 }
 
 type patchWeChatAccountRequest struct {
 	WechatID  *string `json:"wechat_id"`
+	Alias     *string `json:"alias"`
 	Nickname  *string `json:"nickname"`
+	Region    *string `json:"region"`
+	Signature *string `json:"signature"`
 	Status    *string `json:"status"`
 	Heartbeat bool    `json:"heartbeat"`
 }
@@ -54,7 +60,10 @@ func (s *server) upsertWeChatAccount(c *gin.Context) {
 	}
 	req.AccountType = strings.TrimSpace(req.AccountType)
 	req.WechatID = strings.TrimSpace(req.WechatID)
+	req.Alias = strings.TrimSpace(req.Alias)
 	req.Nickname = strings.TrimSpace(req.Nickname)
+	req.Region = strings.TrimSpace(req.Region)
+	req.Signature = strings.TrimSpace(req.Signature)
 	req.Status = strings.TrimSpace(req.Status)
 	if req.Status == "" {
 		req.Status = "online"
@@ -64,11 +73,16 @@ func (s *server) upsertWeChatAccount(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_account_type"})
 		return
 	}
+	if req.WechatID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "wechat_id_required"})
+		return
+	}
 	if !validWeChatStatus(req.Status) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_status"})
 		return
 	}
-	if !validText(req.WechatID, 128) || !validText(req.Nickname, 128) {
+	if !validText(req.WechatID, 128) || !validText(req.Alias, 128) || !validText(req.Nickname, 128) ||
+		!validText(req.Region, 128) || !validText(req.Signature, 500) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "field_too_long"})
 		return
 	}
@@ -77,7 +91,10 @@ func (s *server) upsertWeChatAccount(c *gin.Context) {
 	acc, err := s.store.UpsertWeChatAccount(c.Request.Context(), ownerID, store.WeChatAccountInput{
 		AccountType: req.AccountType,
 		WechatID:    req.WechatID,
+		Alias:       req.Alias,
 		Nickname:    req.Nickname,
+		Region:      req.Region,
+		Signature:   req.Signature,
 		Status:      req.Status,
 	})
 	if err != nil {
@@ -97,11 +114,12 @@ func (s *server) updateWeChatAccount(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	if req.WechatID == nil && req.Nickname == nil && req.Status == nil && !req.Heartbeat {
+	if req.WechatID == nil && req.Alias == nil && req.Nickname == nil && req.Region == nil && req.Signature == nil && req.Status == nil && !req.Heartbeat {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "empty_patch"})
 		return
 	}
-	if !trimAndCheck(&req.WechatID, 128) || !trimAndCheck(&req.Nickname, 128) || !trimAndCheck(&req.Status, 32) {
+	if !trimAndCheck(&req.WechatID, 128) || !trimAndCheck(&req.Alias, 128) || !trimAndCheck(&req.Nickname, 128) ||
+		!trimAndCheck(&req.Region, 128) || !trimAndCheck(&req.Signature, 500) || !trimAndCheck(&req.Status, 32) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "field_too_long"})
 		return
 	}
@@ -113,7 +131,10 @@ func (s *server) updateWeChatAccount(c *gin.Context) {
 	ownerID := auth.IdentityFromContext(c).EmployeeID
 	acc, err := s.store.UpdateWeChatAccount(c.Request.Context(), ownerID, id, store.WeChatAccountPatch{
 		WechatID:  req.WechatID,
+		Alias:     req.Alias,
 		Nickname:  req.Nickname,
+		Region:    req.Region,
+		Signature: req.Signature,
 		Status:    req.Status,
 		Heartbeat: req.Heartbeat,
 	})
@@ -124,16 +145,72 @@ func (s *server) updateWeChatAccount(c *gin.Context) {
 	c.JSON(http.StatusOK, acc)
 }
 
+func (s *server) uploadWeChatAccountAvatar(c *gin.Context) {
+	id, ok := parsePathID(c, "id", "invalid_account_id")
+	if !ok {
+		return
+	}
+	var req uploadAvatarRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	b64 := strings.TrimSpace(req.ImageBase64)
+	if idx := strings.Index(b64, ","); idx >= 0 && strings.HasPrefix(b64[:idx], "data:") {
+		b64 = b64[idx+1:]
+	}
+	if b64 == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "empty_avatar"})
+		return
+	}
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil || len(raw) == 0 || len(raw) > 2<<20 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_avatar_image"})
+		return
+	}
+	ext, _, validImg := detectImageExt(raw)
+	if !validImg {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported_image_format"})
+		return
+	}
+
+	ownerID := auth.IdentityFromContext(c).EmployeeID
+	var nonce [6]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "avatar_save_failed"})
+		return
+	}
+	filename := fmt.Sprintf("%swa%d_%d_%s%s", ownerAvatarPrefix(ownerID), id, time.Now().UnixNano(), hex.EncodeToString(nonce[:]), ext)
+	fullPath := filepath.Join(s.store.AvatarDir(), filename)
+	if err := os.WriteFile(fullPath, raw, 0o640); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "avatar_save_failed"})
+		return
+	}
+
+	avatarURL := "/api/v1/avatars/" + filename
+	updated, prevURL, err := s.store.SetWeChatAccountAvatar(c.Request.Context(), ownerID, id, avatarURL)
+	if err != nil {
+		_ = os.Remove(fullPath)
+		writeStoreErr(c, err)
+		return
+	}
+	if prevURL != "" && prevURL != avatarURL {
+		s.removeAvatarFile(ownerID, prevURL)
+	}
+	c.JSON(http.StatusOK, updated)
+}
+
 func (s *server) deleteWeChatAccount(c *gin.Context) {
 	id, ok := parsePathID(c, "id", "invalid_account_id")
 	if !ok {
 		return
 	}
 	ownerID := auth.IdentityFromContext(c).EmployeeID
-	if err := s.store.DeleteWeChatAccount(c.Request.Context(), ownerID, id); err != nil {
+	avatarURL, err := s.store.DeleteWeChatAccountReturningAvatar(c.Request.Context(), ownerID, id)
+	if err != nil {
 		writeStoreErr(c, err)
 		return
 	}
+	s.removeAvatarFile(ownerID, avatarURL)
 	_, _ = s.store.CreateAuditLog(c.Request.Context(), ownerID, "unbind_wechat_account", "wechat_account", strconv.FormatInt(id, 10), "")
 	c.Status(http.StatusNoContent)
 }

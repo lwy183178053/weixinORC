@@ -708,7 +708,8 @@ namespace Client.Services.WeChat4Db
                     cmd.CommandText =
                         $"SELECT {Sel("local_id", "rowid")}, {Sel("server_id", "0")}, {Sel("local_type", "1")}, " +
                         $"{Sel("sort_seq", "0")}, {Sel("real_sender_id", "0")}, {Sel("create_time", "0")}, " +
-                        $"{Sel("message_content", "NULL")}, {Sel("compress_content", "NULL")}, {Sel("packed_info_data", "NULL")} " +
+                        $"{Sel("message_content", "NULL")}, {Sel("compress_content", "NULL")}, {Sel("packed_info_data", "NULL")}, " +
+                        $"{Sel("source", "NULL")} " +
                         $"FROM \"{table}\" {orderBy}";
                     using var r = cmd.ExecuteReader();
                     while (r.Read())
@@ -722,6 +723,7 @@ namespace Client.Services.WeChat4Db
                         object? rawMsgContent = r.IsDBNull(6) ? null : r.GetValue(6);
                         object? rawCompress = r.IsDBNull(7) ? null : r.GetValue(7);
                         byte[]? packedInfo = r.IsDBNull(8) ? null : r.GetValue(8) as byte[];
+                        object? rawSource = r.IsDBNull(9) ? null : r.GetValue(9);
 
                         int baseType = NormalizeLocalType(rawType);
                         if (skipSystem && baseType is 10000 or 10002 or 51) continue;
@@ -750,6 +752,14 @@ namespace Client.Services.WeChat4Db
                                           !string.IsNullOrEmpty(SelfWxid) &&
                                           sender.Equals(SelfWxid, StringComparison.OrdinalIgnoreCase);
 
+                        bool mentionedSelf = false;
+                        bool mentionedAll = false;
+                        if (isGroup && !isOutgoing && rawSource is not null)
+                        {
+                            string sourceText = DecodeContent(rawSource, null);
+                            ParseAtMentionFlags(sourceText, SelfWxid, out mentionedSelf, out mentionedAll);
+                        }
+
                         string senderName = !string.IsNullOrEmpty(sender)
                             ? ResolveDisplayName(sender)
                             : (kind == "system" ? "系统" : "群成员");
@@ -769,6 +779,8 @@ namespace Client.Services.WeChat4Db
                             SenderWxid = sender,
                             SenderName = senderName,
                             IsOutgoing = isOutgoing,
+                            MentionedSelf = mentionedSelf,
+                            MentionedAll = mentionedAll,
                             Content = text,
                             MediaHints = hints,
                             CreateTime = createTime
@@ -796,6 +808,33 @@ namespace Client.Services.WeChat4Db
                 return all.GetRange(all.Count - maxCount, maxCount);
             }
             return all;
+        }
+
+        private static void ParseAtMentionFlags(string sourceXml, string selfWxid, out bool mentionedSelf, out bool mentionedAll)
+        {
+            mentionedSelf = false;
+            mentionedAll = false;
+            if (string.IsNullOrWhiteSpace(sourceXml)) return;
+
+            int start = sourceXml.IndexOf("<atuserlist>", StringComparison.OrdinalIgnoreCase);
+            if (start < 0) return;
+            start += "<atuserlist>".Length;
+            int end = sourceXml.IndexOf("</atuserlist>", start, StringComparison.OrdinalIgnoreCase);
+            if (end <= start) return;
+
+            string list = sourceXml[start..end].Replace("<![CDATA[", "").Replace("]]>", "");
+            foreach (string raw in list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (raw.Equals("notify@all", StringComparison.OrdinalIgnoreCase))
+                {
+                    mentionedAll = true;
+                }
+                else if (!string.IsNullOrWhiteSpace(selfWxid) &&
+                         raw.Equals(selfWxid, StringComparison.OrdinalIgnoreCase))
+                {
+                    mentionedSelf = true;
+                }
+            }
         }
 
         /// <summary>

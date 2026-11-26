@@ -316,12 +316,27 @@ namespace Client.Services.WeChat4Db
         public string SenderWxid { get; init; } = string.Empty;
         public string SenderName { get; init; } = string.Empty;
         public bool IsOutgoing { get; init; }
+        public bool MentionedSelf { get; init; }
+        public bool MentionedAll { get; init; }
         public string Content { get; init; } = string.Empty;
         public List<string> MediaHints { get; init; } = [];
         public long CreateTime { get; init; }
         public DateTimeOffset SentAtUtc => CreateTime > 0
             ? DateTimeOffset.FromUnixTimeSeconds(CreateTime)
             : DateTimeOffset.UtcNow;
+    }
+
+    public sealed class WeChat4GroupNewMessagesEvent
+    {
+        public long GroupId { get; init; }
+        public string OwnerWxid { get; init; } = string.Empty;
+        public string GroupKey { get; init; } = string.Empty;
+        public string GroupName { get; init; } = string.Empty;
+        public string MyNickname { get; init; } = string.Empty;
+        public string SelfNickname { get; init; } = string.Empty;
+        public string SelfAlias { get; init; } = string.Empty;
+        public bool IsBackgroundAuto { get; init; }
+        public IReadOnlyList<WeChat4Message> NewMessages { get; init; } = [];
     }
 
     public sealed class WeChat4SyncOptions

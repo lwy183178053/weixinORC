@@ -413,6 +413,7 @@
                     <Grid Grid.Row="0" ColumnSpacing="6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
@@ -420,9 +421,9 @@
                         <ComboBox
                             x:Name="LogLevelFilterCombo"
                             Grid.Column="0"
-                            Width="90"
+                            Width="78"
                             Height="30"
-                            FontSize="12"
+                            FontSize="11.5"
                             SelectedIndex="0"
                             SelectionChanged="LogFilter_Changed">
                             <ComboBoxItem Content="全部" Tag="all" />
@@ -432,9 +433,29 @@
                             <ComboBoxItem Content="错误" Tag="err" />
                         </ComboBox>
 
+                        <ComboBox
+                            x:Name="LogModuleFilterCombo"
+                            Grid.Column="1"
+                            Width="104"
+                            Height="30"
+                            FontSize="11.5"
+                            SelectedIndex="0"
+                            SelectionChanged="LogFilter_Changed">
+                            <ComboBoxItem Content="全部模块" Tag="all" />
+                            <ComboBoxItem Content="自动回复" Tag="REPLY" />
+                            <ComboBoxItem Content="微信操控" Tag="AUTO" />
+                            <ComboBoxItem Content="鼠标点击" Tag="CLICK" />
+                            <ComboBoxItem Content="文字识别" Tag="OCR" />
+                            <ComboBoxItem Content="微信监听" Tag="WX4" />
+                            <ComboBoxItem Content="窗口管理" Tag="WIN" />
+                            <ComboBoxItem Content="接口通信" Tag="API" />
+                            <ComboBoxItem Content="AI 引擎" Tag="AI" />
+                            <ComboBoxItem Content="系统与界面" Tag="SYS_GROUP" />
+                        </ComboBox>
+
                         <TextBox
                             x:Name="LogSearchBox"
-                            Grid.Column="1"
+                            Grid.Column="2"
                             Height="30"
                             Padding="9,4"
                             FontSize="12"
@@ -442,10 +463,11 @@
                             Style="{StaticResource SoftTextBoxStyle}"
                             TextChanged="LogSearchBox_TextChanged" />
 
-                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
-                            <Button Height="30" Padding="9,0" Click="RunSelfCheck_Click" Content="自检" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                            <Button Height="30" Padding="9,0" Click="CopyLogs_Click" Content="复制" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                            <Button Height="30" Padding="9,0" Click="ClearLogs_Click" Content="清空" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="5">
+                            <Button Height="30" Padding="8,0" Click="RunSelfCheck_Click" Content="自检" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                            <Button Height="30" Padding="8,0" Click="OpenLogFolder_Click" Content="目录" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" ToolTipService.ToolTip="打开本地日志文件目录" />
+                            <Button Height="30" Padding="8,0" Click="CopyLogs_Click" Content="复制" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                            <Button Height="30" Padding="8,0" Click="ClearLogs_Click" Content="清空" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
                         </StackPanel>
                     </Grid>
 

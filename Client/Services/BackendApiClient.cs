@@ -518,6 +518,9 @@ namespace Client.Services
         public Task<ApiResult<GroupDto>> UpdateGroupAsync(long groupId, CreateGroupRequest payload, CancellationToken ct = default) =>
             SendAuthedAsync<GroupDto>(HttpMethod.Patch, $"/api/v1/groups/{groupId}", payload, ct);
 
+        public Task<ApiResult<GroupDto>> SetGroupAutoReplyAsync(long groupId, bool enabled, CancellationToken ct = default) =>
+            SendAuthedAsync<GroupDto>(HttpMethod.Patch, $"/api/v1/groups/{groupId}", new { auto_reply_enabled = enabled }, ct);
+
         public Task<ApiResult<bool>> DeleteGroupAsync(long groupId, CancellationToken ct = default) =>
             SendAuthedNoContentAsync(HttpMethod.Delete, $"/api/v1/groups/{groupId}", ct);
 
@@ -644,6 +647,25 @@ namespace Client.Services
                     images = images?.ToList() ?? []
                 }, ct);
 
+        public Task<ApiResult<AiChatResponse>> GenerateGroupAutoReplyAsync(
+            long groupId,
+            string senderName,
+            string triggerMessage,
+            string customPrompt,
+            int maxReplyChars,
+            IEnumerable<AutoReplyExamplePayload> examples,
+            CancellationToken ct = default) =>
+            SendAuthedLongRunningAsync<AiChatResponse>(HttpMethod.Post, "/api/v1/ai/group-auto-reply",
+                new
+                {
+                    group_id = groupId,
+                    sender_name = senderName?.Trim() ?? string.Empty,
+                    trigger_message = triggerMessage?.Trim() ?? string.Empty,
+                    custom_prompt = customPrompt?.Trim() ?? string.Empty,
+                    max_reply_chars = maxReplyChars,
+                    examples = examples.ToList()
+                }, ct);
+
         public Task<ApiResult<AiChatResponse>> AgentAiChatAsync(
             IEnumerable<AiChatTurnDto> history,
             string message,
@@ -663,39 +685,68 @@ namespace Client.Services
             SendAuthedLongRunningAsync<AiTranscribeResponse>(HttpMethod.Post, "/api/v1/ai/transcribe",
                 new { audio_url = audioUrl.Trim() }, ct);
 
-        // ---- WeChat 4.x Direct DB Batch Sync ----
+        // ---- WeChat Accounts & 4.x Direct DB Batch Sync ----
 
-        public Task<ApiResult<JsonElement>> UpsertWeChatAccountAsync(
+        public async Task<List<WeChatAccountDto>> ListWeChatAccountsAsync(CancellationToken ct = default)
+        {
+            var res = await SendAuthedAsync<WeChatAccountListResponse>(HttpMethod.Get, "/api/v1/wechat-accounts", null, ct);
+            return res.IsSuccess && res.Data is not null ? res.Data.Items : [];
+        }
+
+        public Task<ApiResult<WeChatAccountDto>> UpsertWeChatAccountAsync(
             string accountType,
             string wechatId,
             string nickname,
             string status = "online",
+            string alias = "",
+            string region = "",
+            string signature = "",
             CancellationToken ct = default) =>
-            SendAuthedAsync<JsonElement>(HttpMethod.Post, "/api/v1/wechat-accounts",
+            SendAuthedAsync<WeChatAccountDto>(HttpMethod.Post, "/api/v1/wechat-accounts",
                 new
                 {
                     account_type = accountType,
                     wechat_id = wechatId,
+                    alias = alias,
                     nickname = nickname,
+                    region = region,
+                    signature = signature,
                     status = status
                 }, ct);
 
+        public async Task<ApiResult<WeChatAccountDto>> UploadWeChatAccountAvatarAsync(long accountId, byte[] imageBytes, CancellationToken ct = default)
+        {
+            string b64 = Convert.ToBase64String(imageBytes);
+            var res = await SendAuthedAsync<WeChatAccountDto>(
+                HttpMethod.Post,
+                $"/api/v1/wechat-accounts/{accountId}/avatar",
+                new UploadAvatarRequest { ImageBase64 = b64 },
+                ct);
+            if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.AvatarUrl))
+            {
+                _avatarCache.Set(res.Data.AvatarUrl, imageBytes);
+            }
+            return res;
+        }
+
         public Task<ApiResult<WeChatSyncCustomersResponse>> SyncWeChatCustomersAsync(
             List<WeChatSyncCustomerPayload> items,
+            string ownerWxid = "",
             CancellationToken ct = default) =>
             SendAuthedLongRunningAsync<WeChatSyncCustomersResponse>(
                 HttpMethod.Post,
                 "/api/v1/wechat-sync/customers",
-                new { items },
+                new { owner_wxid = ownerWxid, items },
                 ct);
 
         public Task<ApiResult<WeChatSyncGroupsResponse>> SyncWeChatGroupsAsync(
             List<WeChatSyncGroupPayload> items,
+            string ownerWxid = "",
             CancellationToken ct = default) =>
             SendAuthedLongRunningAsync<WeChatSyncGroupsResponse>(
                 HttpMethod.Post,
                 "/api/v1/wechat-sync/groups",
-                new { items },
+                new { owner_wxid = ownerWxid, items },
                 ct);
 
         public Task<ApiResult<WeChatSyncMessagesResponse>> SyncCustomerMessagesAsync(

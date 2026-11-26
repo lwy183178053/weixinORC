@@ -9,6 +9,7 @@ import (
 )
 
 type WeChatSyncCustomerItem struct {
+	OwnerWxid     string `json:"owner_wxid"`
 	NativeID      string `json:"native_id"`
 	LocalKey      string `json:"local_key"`
 	WechatRemark  string `json:"wechat_remark"`
@@ -44,6 +45,7 @@ type WeChatSyncGroupMemberItem struct {
 }
 
 type WeChatSyncGroupItem struct {
+	OwnerWxid   string                      `json:"owner_wxid"`
 	GroupKey    string                      `json:"group_key"`
 	GroupName   string                      `json:"group_name"`
 	MyNickname  string                      `json:"my_nickname"`
@@ -104,38 +106,67 @@ func (s *Store) SyncWeChatCustomers(ctx context.Context, ownerID string, items [
 
 	for _, item := range items {
 		var existingID int64
-		var curRemark, curName, curAccount, curGender, curAvatar, curDesc, curTags, curLocalKey, curNativeID, curRegion, curPhone, curSig, curSource string
+		var curOwnerWxid, curRemark, curName, curAccount, curGender, curAvatar, curDesc, curTags, curLocalKey, curNativeID, curRegion, curPhone, curSig, curSource string
 		found := false
 
-		if item.NativeID != "" {
+		queryCustomer := func(where string, args ...any) (bool, error) {
 			err := tx.QueryRowContext(ctx, `
-				SELECT id, wechat_remark, wechat_name, wechat_account, gender, avatar_url,
+				SELECT id, owner_wxid, wechat_remark, wechat_name, wechat_account, gender, avatar_url,
 				       description, tags, local_key, native_id, region, phone, signature, source
 				FROM customers
-				WHERE owner_id = ? AND native_id = ?
-				LIMIT 1`, ownerID, item.NativeID,
-			).Scan(&existingID, &curRemark, &curName, &curAccount, &curGender, &curAvatar,
+				WHERE `+where+`
+				LIMIT 1`, args...,
+			).Scan(&existingID, &curOwnerWxid, &curRemark, &curName, &curAccount, &curGender, &curAvatar,
 				&curDesc, &curTags, &curLocalKey, &curNativeID, &curRegion, &curPhone, &curSig, &curSource)
 			if err == nil {
-				found = true
-			} else if !errors.Is(err, sql.ErrNoRows) {
-				return nil, 0, 0, err
+				return true, nil
 			}
+			if errors.Is(err, sql.ErrNoRows) {
+				return false, nil
+			}
+			return false, err
 		}
 
-		if !found && item.WechatAccount != "" {
-			err := tx.QueryRowContext(ctx, `
-				SELECT id, wechat_remark, wechat_name, wechat_account, gender, avatar_url,
-				       description, tags, local_key, native_id, region, phone, signature, source
-				FROM customers
-				WHERE owner_id = ? AND wechat_account = ?
-				LIMIT 1`, ownerID, item.WechatAccount,
-			).Scan(&existingID, &curRemark, &curName, &curAccount, &curGender, &curAvatar,
-				&curDesc, &curTags, &curLocalKey, &curNativeID, &curRegion, &curPhone, &curSig, &curSource)
-			if err == nil {
-				found = true
-			} else if !errors.Is(err, sql.ErrNoRows) {
-				return nil, 0, 0, err
+		// Multi-WeChat aware lookup:
+		// 1. Exact match within the same owner_wxid (so same contact across WeChat A & B stays separate).
+		// 2. Adopt legacy rows with owner_wxid = '' so existing pre-upgrade archives seamlessly bind to the active account.
+		if item.OwnerWxid != "" {
+			if item.NativeID != "" {
+				found, err = queryCustomer(`owner_id = ? AND owner_wxid = ? AND native_id = ?`, ownerID, item.OwnerWxid, item.NativeID)
+				if err != nil {
+					return nil, 0, 0, err
+				}
+			}
+			if !found && item.WechatAccount != "" {
+				found, err = queryCustomer(`owner_id = ? AND owner_wxid = ? AND wechat_account = ?`, ownerID, item.OwnerWxid, item.WechatAccount)
+				if err != nil {
+					return nil, 0, 0, err
+				}
+			}
+			if !found && item.NativeID != "" {
+				found, err = queryCustomer(`owner_id = ? AND owner_wxid = '' AND native_id = ?`, ownerID, item.NativeID)
+				if err != nil {
+					return nil, 0, 0, err
+				}
+			}
+			if !found && item.WechatAccount != "" {
+				found, err = queryCustomer(`owner_id = ? AND owner_wxid = '' AND wechat_account = ?`, ownerID, item.WechatAccount)
+				if err != nil {
+					return nil, 0, 0, err
+				}
+			}
+		} else {
+			if item.NativeID != "" {
+				found, err = queryCustomer(`owner_id = ? AND native_id = ?`, ownerID, item.NativeID)
+				if err != nil {
+					return nil, 0, 0, err
+				}
+			}
+			if !found && item.WechatAccount != "" {
+				found, err = queryCustomer(`owner_id = ? AND wechat_account = ?`, ownerID, item.WechatAccount)
+				if err != nil {
+					return nil, 0, 0, err
+				}
 			}
 		}
 
@@ -143,7 +174,8 @@ func (s *Store) SyncWeChatCustomers(ctx context.Context, ownerID string, items [
 			// Update WeChat-sourced profile fields while preserving employee-authored note, follow_status, and avatar_url.
 			_, err := tx.ExecContext(ctx, `
 				UPDATE customers
-				SET wechat_remark  = ?,
+				SET owner_wxid     = ?,
+				    wechat_remark  = ?,
 				    wechat_name    = ?,
 				    wechat_account = ?,
 				    gender         = ?,
@@ -157,6 +189,7 @@ func (s *Store) SyncWeChatCustomers(ctx context.Context, ownerID string, items [
 				    source         = ?,
 				    updated_at     = ?
 				WHERE owner_id = ? AND id = ?`,
+				nonEmptyOr(item.OwnerWxid, curOwnerWxid),
 				nonEmptyOr(item.WechatRemark, curRemark),
 				nonEmptyOr(item.WechatName, curName),
 				nonEmptyOr(item.WechatAccount, curAccount),
@@ -186,12 +219,12 @@ func (s *Store) SyncWeChatCustomers(ctx context.Context, ownerID string, items [
 
 		res, err := tx.ExecContext(ctx, `
 			INSERT INTO customers (
-				owner_id, wechat_remark, wechat_name, wechat_account,
+				owner_id, owner_wxid, wechat_remark, wechat_name, wechat_account,
 				gender, avatar_url, description, tags, follow_status, local_key, native_id,
 				note, region, phone, signature, source, added_date,
 				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, '', ?, ?, '', ?, ?, '', ?, ?, ?, ?, '', ?, ?)`,
-			ownerID, item.WechatRemark, item.WechatName, item.WechatAccount,
+			) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, '', ?, ?, '', ?, ?, ?, ?, '', ?, ?)`,
+			ownerID, item.OwnerWxid, item.WechatRemark, item.WechatName, item.WechatAccount,
 			item.Gender, item.Description, item.Tags, item.LocalKey, item.NativeID,
 			item.Region, item.Phone, item.Signature, item.Source,
 			now, now,
@@ -232,21 +265,43 @@ func (s *Store) SyncWeChatGroups(ctx context.Context, ownerID string, items []We
 
 	for _, item := range items {
 		var groupID int64
-		var curName, curMyNick, curAvatar, curMembersText string
+		var curOwnerWxid, curName, curMyNick, curAvatar, curMembersText string
 		var curMemberCount int
 		found := false
 
-		if item.GroupKey != "" {
+		queryGroup := func(where string, args ...any) (bool, error) {
 			err := tx.QueryRowContext(ctx, `
-				SELECT id, group_name, my_nickname, avatar_url, member_count, members_text
+				SELECT id, owner_wxid, group_name, my_nickname, avatar_url, member_count, members_text
 				FROM groups
-				WHERE owner_id = ? AND group_key = ?
-				LIMIT 1`, ownerID, item.GroupKey,
-			).Scan(&groupID, &curName, &curMyNick, &curAvatar, &curMemberCount, &curMembersText)
+				WHERE `+where+`
+				LIMIT 1`, args...,
+			).Scan(&groupID, &curOwnerWxid, &curName, &curMyNick, &curAvatar, &curMemberCount, &curMembersText)
 			if err == nil {
-				found = true
-			} else if !errors.Is(err, sql.ErrNoRows) {
-				return nil, 0, 0, err
+				return true, nil
+			}
+			if errors.Is(err, sql.ErrNoRows) {
+				return false, nil
+			}
+			return false, err
+		}
+
+		if item.GroupKey != "" {
+			if item.OwnerWxid != "" {
+				found, err = queryGroup(`owner_id = ? AND owner_wxid = ? AND group_key = ?`, ownerID, item.OwnerWxid, item.GroupKey)
+				if err != nil {
+					return nil, 0, 0, err
+				}
+				if !found {
+					found, err = queryGroup(`owner_id = ? AND owner_wxid = '' AND group_key = ?`, ownerID, item.GroupKey)
+					if err != nil {
+						return nil, 0, 0, err
+					}
+				}
+			} else {
+				found, err = queryGroup(`owner_id = ? AND group_key = ?`, ownerID, item.GroupKey)
+				if err != nil {
+					return nil, 0, 0, err
+				}
 			}
 		}
 
@@ -258,12 +313,14 @@ func (s *Store) SyncWeChatGroups(ctx context.Context, ownerID string, items []We
 			}
 			_, err := tx.ExecContext(ctx, `
 				UPDATE groups
-				SET group_name   = ?,
+				SET owner_wxid   = ?,
+				    group_name   = ?,
 				    my_nickname  = ?,
 				    member_count = ?,
 				    members_text = ?,
 				    updated_at   = ?
 				WHERE owner_id = ? AND id = ?`,
+				nonEmptyOr(item.OwnerWxid, curOwnerWxid),
 				nonEmptyOr(item.GroupName, curName),
 				nonEmptyOr(item.MyNickname, curMyNick),
 				memberCount,
@@ -276,9 +333,9 @@ func (s *Store) SyncWeChatGroups(ctx context.Context, ownerID string, items []We
 			updatedCount++
 		} else {
 			res, err := tx.ExecContext(ctx, `
-				INSERT INTO groups (owner_id, group_name, group_key, my_nickname, member_count, members_text, note, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)`,
-				ownerID, item.GroupName, item.GroupKey, item.MyNickname, item.MemberCount, item.MembersText, now, now,
+				INSERT INTO groups (owner_id, owner_wxid, group_name, group_key, my_nickname, member_count, members_text, note, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
+				ownerID, item.OwnerWxid, item.GroupName, item.GroupKey, item.MyNickname, item.MemberCount, item.MembersText, now, now,
 			)
 			if err != nil {
 				return nil, 0, 0, err

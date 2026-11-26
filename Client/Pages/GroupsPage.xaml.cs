@@ -101,10 +101,18 @@ namespace Client.Pages
         {
             AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted -= OnWeChatSyncCompleted;
+            AppServices.WeChat4Sync.AccountsUpdated -= OnWeChatAccountsUpdated;
+            AppServices.GroupAutoReply.GroupAutoReplyToggled -= OnExternalGroupAutoReplyToggled;
             AppServices.Settings.ThemeChanged += OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted += OnWeChatSyncCompleted;
+            AppServices.WeChat4Sync.AccountsUpdated += OnWeChatAccountsUpdated;
+            AppServices.GroupAutoReply.GroupAutoReplyToggled += OnExternalGroupAutoReplyToggled;
             UpdateRightTabVisuals();
             UpdateDirectionToggleVisuals();
+            if (AppServices.WeChat4Sync.KnownAccounts.Count == 0 && AppServices.Backend.IsAuthenticated)
+            {
+                _ = AppServices.WeChat4Sync.RefreshMonitoredCountsAsync();
+            }
             ChatPageSharedHelper.AttachScrollNearBottomWatcher(MessagesListView, ClearNewMessagesJumpHint);
         }
 
@@ -112,6 +120,8 @@ namespace Client.Pages
         {
             AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted -= OnWeChatSyncCompleted;
+            AppServices.WeChat4Sync.AccountsUpdated -= OnWeChatAccountsUpdated;
+            AppServices.GroupAutoReply.GroupAutoReplyToggled -= OnExternalGroupAutoReplyToggled;
             _chatImageHydrationCts?.Cancel();
             _chatImageHydrationCts?.Dispose();
             _chatImageHydrationCts = null;
@@ -121,6 +131,38 @@ namespace Client.Pages
             _memberAvatarHydrationCts?.Cancel();
             _memberAvatarHydrationCts?.Dispose();
             _memberAvatarHydrationCts = null;
+        }
+
+        private void OnExternalGroupAutoReplyToggled(long groupId, bool enabled)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                var found = _allGroups.FirstOrDefault(g => g.Id == groupId);
+                if (found is not null)
+                {
+                    found.AutoReplyEnabled = enabled;
+                }
+                if (_selectedGroup?.Id == groupId)
+                {
+                    _selectedGroup.AutoReplyEnabled = enabled;
+                    UpdateAutoReplyToggleVisual(_selectedGroup.AutoReplyEnabled);
+                }
+            });
+        }
+
+        private void OnWeChatAccountsUpdated()
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_hasLoadedOnce)
+                {
+                    ApplyFilter(_selectedGroup?.Id, forceReloadDetail: false);
+                }
+                if (_selectedGroup is not null)
+                {
+                    UpdateSelectedGroupUi();
+                }
+            });
         }
 
         private void OnWeChatSyncCompleted(Client.Services.WeChat4Db.WeChat4SyncReport report)
@@ -180,6 +222,7 @@ namespace Client.Pages
         {
             UpdateRightTabVisuals();
             UpdateDirectionToggleVisuals();
+            UpdateAutoReplyToggleVisual(_selectedGroup?.AutoReplyEnabled == true);
             foreach (var g in _filteredGroups) g.NotifyRowVisualsChanged();
         }
 
@@ -235,6 +278,7 @@ namespace Client.Pages
                 }
 
                 _allGroups = items;
+                AppServices.GroupAutoReply.SyncGroupsSnapshot(_allGroups);
                 var validIds = _allGroups.Select(g => g.Id).ToHashSet();
                 _selectedGroupIds.RemoveWhere(id => !validIds.Contains(id));
                 ApplyFilter(selectId, forceReloadDetail: !preserveCurrentDetail);
@@ -292,10 +336,17 @@ namespace Client.Pages
 
         private void ApplyFilter(long? preferredSelectId = null, bool forceReloadDetail = false)
         {
+            string activeWxid = AppServices.WeChat4Sync.ActiveOwnerWxid;
+            IEnumerable<GroupDto> baseList = string.IsNullOrWhiteSpace(activeWxid)
+                ? _allGroups
+                : _allGroups.Where(g =>
+                    string.IsNullOrWhiteSpace(g.OwnerWxid) ||
+                    string.Equals(g.OwnerWxid, activeWxid, StringComparison.OrdinalIgnoreCase));
+
             string q = SearchBox.Text.Trim();
             _filteredGroups = string.IsNullOrEmpty(q)
-                ? [.. _allGroups]
-                : _allGroups.Where(g =>
+                ? baseList.ToList()
+                : baseList.Where(g =>
                     g.GroupName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     g.MembersText.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     g.Note.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -369,7 +420,6 @@ namespace Client.Pages
             SetEditMode(false);
             ClearPendingChatImage();
             ClearNewMessagesJumpHint();
-            DetailStatusBanner.Visibility = Visibility.Collapsed;
             UpdateSelectedGroupUi();
 
             if (selected is not null)
@@ -482,10 +532,13 @@ namespace Client.Pages
 
             SendMessageButton.IsEnabled = hasGroup;
             UploadChatImageButton.IsEnabled = hasGroup;
+            SearchMessagesButton.IsEnabled = hasGroup;
+            AutoReplyToggleButton.IsEnabled = hasGroup;
             EditGroupButton.IsEnabled = hasGroup;
             DeleteGroupButton.IsEnabled = hasGroup;
             EmptyDetailHint.Visibility = hasGroup ? Visibility.Collapsed : Visibility.Visible;
             UpdateRightTabVisibility();
+            UpdateAutoReplyToggleVisual(g?.AutoReplyEnabled == true);
 
             if (g is null)
             {
@@ -494,10 +547,17 @@ namespace Client.Pages
                 return;
             }
 
+            string ownerWeChatLabel = !string.IsNullOrWhiteSpace(g.OwnerWxid)
+                ? AppServices.WeChat4Sync.ResolveAccountDisplayName(g.OwnerWxid)
+                : string.Empty;
+
             ActiveGroupTitle.Text = g.DisplayTitleWithCount;
+            string ownerMetaSuffix = (AppServices.WeChat4Sync.KnownAccounts.Count >= 2 && !string.IsNullOrWhiteSpace(ownerWeChatLabel))
+                ? $" · 所属微信：{ownerWeChatLabel}"
+                : string.Empty;
             ActiveGroupMeta.Text = string.IsNullOrWhiteSpace(g.Note)
-                ? $"群组 ID #{g.Id} · 成员 {g.MemberCount} 人" + (!string.IsNullOrWhiteSpace(g.MyNickname) ? $" · 我在本群：{g.MyNickname}" : "")
-                : g.Note;
+                ? $"群组 ID #{g.Id} · 成员 {g.MemberCount} 人" + (!string.IsNullOrWhiteSpace(g.MyNickname) ? $" · 我在本群：{g.MyNickname}" : "") + ownerMetaSuffix
+                : g.Note + ownerMetaSuffix;
 
             DetailAvatarText.Text = g.AvatarInitial;
             ApplyDetailGroupAvatarVisual(g);
@@ -506,6 +566,15 @@ namespace Client.Pages
             DetailHeaderKeyText.Text = !string.IsNullOrWhiteSpace(g.MyNickname)
                 ? $"我在本群：{g.MyNickname}"
                 : $"群标识：{(string.IsNullOrWhiteSpace(g.GroupKey) ? "-" : g.GroupKey)}";
+            if (!string.IsNullOrWhiteSpace(ownerWeChatLabel))
+            {
+                DetailHeaderOwnerWeChatText.Text = $"所属微信：{ownerWeChatLabel}";
+                DetailHeaderOwnerWeChatText.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                DetailHeaderOwnerWeChatText.Visibility = Visibility.Collapsed;
+            }
             ViewMembersText.Text = string.IsNullOrWhiteSpace(g.MembersText) ? "暂无已建档成员，点击顶部「刷新同步」即可拉取群成员。" : g.MembersText;
 
             if (string.IsNullOrWhiteSpace(g.Note))
@@ -520,6 +589,60 @@ namespace Client.Pages
             }
 
             PopulateEditBoxes(g);
+        }
+
+        private void UpdateAutoReplyToggleVisual(bool enabled)
+        {
+            if (AutoReplyToggleButton is null) return;
+            if (enabled)
+            {
+                AutoReplyToggleButton.Background = (Brush)Application.Current.Resources["SuccessBgBrush"];
+                AutoReplyToggleButton.BorderBrush = (Brush)Application.Current.Resources["SuccessTextBrush"];
+                AutoReplyToggleDot.Fill = (Brush)Application.Current.Resources["SuccessTextBrush"];
+                AutoReplyToggleText.Foreground = (Brush)Application.Current.Resources["SuccessTextBrush"];
+                AutoReplyToggleText.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+                AutoReplyToggleText.Text = "AI回复 开";
+                ToolTipService.SetToolTip(AutoReplyToggleButton, "已开启本群 @我 AI 自动回复（点击关闭）");
+            }
+            else
+            {
+                AutoReplyToggleButton.Background = (Brush)Application.Current.Resources["ButtonBgBrush"];
+                AutoReplyToggleButton.BorderBrush = (Brush)Application.Current.Resources["ButtonBorderBrush"];
+                AutoReplyToggleDot.Fill = (Brush)Application.Current.Resources["TextMutedBrush"];
+                AutoReplyToggleText.Foreground = (Brush)Application.Current.Resources["TextSecondaryBrush"];
+                AutoReplyToggleText.FontWeight = Microsoft.UI.Text.FontWeights.Normal;
+                AutoReplyToggleText.Text = "AI回复";
+                ToolTipService.SetToolTip(AutoReplyToggleButton, "点击开启：开启后，群内有人 @我 时将自动生成 AI 回复并写入微信");
+            }
+        }
+
+        private async void AutoReplyToggleButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedGroup is null) return;
+            var target = _selectedGroup;
+            bool nextEnabled = !target.AutoReplyEnabled;
+            AutoReplyToggleButton.IsEnabled = false;
+            try
+            {
+                var res = await AppServices.Backend.SetGroupAutoReplyAsync(target.Id, nextEnabled);
+                if (!res.IsSuccess || res.Data is null)
+                {
+                    ShowDetailStatus($"切换自动回复开关失败：{res.ErrorMessage}", isError: true);
+                    return;
+                }
+
+                target.AutoReplyEnabled = res.Data.AutoReplyEnabled;
+                UpdateAutoReplyToggleVisual(target.AutoReplyEnabled);
+                AppServices.GroupAutoReply.NotifyGroupAutoReplyChanged(target);
+            }
+            catch (Exception ex)
+            {
+                AppServices.Logs.Error("REPLY", $"切换群「{target.DisplayName}」自动回复开关异常：{ex.Message}");
+            }
+            finally
+            {
+                AutoReplyToggleButton.IsEnabled = _selectedGroup is not null;
+            }
         }
 
         private void PopulateEditBoxes(GroupDto g)
@@ -545,7 +668,6 @@ namespace Client.Pages
         {
             if (_selectedGroup is null) return;
             PopulateEditBoxes(_selectedGroup);
-            DetailStatusBanner.Visibility = Visibility.Collapsed;
             SetEditMode(true);
         }
 
@@ -1148,6 +1270,79 @@ namespace Client.Pages
             }
         }
 
+        private async void SearchMessagesButton_Click(object sender, RoutedEventArgs e)
+        {
+            var group = _selectedGroup;
+            if (group is null || !AppServices.TryBeginModalDialog()) return;
+
+            long jumpMsgId = 0;
+            try
+            {
+                var dialog = new ChatHistorySearchDialog(
+                    isGroup: true,
+                    targetId: group.Id,
+                    conversationTitle: group.DisplayName)
+                {
+                    XamlRoot = XamlRoot
+                };
+                await dialog.ShowAsync();
+                jumpMsgId = dialog.SelectedJumpMessageId;
+            }
+            catch (Exception ex)
+            {
+                AppServices.Logs.Error("UI", $"打开群聊记录搜索弹窗失败：{ex.Message}");
+            }
+            finally
+            {
+                AppServices.EndModalDialog();
+            }
+
+            if (jumpMsgId > 0 && _selectedGroup?.Id == group.Id)
+            {
+                await JumpToGroupMessageAsync(group, jumpMsgId);
+            }
+        }
+
+        private async Task JumpToGroupMessageAsync(GroupDto group, long targetMessageId)
+        {
+            var found = _currentMessages.FirstOrDefault(m => m.Id == targetMessageId);
+            int guardPages = 0;
+            while (found is null && _nextOlderMessageCursor > 0 && guardPages < 35 && _selectedGroup?.Id == group.Id)
+            {
+                guardPages++;
+                var res = await AppServices.Backend.ListGroupMessagesAsync(group.Id, limit: 100, cursor: _nextOlderMessageCursor);
+                if (_selectedGroup?.Id != group.Id || !res.IsSuccess || res.Data is null || res.Data.Items.Count == 0)
+                {
+                    break;
+                }
+
+                var existingIds = _currentMessages.Where(x => x.Id > 0).Select(x => x.Id).ToHashSet();
+                var olderBubbles = new List<ChatBubbleItem>();
+                foreach (var m in res.Data.Items.AsEnumerable().Reverse())
+                {
+                    if (_locallyDeletedMessageIds.Contains(m.Id) || existingIds.Contains(m.Id)) continue;
+                    olderBubbles.Add(BuildGroupBubbleItem(m));
+                }
+                for (int i = 0; i < olderBubbles.Count; i++)
+                {
+                    _currentMessages.Insert(i, olderBubbles[i]);
+                }
+                _nextOlderMessageCursor = res.Data.NextCursor;
+                if (olderBubbles.Count > 0)
+                {
+                    _ = HydrateChatBubbleImagesAsync(olderBubbles, _chatImageHydrationCts?.Token ?? CancellationToken.None);
+                }
+                found = _currentMessages.FirstOrDefault(m => m.Id == targetMessageId);
+            }
+
+            UpdateLoadOlderMessagesBar();
+            if (found is not null)
+            {
+                MessagesListView.ScrollIntoView(found, ScrollIntoViewAlignment.Leading);
+                DispatcherQueue.TryEnqueue(() => MessagesListView.ScrollIntoView(found, ScrollIntoViewAlignment.Leading));
+            }
+        }
+
         private void StartChatImageHydration(List<ChatBubbleItem> bubbles)
         {
             _chatImageHydrationCts?.Cancel();
@@ -1579,12 +1774,9 @@ namespace Client.Pages
             }
         }
 
-        private void ShowDetailStatus(string message, bool isError = false)
+        private static void ShowDetailStatus(string message, bool isError = false)
         {
-            DetailStatusBanner.Background = (Brush)Application.Current.Resources[isError ? "DangerBgBrush" : "SuccessBgBrush"];
-            DetailStatusText.Foreground = (Brush)Application.Current.Resources[isError ? "DangerTextBrush" : "SuccessTextBrush"];
-            DetailStatusText.Text = message;
-            DetailStatusBanner.Visibility = Visibility.Visible;
+            WorkbenchPage.Current?.ShowToast(message, isError);
         }
 
         // ---- Right Panel 3-Tab Switcher & Group AI Summary / AI Chat ----

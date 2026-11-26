@@ -7,14 +7,20 @@ import (
 	"time"
 )
 
-// ---- WeChat Accounts (1 employee <-> personal / enterprise WeChat binding) ----
+// ---- WeChat Accounts (1 employee <-> multiple personal / enterprise WeChat accounts) ----
 
 type WeChatAccount struct {
 	ID              int64  `json:"id"`
 	AccountType     string `json:"account_type"`
 	WechatID        string `json:"wechat_id"`
+	Alias           string `json:"alias"`
 	Nickname        string `json:"nickname"`
+	AvatarURL       string `json:"avatar_url"`
+	Region          string `json:"region"`
+	Signature       string `json:"signature"`
 	Status          string `json:"status"`
+	CustomerCount   int    `json:"customer_count"`
+	GroupCount      int    `json:"group_count"`
 	LastHeartbeatAt string `json:"last_heartbeat_at"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
@@ -23,27 +29,43 @@ type WeChatAccount struct {
 type WeChatAccountInput struct {
 	AccountType string
 	WechatID    string
+	Alias       string
 	Nickname    string
+	Region      string
+	Signature   string
 	Status      string
 }
 
 type WeChatAccountPatch struct {
 	WechatID  *string
+	Alias     *string
 	Nickname  *string
+	Region    *string
+	Signature *string
 	Status    *string
 	Heartbeat bool
 }
 
-const wechatAccountCols = `id, account_type, wechat_id, nickname, status, last_heartbeat_at, created_at, updated_at`
+const wechatAccountSelectCols = `
+	w.id, w.account_type, w.wechat_id, w.alias, w.nickname, w.avatar_url, w.region, w.signature, w.status,
+	COALESCE((SELECT COUNT(*) FROM customers c WHERE c.owner_id = w.owner_id AND c.owner_wxid = w.wechat_id), 0),
+	COALESCE((SELECT COUNT(*) FROM groups g WHERE g.owner_id = w.owner_id AND g.owner_wxid = w.wechat_id), 0),
+	w.last_heartbeat_at, w.created_at, w.updated_at`
 
 func scanWeChatAccount(sc rowScanner) (WeChatAccount, error) {
 	var a WeChatAccount
-	err := sc.Scan(&a.ID, &a.AccountType, &a.WechatID, &a.Nickname, &a.Status, &a.LastHeartbeatAt, &a.CreatedAt, &a.UpdatedAt)
+	err := sc.Scan(
+		&a.ID, &a.AccountType, &a.WechatID, &a.Alias, &a.Nickname, &a.AvatarURL, &a.Region, &a.Signature, &a.Status,
+		&a.CustomerCount, &a.GroupCount, &a.LastHeartbeatAt, &a.CreatedAt, &a.UpdatedAt,
+	)
 	return a, err
 }
 
 func (s *Store) ListWeChatAccounts(ctx context.Context, ownerID string) ([]WeChatAccount, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+wechatAccountCols+` FROM wechat_accounts WHERE owner_id = ? ORDER BY id DESC`, ownerID)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+wechatAccountSelectCols+` FROM wechat_accounts w WHERE w.owner_id = ? ORDER BY CASE WHEN w.status = 'online' THEN 0 ELSE 1 END, w.updated_at DESC, w.id DESC`,
+		ownerID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -61,52 +83,152 @@ func (s *Store) ListWeChatAccounts(ctx context.Context, ownerID string) ([]WeCha
 }
 
 func (s *Store) UpsertWeChatAccount(ctx context.Context, ownerID string, input WeChatAccountInput) (WeChatAccount, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return WeChatAccount{}, err
+	}
+	defer tx.Rollback()
+
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	status := input.Status
 	if status == "" {
 		status = "online"
 	}
 
-	return scanWeChatAccount(s.db.QueryRowContext(ctx, `
-		INSERT INTO wechat_accounts (owner_id, account_type, wechat_id, nickname, status, last_heartbeat_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(owner_id, account_type) DO UPDATE SET
-			wechat_id = excluded.wechat_id,
-			nickname = excluded.nickname,
-			status = excluded.status,
+	if status == "online" && input.AccountType == "personal" {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE wechat_accounts SET status = 'offline', updated_at = ? WHERE owner_id = ? AND account_type = 'personal' AND wechat_id <> ? AND status = 'online'`,
+			now, ownerID, input.WechatID,
+		); err != nil {
+			return WeChatAccount{}, err
+		}
+	}
+
+	var id int64
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO wechat_accounts (owner_id, account_type, wechat_id, alias, nickname, avatar_url, region, signature, status, last_heartbeat_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(owner_id, wechat_id) DO UPDATE SET
+			account_type      = excluded.account_type,
+			alias             = CASE WHEN excluded.alias <> '' THEN excluded.alias ELSE wechat_accounts.alias END,
+			nickname          = CASE WHEN excluded.nickname <> '' THEN excluded.nickname ELSE wechat_accounts.nickname END,
+			region            = CASE WHEN excluded.region <> '' THEN excluded.region ELSE wechat_accounts.region END,
+			signature         = CASE WHEN excluded.signature <> '' THEN excluded.signature ELSE wechat_accounts.signature END,
+			status            = excluded.status,
 			last_heartbeat_at = excluded.last_heartbeat_at,
-			updated_at = excluded.updated_at
-		RETURNING `+wechatAccountCols,
-		ownerID, input.AccountType, input.WechatID, input.Nickname, status, now, now, now,
-	))
+			updated_at        = excluded.updated_at
+		RETURNING id`,
+		ownerID, input.AccountType, input.WechatID, input.Alias, input.Nickname, input.Region, input.Signature, status, now, now, now,
+	).Scan(&id)
+	if err != nil {
+		return WeChatAccount{}, err
+	}
+
+	acc, err := scanWeChatAccount(tx.QueryRowContext(ctx, `SELECT `+wechatAccountSelectCols+` FROM wechat_accounts w WHERE w.owner_id = ? AND w.id = ?`, ownerID, id))
+	if err != nil {
+		return WeChatAccount{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return WeChatAccount{}, err
+	}
+	return acc, nil
 }
 
 func (s *Store) UpdateWeChatAccount(ctx context.Context, ownerID string, id int64, patch WeChatAccountPatch) (WeChatAccount, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return WeChatAccount{}, err
+	}
+	defer tx.Rollback()
+
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	var heartbeat *string
 	if patch.Heartbeat {
 		heartbeat = &now
 	}
 
-	a, err := scanWeChatAccount(s.db.QueryRowContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		UPDATE wechat_accounts
 		SET wechat_id         = COALESCE(?, wechat_id),
+		    alias             = COALESCE(?, alias),
 		    nickname          = COALESCE(?, nickname),
+		    region            = COALESCE(?, region),
+		    signature         = COALESCE(?, signature),
 		    status            = COALESCE(?, status),
 		    last_heartbeat_at = COALESCE(?, last_heartbeat_at),
 		    updated_at        = ?
-		WHERE owner_id = ? AND id = ?
-		RETURNING `+wechatAccountCols,
-		patch.WechatID, patch.Nickname, patch.Status, heartbeat, now, ownerID, id,
-	))
-	if errors.Is(err, sql.ErrNoRows) {
+		WHERE owner_id = ? AND id = ?`,
+		patch.WechatID, patch.Alias, patch.Nickname, patch.Region, patch.Signature, patch.Status, heartbeat, now, ownerID, id,
+	)
+	if err != nil {
+		return WeChatAccount{}, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return WeChatAccount{}, err
+	}
+	if n == 0 {
 		return WeChatAccount{}, ErrNotFound
 	}
-	return a, err
+
+	acc, err := scanWeChatAccount(tx.QueryRowContext(ctx, `SELECT `+wechatAccountSelectCols+` FROM wechat_accounts w WHERE w.owner_id = ? AND w.id = ?`, ownerID, id))
+	if err != nil {
+		return WeChatAccount{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return WeChatAccount{}, err
+	}
+	return acc, nil
+}
+
+func (s *Store) SetWeChatAccountAvatar(ctx context.Context, ownerID string, id int64, newAvatarURL string) (WeChatAccount, string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return WeChatAccount{}, "", err
+	}
+	defer tx.Rollback()
+
+	var prevURL string
+	err = tx.QueryRowContext(ctx, `SELECT avatar_url FROM wechat_accounts WHERE owner_id = ? AND id = ?`, ownerID, id).Scan(&prevURL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return WeChatAccount{}, "", ErrNotFound
+	}
+	if err != nil {
+		return WeChatAccount{}, "", err
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE wechat_accounts SET avatar_url = ?, updated_at = ? WHERE owner_id = ? AND id = ?`,
+		newAvatarURL, now, ownerID, id,
+	); err != nil {
+		return WeChatAccount{}, "", err
+	}
+
+	acc, err := scanWeChatAccount(tx.QueryRowContext(ctx, `SELECT `+wechatAccountSelectCols+` FROM wechat_accounts w WHERE w.owner_id = ? AND w.id = ?`, ownerID, id))
+	if err != nil {
+		return WeChatAccount{}, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return WeChatAccount{}, "", err
+	}
+	return acc, prevURL, nil
 }
 
 func (s *Store) DeleteWeChatAccount(ctx context.Context, ownerID string, id int64) error {
 	return s.deleteOne(ctx, `DELETE FROM wechat_accounts WHERE owner_id = ? AND id = ?`, ownerID, id)
+}
+
+func (s *Store) DeleteWeChatAccountReturningAvatar(ctx context.Context, ownerID string, id int64) (avatarURL string, err error) {
+	err = s.db.QueryRowContext(
+		ctx,
+		`DELETE FROM wechat_accounts WHERE owner_id = ? AND id = ? RETURNING avatar_url`,
+		ownerID, id,
+	).Scan(&avatarURL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return avatarURL, err
 }
 
 // ---- Group Members ----

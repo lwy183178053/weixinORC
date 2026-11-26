@@ -121,10 +121,16 @@ namespace Client.Pages
         {
             AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted -= OnWeChatSyncCompleted;
+            AppServices.WeChat4Sync.AccountsUpdated -= OnWeChatAccountsUpdated;
             AppServices.Settings.ThemeChanged += OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted += OnWeChatSyncCompleted;
+            AppServices.WeChat4Sync.AccountsUpdated += OnWeChatAccountsUpdated;
             UpdateRightTabVisuals();
             UpdateDirectionToggleVisuals();
+            if (AppServices.WeChat4Sync.KnownAccounts.Count == 0 && AppServices.Backend.IsAuthenticated)
+            {
+                _ = AppServices.WeChat4Sync.RefreshMonitoredCountsAsync();
+            }
             ChatPageSharedHelper.AttachScrollNearBottomWatcher(MessagesListView, ClearNewMessagesJumpHint);
         }
 
@@ -132,12 +138,28 @@ namespace Client.Pages
         {
             AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted -= OnWeChatSyncCompleted;
+            AppServices.WeChat4Sync.AccountsUpdated -= OnWeChatAccountsUpdated;
             _avatarHydrationCts?.Cancel();
             _avatarHydrationCts?.Dispose();
             _avatarHydrationCts = null;
             _chatImageHydrationCts?.Cancel();
             _chatImageHydrationCts?.Dispose();
             _chatImageHydrationCts = null;
+        }
+
+        private void OnWeChatAccountsUpdated()
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_hasLoadedOnce)
+                {
+                    ApplyFilter(_selectedCustomer?.Id, forceReloadDetail: false);
+                }
+                if (_selectedCustomer is not null)
+                {
+                    UpdateSelectedCustomerUi();
+                }
+            });
         }
 
         private void OnWeChatSyncCompleted(Client.Services.WeChat4Db.WeChat4SyncReport report)
@@ -314,10 +336,17 @@ namespace Client.Pages
 
         private void ApplyFilter(long? preferredSelectId = null, bool forceReloadDetail = false)
         {
+            string activeWxid = AppServices.WeChat4Sync.ActiveOwnerWxid;
+            IEnumerable<CustomerDto> baseList = string.IsNullOrWhiteSpace(activeWxid)
+                ? _allCustomers
+                : _allCustomers.Where(c =>
+                    string.IsNullOrWhiteSpace(c.OwnerWxid) ||
+                    string.Equals(c.OwnerWxid, activeWxid, StringComparison.OrdinalIgnoreCase));
+
             string q = SearchBox.Text.Trim();
             _filteredCustomers = string.IsNullOrEmpty(q)
-                ? [.. _allCustomers]
-                : _allCustomers.Where(c =>
+                ? baseList.ToList()
+                : baseList.Where(c =>
                     c.WechatRemark.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     c.WechatName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     c.WechatAccount.Contains(q, StringComparison.OrdinalIgnoreCase) ||
@@ -515,7 +544,6 @@ namespace Client.Pages
             SetMultiSelectMode(false);
             ClearPendingChatImage();
             ClearNewMessagesJumpHint();
-            ProfileStatusBanner.Visibility = Visibility.Collapsed;
             UpdateSelectedCustomerUi();
 
             if (selected is not null)
@@ -701,6 +729,7 @@ namespace Client.Pages
 
             SendMessageButton.IsEnabled = hasCustomer;
             UploadChatImageButton.IsEnabled = hasCustomer;
+            SearchMessagesButton.IsEnabled = hasCustomer;
             EditProfileButton.IsEnabled = hasCustomer;
             DeleteCustomerButton.IsEnabled = hasCustomer;
             EmptyProfileHint.Visibility = hasCustomer ? Visibility.Collapsed : Visibility.Visible;
@@ -713,6 +742,10 @@ namespace Client.Pages
                 return;
             }
 
+            string ownerWeChatLabel = !string.IsNullOrWhiteSpace(c.OwnerWxid)
+                ? AppServices.WeChat4Sync.ResolveAccountDisplayName(c.OwnerWxid)
+                : string.Empty;
+
             ActiveCustomerTitle.Text = c.DisplayName;
             string singleLineRemark = c.WechatRemark.Replace("\r", " ").Replace("\n", " ").Trim();
             var metaParts = new[]
@@ -720,7 +753,8 @@ namespace Client.Pages
                 string.IsNullOrWhiteSpace(singleLineRemark) || string.IsNullOrWhiteSpace(c.WechatName) ? "" : $"备注: {singleLineRemark}",
                 string.IsNullOrWhiteSpace(c.WechatAccount) ? "" : $"微信号: {c.WechatAccount}",
                 string.IsNullOrWhiteSpace(c.Region) ? "" : $"地区: {c.Region}",
-                string.IsNullOrWhiteSpace(c.Phone) ? "" : $"电话: {c.Phone}"
+                string.IsNullOrWhiteSpace(c.Phone) ? "" : $"电话: {c.Phone}",
+                (AppServices.WeChat4Sync.KnownAccounts.Count >= 2 && !string.IsNullOrWhiteSpace(ownerWeChatLabel)) ? $"所属微信: {ownerWeChatLabel}" : ""
             }.Where(s => s.Length > 0);
             ActiveCustomerMeta.Text = metaParts.Any() ? string.Join("  ·  ", metaParts) : $"客户 ID #{c.Id}";
 
@@ -772,6 +806,15 @@ namespace Client.Pages
             ViewPhoneText.Text = string.IsNullOrWhiteSpace(c.Phone) ? "-" : c.Phone;
             ViewSignatureText.Text = string.IsNullOrWhiteSpace(c.Signature) ? "-" : c.Signature;
             ViewAddedDateText.Text = string.IsNullOrWhiteSpace(c.AddedDate) ? "-" : c.AddedDate;
+            if (!string.IsNullOrWhiteSpace(ownerWeChatLabel))
+            {
+                ViewOwnerWeChatText.Text = ownerWeChatLabel;
+                ViewOwnerWeChatRow.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                ViewOwnerWeChatRow.Visibility = Visibility.Collapsed;
+            }
 
             ViewFollowStatusText.Text = string.IsNullOrWhiteSpace(c.FollowStatus) ? "未设置" : c.FollowStatus;
             ViewTagsText.Text = string.IsNullOrWhiteSpace(c.Tags) ? "-" : c.Tags;
@@ -1224,6 +1267,80 @@ namespace Client.Pages
             {
                 _isLoadingOlderMessages = false;
                 UpdateLoadOlderMessagesBar();
+            }
+        }
+
+        private async void SearchMessagesButton_Click(object sender, RoutedEventArgs e)
+        {
+            var customer = _selectedCustomer;
+            if (customer is null || !AppServices.TryBeginModalDialog()) return;
+
+            long jumpMsgId = 0;
+            try
+            {
+                var dialog = new ChatHistorySearchDialog(
+                    isGroup: false,
+                    targetId: customer.Id,
+                    conversationTitle: customer.DisplayName,
+                    peerFallbackName: customer.DisplayName)
+                {
+                    XamlRoot = XamlRoot
+                };
+                await dialog.ShowAsync();
+                jumpMsgId = dialog.SelectedJumpMessageId;
+            }
+            catch (Exception ex)
+            {
+                AppServices.Logs.Error("UI", $"打开客户聊天记录搜索弹窗失败：{ex.Message}");
+            }
+            finally
+            {
+                AppServices.EndModalDialog();
+            }
+
+            if (jumpMsgId > 0 && _selectedCustomer?.Id == customer.Id)
+            {
+                await JumpToCustomerMessageAsync(customer, jumpMsgId);
+            }
+        }
+
+        private async Task JumpToCustomerMessageAsync(CustomerDto customer, long targetMessageId)
+        {
+            var found = _currentMessages.FirstOrDefault(m => m.Id == targetMessageId);
+            int guardPages = 0;
+            while (found is null && _nextOlderMessageCursor > 0 && guardPages < 35 && _selectedCustomer?.Id == customer.Id)
+            {
+                guardPages++;
+                var res = await AppServices.Backend.ListCustomerMessagesAsync(customer.Id, limit: 100, cursor: _nextOlderMessageCursor);
+                if (_selectedCustomer?.Id != customer.Id || !res.IsSuccess || res.Data is null || res.Data.Items.Count == 0)
+                {
+                    break;
+                }
+
+                var existingIds = _currentMessages.Where(x => x.Id > 0).Select(x => x.Id).ToHashSet();
+                var olderBubbles = new List<ChatBubbleItem>();
+                foreach (var m in res.Data.Items.AsEnumerable().Reverse())
+                {
+                    if (SessionDeletedMessageIds.Contains(m.Id) || existingIds.Contains(m.Id)) continue;
+                    olderBubbles.Add(BuildCustomerBubbleItem(customer, m));
+                }
+                for (int i = 0; i < olderBubbles.Count; i++)
+                {
+                    _currentMessages.Insert(i, olderBubbles[i]);
+                }
+                _nextOlderMessageCursor = res.Data.NextCursor;
+                if (olderBubbles.Count > 0)
+                {
+                    _ = HydrateChatBubbleImagesAsync(olderBubbles, _chatImageHydrationCts?.Token ?? CancellationToken.None);
+                }
+                found = _currentMessages.FirstOrDefault(m => m.Id == targetMessageId);
+            }
+
+            UpdateLoadOlderMessagesBar();
+            if (found is not null)
+            {
+                MessagesListView.ScrollIntoView(found, ScrollIntoViewAlignment.Leading);
+                DispatcherQueue.TryEnqueue(() => MessagesListView.ScrollIntoView(found, ScrollIntoViewAlignment.Leading));
             }
         }
 
@@ -1860,12 +1977,9 @@ namespace Client.Pages
             }
         }
 
-        private void ShowProfileStatus(string message, bool isError = false)
+        private static void ShowProfileStatus(string message, bool isError = false)
         {
-            ProfileStatusBanner.Background = (Brush)Application.Current.Resources[isError ? "DangerBgBrush" : "SuccessBgBrush"];
-            ProfileStatusText.Foreground = (Brush)Application.Current.Resources[isError ? "DangerTextBrush" : "SuccessTextBrush"];
-            ProfileStatusText.Text = message;
-            ProfileStatusBanner.Visibility = Visibility.Visible;
+            WorkbenchPage.Current?.ShowToast(message, isError);
         }
     }
 }

@@ -12,11 +12,13 @@ import (
 )
 
 type syncCustomersRequest struct {
-	Items []store.WeChatSyncCustomerItem `json:"items"`
+	OwnerWxid string                         `json:"owner_wxid"`
+	Items     []store.WeChatSyncCustomerItem `json:"items"`
 }
 
 type syncGroupsRequest struct {
-	Items []store.WeChatSyncGroupItem `json:"items"`
+	OwnerWxid string                      `json:"owner_wxid"`
+	Items     []store.WeChatSyncGroupItem `json:"items"`
 }
 
 type syncMessagePayload struct {
@@ -62,9 +64,15 @@ func (s *server) syncWeChatCustomers(c *gin.Context) {
 		return
 	}
 
+	defaultOwnerWxid := truncateRunes(req.OwnerWxid, 128)
 	sanitized := make([]store.WeChatSyncCustomerItem, 0, len(req.Items))
 	for _, it := range req.Items {
+		itemOwnerWxid := truncateRunes(it.OwnerWxid, 128)
+		if itemOwnerWxid == "" {
+			itemOwnerWxid = defaultOwnerWxid
+		}
 		item := store.WeChatSyncCustomerItem{
+			OwnerWxid:     itemOwnerWxid,
 			NativeID:      truncateRunes(it.NativeID, 128),
 			LocalKey:      truncateRunes(it.LocalKey, 128),
 			WechatRemark:  truncateRunes(it.WechatRemark, 128),
@@ -107,8 +115,13 @@ func (s *server) syncWeChatGroups(c *gin.Context) {
 		return
 	}
 
+	defaultOwnerWxid := truncateRunes(req.OwnerWxid, 128)
 	sanitized := make([]store.WeChatSyncGroupItem, 0, len(req.Items))
 	for _, g := range req.Items {
+		groupOwnerWxid := truncateRunes(g.OwnerWxid, 128)
+		if groupOwnerWxid == "" {
+			groupOwnerWxid = defaultOwnerWxid
+		}
 		groupName := truncateRunes(g.GroupName, 128)
 		groupKey := truncateRunes(g.GroupKey, 128)
 		if groupName == "" {
@@ -144,6 +157,7 @@ func (s *server) syncWeChatGroups(c *gin.Context) {
 			members = append(members, mem)
 		}
 		sanitized = append(sanitized, store.WeChatSyncGroupItem{
+			OwnerWxid:   groupOwnerWxid,
 			GroupKey:    groupKey,
 			GroupName:   groupName,
 			MyNickname:  truncateRunes(g.MyNickname, 128),

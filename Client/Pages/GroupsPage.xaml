@@ -214,9 +214,21 @@
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Grid.Column="0" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayTitleWithCount}" TextTrimming="CharacterEllipsis" />
-                                                <TextBlock Grid.Column="1" Margin="4,0,0,0" VerticalAlignment="Center" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeShort}" />
+                                                <Border
+                                                    Grid.Column="1"
+                                                    Margin="4,0,0,0"
+                                                    Padding="4,1"
+                                                    VerticalAlignment="Center"
+                                                    Background="{StaticResource SuccessBgBrush}"
+                                                    CornerRadius="4"
+                                                    ToolTipService.ToolTip="已开启 AI 自动回复"
+                                                    Visibility="{x:Bind AutoReplyBadgeVisibility, Mode=OneWay}">
+                                                    <TextBlock FontSize="9.5" FontWeight="SemiBold" Foreground="{StaticResource SuccessTextBrush}" Text="AI" />
+                                                </Border>
+                                                <TextBlock Grid.Column="2" Margin="4,0,0,0" VerticalAlignment="Center" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeShort}" />
                                             </Grid>
 
                                             <TextBlock Grid.Row="1" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" MaxLines="1" Text="{x:Bind PreviewLine}" TextTrimming="CharacterEllipsis" />
@@ -268,6 +280,20 @@
                     </StackPanel>
 
                     <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                        <Button
+                            x:Name="SearchMessagesButton"
+                            Height="30"
+                            Padding="10,0"
+                            Click="SearchMessagesButton_Click"
+                            FontSize="12"
+                            IsEnabled="False"
+                            Style="{StaticResource SecondaryOutlineButtonStyle}"
+                            ToolTipService.ToolTip="按关键词或日期查找历史群聊记录">
+                            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                <FontIcon FontSize="12" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE721;" />
+                                <TextBlock Text="查找记录" />
+                            </StackPanel>
+                        </Button>
                         <Button
                             x:Name="SyncActiveGroupsNowButton"
                             Height="30"
@@ -877,10 +903,6 @@
                 <Grid x:Name="ProfileTabContainer" Grid.Row="1" Visibility="Collapsed">
                     <ScrollViewer x:Name="DetailContentScroll" Padding="16,14">
                         <StackPanel Spacing="14">
-                            <Border x:Name="DetailStatusBanner" Padding="10,7" Background="{StaticResource SuccessBgBrush}" CornerRadius="7" Visibility="Collapsed">
-                                <TextBlock x:Name="DetailStatusText" FontSize="12" Foreground="{StaticResource SuccessTextBrush}" TextWrapping="Wrap" />
-                            </Border>
-
                             <!-- Top Avatar & Group Identity + Compact Icon Actions -->
                             <Grid ColumnSpacing="12">
                                 <Grid.ColumnDefinitions>
@@ -903,6 +925,20 @@
                                         </Grid.ColumnDefinitions>
                                         <TextBlock x:Name="DetailHeaderKeyText" Grid.Column="0" VerticalAlignment="Center" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="我在本群：-" TextTrimming="CharacterEllipsis" />
                                         <StackPanel x:Name="ViewActionsBar" Grid.Column="1" VerticalAlignment="Bottom" Orientation="Horizontal" Spacing="5">
+                                            <Button
+                                                x:Name="AutoReplyToggleButton"
+                                                Height="26"
+                                                Padding="7,0"
+                                                Click="AutoReplyToggleButton_Click"
+                                                CornerRadius="6"
+                                                IsEnabled="False"
+                                                Style="{StaticResource SecondaryOutlineButtonStyle}"
+                                                ToolTipService.ToolTip="开启后，群内有人 @我 时自动生成 AI 回复并写入微信">
+                                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                                    <Ellipse x:Name="AutoReplyToggleDot" Width="6" Height="6" Fill="{StaticResource TextMutedBrush}" />
+                                                    <TextBlock x:Name="AutoReplyToggleText" FontSize="11" Text="AI回复" />
+                                                </StackPanel>
+                                            </Button>
                                             <Button
                                                 x:Name="EditGroupButton"
                                                 Width="26"
@@ -933,6 +969,12 @@
                                             <Button x:Name="SaveGroupButton" Height="26" Padding="10,0" Click="SaveGroupButton_Click" Content="保存" CornerRadius="6" FontSize="11.5" Style="{StaticResource PrimaryVioletButtonStyle}" />
                                         </StackPanel>
                                     </Grid>
+                                    <TextBlock
+                                        x:Name="DetailHeaderOwnerWeChatText"
+                                        FontSize="11.5"
+                                        Foreground="{StaticResource TextMutedBrush}"
+                                        TextTrimming="CharacterEllipsis"
+                                        Visibility="Collapsed" />
                                 </StackPanel>
                             </Grid>
 

@@ -8,36 +8,42 @@ import (
 )
 
 type Group struct {
-	ID            int64  `json:"id"`
-	GroupName     string `json:"group_name"`
-	GroupKey      string `json:"group_key"`
-	MyNickname    string `json:"my_nickname"`
-	AvatarURL     string `json:"avatar_url"`
-	MemberCount   int    `json:"member_count"`
-	MembersText   string `json:"members_text"`
-	Note          string `json:"note"`
-	LastMessage   string `json:"last_message"`
-	LastMessageAt string `json:"last_message_at"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ID               int64  `json:"id"`
+	OwnerWxid        string `json:"owner_wxid"`
+	GroupName        string `json:"group_name"`
+	GroupKey         string `json:"group_key"`
+	MyNickname       string `json:"my_nickname"`
+	AvatarURL        string `json:"avatar_url"`
+	MemberCount      int    `json:"member_count"`
+	MembersText      string `json:"members_text"`
+	Note             string `json:"note"`
+	AutoReplyEnabled bool   `json:"auto_reply_enabled"`
+	LastMessage      string `json:"last_message"`
+	LastMessageAt    string `json:"last_message_at"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 type GroupInput struct {
-	GroupName   string
-	GroupKey    string
-	MyNickname  string
-	MemberCount int
-	MembersText string
-	Note        string
+	OwnerWxid        string
+	GroupName        string
+	GroupKey         string
+	MyNickname       string
+	MemberCount      int
+	MembersText      string
+	Note             string
+	AutoReplyEnabled bool
 }
 
 type GroupPatch struct {
-	GroupName   *string
-	GroupKey    *string
-	MyNickname  *string
-	MemberCount *int
-	MembersText *string
-	Note        *string
+	OwnerWxid        *string
+	GroupName        *string
+	GroupKey         *string
+	MyNickname       *string
+	MemberCount      *int
+	MembersText      *string
+	Note             *string
+	AutoReplyEnabled *bool
 }
 
 type GroupMessage struct {
@@ -63,10 +69,14 @@ type GroupMessageInput struct {
 
 func (s *Store) CreateGroup(ctx context.Context, ownerID string, input GroupInput) (Group, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	autoReplyInt := 0
+	if input.AutoReplyEnabled {
+		autoReplyInt = 1
+	}
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO groups (owner_id, group_name, group_key, my_nickname, member_count, members_text, note, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ownerID, input.GroupName, input.GroupKey, input.MyNickname, input.MemberCount, input.MembersText, input.Note, now, now,
+		INSERT INTO groups (owner_id, owner_wxid, group_name, group_key, my_nickname, member_count, members_text, note, auto_reply_enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ownerID, input.OwnerWxid, input.GroupName, input.GroupKey, input.MyNickname, input.MemberCount, input.MembersText, input.Note, autoReplyInt, now, now,
 	)
 	if err != nil {
 		return Group{}, err
@@ -78,30 +88,34 @@ func (s *Store) CreateGroup(ctx context.Context, ownerID string, input GroupInpu
 	}
 
 	return Group{
-		ID:          id,
-		GroupName:   input.GroupName,
-		GroupKey:    input.GroupKey,
-		MyNickname:  input.MyNickname,
-		MemberCount: input.MemberCount,
-		MembersText: input.MembersText,
-		Note:        input.Note,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:               id,
+		OwnerWxid:        input.OwnerWxid,
+		GroupName:        input.GroupName,
+		GroupKey:         input.GroupKey,
+		MyNickname:       input.MyNickname,
+		MemberCount:      input.MemberCount,
+		MembersText:      input.MembersText,
+		Note:             input.Note,
+		AutoReplyEnabled: input.AutoReplyEnabled,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}, nil
 }
 
 const groupSelectCols = `
-	g.id, g.group_name, g.group_key, g.my_nickname, g.avatar_url, g.member_count, g.members_text, g.note,
+	g.id, g.owner_wxid, g.group_name, g.group_key, g.my_nickname, g.avatar_url, g.member_count, g.members_text, g.note, g.auto_reply_enabled,
 	COALESCE((SELECT CASE WHEN m.content <> '' THEN m.content WHEN m.image_url <> '' THEN '[图片]' ELSE '' END FROM group_messages m WHERE m.owner_id = g.owner_id AND m.group_id = g.id ORDER BY m.sent_at DESC, m.id DESC LIMIT 1), ''),
 	COALESCE((SELECT m.sent_at FROM group_messages m WHERE m.owner_id = g.owner_id AND m.group_id = g.id ORDER BY m.sent_at DESC, m.id DESC LIMIT 1), ''),
 	g.created_at, g.updated_at`
 
 func scanGroup(scanner rowScanner) (Group, error) {
 	var g Group
+	var autoReplyInt int
 	err := scanner.Scan(
-		&g.ID, &g.GroupName, &g.GroupKey, &g.MyNickname, &g.AvatarURL, &g.MemberCount, &g.MembersText, &g.Note,
+		&g.ID, &g.OwnerWxid, &g.GroupName, &g.GroupKey, &g.MyNickname, &g.AvatarURL, &g.MemberCount, &g.MembersText, &g.Note, &autoReplyInt,
 		&g.LastMessage, &g.LastMessageAt, &g.CreatedAt, &g.UpdatedAt,
 	)
+	g.AutoReplyEnabled = autoReplyInt != 0
 	return g, err
 }
 
@@ -125,17 +139,27 @@ func (s *Store) UpdateGroup(ctx context.Context, ownerID string, id int64, patch
 	defer tx.Rollback()
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	var autoReplyArg any
+	if patch.AutoReplyEnabled != nil {
+		if *patch.AutoReplyEnabled {
+			autoReplyArg = 1
+		} else {
+			autoReplyArg = 0
+		}
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE groups
-		SET group_name   = COALESCE(?, group_name),
-		    group_key    = COALESCE(?, group_key),
-		    my_nickname  = COALESCE(?, my_nickname),
-		    member_count = COALESCE(?, member_count),
-		    members_text = COALESCE(?, members_text),
-		    note         = COALESCE(?, note),
-		    updated_at   = ?
+		SET owner_wxid         = COALESCE(?, owner_wxid),
+		    group_name         = COALESCE(?, group_name),
+		    group_key          = COALESCE(?, group_key),
+		    my_nickname        = COALESCE(?, my_nickname),
+		    member_count       = COALESCE(?, member_count),
+		    members_text       = COALESCE(?, members_text),
+		    note               = COALESCE(?, note),
+		    auto_reply_enabled = COALESCE(?, auto_reply_enabled),
+		    updated_at         = ?
 		WHERE owner_id = ? AND id = ?`,
-		patch.GroupName, patch.GroupKey, patch.MyNickname, patch.MemberCount, patch.MembersText, patch.Note, now, ownerID, id,
+		patch.OwnerWxid, patch.GroupName, patch.GroupKey, patch.MyNickname, patch.MemberCount, patch.MembersText, patch.Note, autoReplyArg, now, ownerID, id,
 	)
 	if err != nil {
 		return Group{}, err

@@ -12,8 +12,7 @@ namespace Client.Dialogs
 {
     public sealed partial class ImportWeChatFriendsDialog : ContentDialog
     {
-        private readonly HashSet<string> _existingNativeIds;
-        private readonly HashSet<string> _existingAccounts;
+        private readonly List<CustomerDto> _existingCustomers;
         private readonly ObservableCollection<WeChat4TagOption> _tagOptions = [];
         private readonly ObservableCollection<WeChat4Contact> _visibleFriends = [];
         private readonly HashSet<string> _selectedUsernames = new(StringComparer.OrdinalIgnoreCase);
@@ -30,14 +29,7 @@ namespace Client.Dialogs
         {
             InitializeComponent();
             RequestedTheme = AppServices.Settings.CurrentElementTheme;
-            _existingNativeIds = existingCustomers
-                .Select(c => c.NativeId?.Trim())
-                .Where(s => !string.IsNullOrEmpty(s))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase)!;
-            _existingAccounts = existingCustomers
-                .Select(c => c.WechatAccount?.Trim())
-                .Where(s => !string.IsNullOrEmpty(s))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase)!;
+            _existingCustomers = existingCustomers.ToList();
 
             TagsListView.ItemsSource = _tagOptions;
             FriendsListView.ItemsSource = _visibleFriends;
@@ -93,16 +85,35 @@ namespace Client.Dialogs
                 }
 
                 var reader = AppServices.WeChat4Sync.ActiveReader;
+                string selfWxid = reader.SelfWxid ?? string.Empty;
+                // Only mark friends already imported under THIS WeChat account (or legacy unassigned records)
+                var scopedExisting = _existingCustomers
+                    .Where(c => string.IsNullOrWhiteSpace(c.OwnerWxid) ||
+                                string.IsNullOrWhiteSpace(selfWxid) ||
+                                c.OwnerWxid.Equals(selfWxid, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                var existingNativeIds = scopedExisting
+                    .Select(c => c.NativeId?.Trim())
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase)!;
+                var existingAccounts = scopedExisting
+                    .Select(c => c.WechatAccount?.Trim())
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase)!;
+
                 _allFriends = reader.Friends.ToList();
                 foreach (var f in _allFriends)
                 {
-                    f.IsAlreadyImported = _existingNativeIds.Contains(f.Username) ||
-                                          (!string.IsNullOrWhiteSpace(f.Alias) && _existingAccounts.Contains(f.Alias));
+                    f.IsAlreadyImported = existingNativeIds.Contains(f.Username) ||
+                                          (!string.IsNullOrWhiteSpace(f.Alias) && existingAccounts.Contains(f.Alias));
                     f.IsSelected = _selectedUsernames.Contains(f.Username);
                 }
 
                 BuildTagCategories(reader);
-                HeaderSubtitleText.Text = $"账号 {reader.SelfWxid} · 共 {_allFriends.Count} 位微信好友 · {reader.LabelNames.Count} 个微信标签";
+                string selfLabel = !string.IsNullOrWhiteSpace(reader.SelfContact?.NickName)
+                    ? $"{reader.SelfContact.NickName} ({selfWxid})"
+                    : selfWxid;
+                HeaderSubtitleText.Text = $"当前微信：{selfLabel} · 共 {_allFriends.Count} 位好友 · {reader.LabelNames.Count} 个微信标签";
                 SetLoadingState(false);
                 PickerBodyGrid.Visibility = Visibility.Visible;
 

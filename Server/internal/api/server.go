@@ -90,10 +90,11 @@ func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.
 	authed.POST("/groups/:id/messages", s.createGroupMessage)
 	authed.PATCH("/groups/:id/messages/:msgId", s.updateGroupMessage)
 
-	// WeChat Accounts (1 employee <-> personal/enterprise WeChat binding)
+	// WeChat Accounts (1 employee <-> multiple personal/enterprise WeChat accounts)
 	authed.GET("/wechat-accounts", s.listWeChatAccounts)
 	authed.POST("/wechat-accounts", s.upsertWeChatAccount)
 	authed.PATCH("/wechat-accounts/:id", s.updateWeChatAccount)
+	authed.POST("/wechat-accounts/:id/avatar", s.uploadWeChatAccountAvatar)
 	authed.DELETE("/wechat-accounts/:id", s.deleteWeChatAccount)
 
 	// WeChat 4.x Direct DB Batch Sync (Idempotent Upsert)
@@ -113,6 +114,7 @@ func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.
 	authed.POST("/ai/customer-chat", s.aiCustomerChat)
 	authed.POST("/ai/group-summary", s.aiGroupSummary)
 	authed.POST("/ai/group-chat", s.aiGroupChat)
+	authed.POST("/ai/group-auto-reply", s.aiGroupAutoReply)
 	authed.POST("/ai/agent-chat", s.aiAgentChat)
 	authed.POST("/ai/transcribe", s.aiTranscribeAudio)
 

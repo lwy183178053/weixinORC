@@ -381,6 +381,41 @@ func (s *server) aiGroupChat(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+type groupAutoReplyRequest struct {
+	GroupID        int64                 `json:"group_id"`
+	SenderName     string                `json:"sender_name"`
+	TriggerMessage string                `json:"trigger_message"`
+	CustomPrompt   string                `json:"custom_prompt,omitempty"`
+	MaxReplyChars  int                   `json:"max_reply_chars,omitempty"`
+	Examples       []ai.AutoReplyExample `json:"examples,omitempty"`
+}
+
+func (s *server) aiGroupAutoReply(c *gin.Context) {
+	var req groupAutoReplyRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	if req.GroupID <= 0 || strings.TrimSpace(req.TriggerMessage) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		return
+	}
+	id := auth.IdentityFromContext(c)
+	res, err := s.ai.GroupAutoReply(c.Request.Context(), id.EmployeeID, ai.GroupAutoReplyInput{
+		GroupID:        req.GroupID,
+		SenderName:     req.SenderName,
+		TriggerMessage: req.TriggerMessage,
+		CustomPrompt:   req.CustomPrompt,
+		MaxReplyChars:  req.MaxReplyChars,
+		Examples:       req.Examples,
+	})
+	if err != nil {
+		writeAIError(c, err)
+		return
+	}
+	_, _ = s.store.CreateAuditLog(c.Request.Context(), id.EmployeeID, "ai_group_auto_reply", "group", "", "model="+res.Model)
+	c.JSON(http.StatusOK, res)
+}
+
 type agentChatRequest struct {
 	History []ai.ChatTurn `json:"history"`
 	Message string        `json:"message"`

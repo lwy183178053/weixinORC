@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:Client.Models"
     mc:Ignorable="d">
 
     <Grid Background="{StaticResource AppCanvasBgBrush}">
@@ -30,7 +31,7 @@
                                 <TextBlock x:Name="StatusBadgeText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="检测中" />
                             </Border>
                         </StackPanel>
-                        <TextBlock FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="自动监测电脑微信消息文件变化，仅同步您已导入的客户与群聊，全程免手动操作" />
+                        <TextBlock FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="自动识别登录的电脑微信账号并监测消息变化，切换微信时自动区分并隔离对应客户与群聊" />
                     </StackPanel>
                 </StackPanel>
 
@@ -45,14 +46,6 @@
                         Style="{StaticResource DangerOutlineButtonStyle}"
                         Visibility="Collapsed" />
                     <Button
-                        x:Name="SelectDirButton"
-                        Height="32"
-                        Padding="12,0"
-                        Click="SelectDirButton_Click"
-                        Content="更改微信目录"
-                        FontSize="12"
-                        Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                    <Button
                         x:Name="SyncNowButton"
                         Height="32"
                         Padding="14,0"
@@ -65,29 +58,121 @@
         </Border>
 
         <!-- Row 1: Main Centered Content -->
-        <ScrollViewer Grid.Row="1" Padding="24,18">
-            <StackPanel MaxWidth="900" HorizontalAlignment="Stretch" Spacing="14">
+        <ScrollViewer
+            Grid.Row="1"
+            HorizontalContentAlignment="Stretch"
+            HorizontalScrollBarVisibility="Disabled"
+            HorizontalScrollMode="Disabled">
+            <Grid Padding="24,18">
+                <StackPanel MaxWidth="900" HorizontalAlignment="Stretch" Spacing="14">
 
-                <!-- Feedback Banner -->
-                <Border
-                    x:Name="FeedbackBanner"
-                    Padding="13,9"
-                    Background="{StaticResource BrandSoftBgBrush}"
-                    BorderBrush="{StaticResource BrandSoftBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="9"
-                    Visibility="Collapsed">
-                    <Grid>
-                        <TextBlock x:Name="FeedbackText" VerticalAlignment="Center" FontSize="12.5" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap" />
-                        <Button HorizontalAlignment="Right" Padding="6,2" Background="Transparent" BorderThickness="0" Click="CloseBannerButton_Click" Content="✕" FontSize="11" Foreground="{StaticResource TextMutedBrush}" />
-                    </Grid>
-                </Border>
-
-                <!-- Card 1: Auto File-Change Watcher Control -->
+                <!-- Card 1: Current Active WeChat Account Identity -->
                 <Border
                     Padding="20,16"
                     Background="{StaticResource AppSurfaceBrush}"
                     BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12">
+                    <Grid ColumnSpacing="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="54" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Self Avatar -->
+                        <Border
+                            Grid.Column="0"
+                            Width="52"
+                            Height="52"
+                            VerticalAlignment="Center"
+                            Background="{StaticResource BrandSoftBgBrush}"
+                            BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10">
+                            <Grid>
+                                <TextBlock
+                                    x:Name="CurrentAccountAvatarText"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    FontSize="20"
+                                    FontWeight="Bold"
+                                    Foreground="{StaticResource BrandPrimaryBrush}"
+                                    Text="微" />
+                                <Image
+                                    x:Name="CurrentAccountAvatarImage"
+                                    Stretch="UniformToFill"
+                                    Visibility="Collapsed" />
+                            </Grid>
+                        </Border>
+
+                        <!-- Self Identity Details -->
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
+                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <TextBlock
+                                    x:Name="CurrentAccountNameText"
+                                    FontSize="15.5"
+                                    FontWeight="Bold"
+                                    Foreground="{StaticResource TextPrimaryBrush}"
+                                    Text="等待识别当前登录微信"
+                                    TextTrimming="CharacterEllipsis" />
+                                <Border
+                                    x:Name="CurrentAccountStatusBadge"
+                                    Padding="8,2"
+                                    Background="{StaticResource AppInputBgBrush}"
+                                    CornerRadius="9">
+                                    <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                        <Ellipse x:Name="CurrentAccountStatusDot" Width="7" Height="7" Fill="{StaticResource TextMutedBrush}" />
+                                        <TextBlock
+                                            x:Name="CurrentAccountStatusText"
+                                            FontSize="11"
+                                            FontWeight="SemiBold"
+                                            Foreground="{StaticResource TextSecondaryBrush}"
+                                            Text="待识别" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <TextBlock
+                                x:Name="CurrentAccountIdText"
+                                FontSize="12"
+                                Foreground="{StaticResource TextSecondaryBrush}"
+                                IsTextSelectionEnabled="True"
+                                Text="登录电脑微信后将自动识别头像、昵称与微信号，也可点击右侧按钮立即识别"
+                                TextTrimming="CharacterEllipsis" />
+
+                            <TextBlock
+                                x:Name="CurrentAccountBioText"
+                                FontSize="11.5"
+                                Foreground="{StaticResource TextMutedBrush}"
+                                TextTrimming="CharacterEllipsis"
+                                Visibility="Collapsed" />
+                        </StackPanel>
+
+                        <!-- Action Button -->
+                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                            <Button
+                                x:Name="DetectAccountButton"
+                                Height="32"
+                                Padding="12,0"
+                                Click="DetectAccountButton_Click"
+                                FontSize="12"
+                                Style="{StaticResource SecondaryOutlineButtonStyle}"
+                                ToolTipService.ToolTip="立即读取电脑当前登录微信的头像、昵称与资料并更新关联列表">
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <FontIcon FontSize="12.5" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE77B;" />
+                                    <TextBlock Text="识别当前微信" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Card 2: Auto File-Change Watcher Control -->
+                <Border
+                    Padding="20,16"
+                    Background="{StaticResource AppSurfaceBrush}"
+                    BorderBrush="{StaticResource AppBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="12">
                     <Grid ColumnSpacing="16">
@@ -125,7 +210,7 @@
                     </Grid>
                 </Border>
 
-                <!-- Card 2: 3 Simple Status KPIs -->
+                <!-- Card 3: 3 Simple Status KPIs -->
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -145,7 +230,7 @@
                         <StackPanel Spacing="3">
                             <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="已托管客户与群聊" />
                             <TextBlock x:Name="KpiMonitoredText" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="0 客户 · 0 群" />
-                            <TextBlock FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="仅定向同步已导入的对象" />
+                            <TextBlock FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="仅定向同步当前在线微信的已导入对象" />
                         </StackPanel>
                     </Border>
 
@@ -158,28 +243,151 @@
                     </Border>
                 </Grid>
 
-                <!-- Card 3: Quick Actions & Simple Sync Preferences -->
+                <!-- Card 4: Linked WeChat Accounts Under This Employee -->
+                <Border
+                    Background="{StaticResource AppSurfaceBrush}"
+                    BorderBrush="{StaticResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Padding="16,11" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
+                            <Grid ColumnSpacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <FontIcon FontSize="13.5" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE716;" />
+                                    <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="本员工已关联的微信账号" />
+                                    <Border Padding="7,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8">
+                                        <TextBlock x:Name="LinkedAccountsCountText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="0 个账号" />
+                                    </Border>
+                                </StackPanel>
+                                <TextBlock
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    FontSize="11.5"
+                                    Foreground="{StaticResource TextMutedBrush}"
+                                    Text="切换电脑微信后自动归档，不同微信号的客户与群聊独立隔离" />
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Row="1">
+                            <TextBlock
+                                x:Name="EmptyAccountsHint"
+                                Margin="16,20"
+                                HorizontalAlignment="Center"
+                                FontSize="12"
+                                Foreground="{StaticResource TextMutedBrush}"
+                                Text="暂未关联微信账号，点击上方「识别当前微信」或导入好友/群聊后将自动登记。"
+                                TextAlignment="Center"
+                                TextWrapping="Wrap" />
+
+                            <ListView
+                                x:Name="LinkedAccountsListView"
+                                Padding="12,8"
+                                SelectionMode="None"
+                                Visibility="Collapsed">
+                                <ListView.ItemContainerTransitions>
+                                    <TransitionCollection />
+                                </ListView.ItemContainerTransitions>
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="Padding" Value="0,3" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="models:WeChatAccountDto">
+                                        <Border
+                                            Padding="12,10"
+                                            Background="{StaticResource AppSurfaceAltBrush}"
+                                            BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="8">
+                                            <Grid ColumnSpacing="12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="40" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <Border
+                                                    Grid.Column="0"
+                                                    Width="38"
+                                                    Height="38"
+                                                    VerticalAlignment="Center"
+                                                    Background="{StaticResource BrandSoftBgBrush}"
+                                                    BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="8">
+                                                    <Grid>
+                                                        <TextBlock
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center"
+                                                            FontSize="15"
+                                                            FontWeight="Bold"
+                                                            Foreground="{StaticResource BrandPrimaryBrush}"
+                                                            Text="{x:Bind AvatarInitial}"
+                                                            Visibility="{x:Bind AvatarInitialVisibility, Mode=OneWay}" />
+                                                        <Image
+                                                            Source="{x:Bind AvatarImage, Mode=OneWay}"
+                                                            Stretch="UniformToFill"
+                                                            Visibility="{x:Bind AvatarImageVisibility, Mode=OneWay}" />
+                                                    </Grid>
+                                                </Border>
+
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                                    <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                                                        <TextBlock
+                                                            FontSize="13.5"
+                                                            FontWeight="SemiBold"
+                                                            Foreground="{StaticResource TextPrimaryBrush}"
+                                                            Text="{x:Bind DisplayName}"
+                                                            TextTrimming="CharacterEllipsis" />
+                                                        <Border Padding="6,1" Background="{x:Bind StatusBadgeBgBrush, Mode=OneWay}" CornerRadius="7">
+                                                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                                                <Ellipse Width="6" Height="6" Fill="{x:Bind StatusDotBrush, Mode=OneWay}" />
+                                                                <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{x:Bind StatusBadgeFgBrush, Mode=OneWay}" Text="{x:Bind StatusLabel}" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </StackPanel>
+
+                                                    <TextBlock
+                                                        FontSize="11.5"
+                                                        Foreground="{StaticResource TextMutedBrush}"
+                                                        Text="{x:Bind SubtitleLine}"
+                                                        TextTrimming="CharacterEllipsis" />
+
+                                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                                        <TextBlock FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind CountsSummary}" />
+                                                        <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind LastActiveLabel}" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!-- Card 5: Simple Sync Preferences -->
                 <Border
                     Padding="16,13"
                     Background="{StaticResource AppSurfaceBrush}"
                     BorderBrush="{StaticResource AppBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="10">
-                    <Grid ColumnSpacing="12">
-                        <StackPanel Orientation="Horizontal" Spacing="18" VerticalAlignment="Center">
-                            <CheckBox x:Name="OptImagesCheck" Content="自动同步聊天图片" IsChecked="True" Checked="OptCheck_Changed" Unchecked="OptCheck_Changed" />
-                            <CheckBox x:Name="OptAvatarsCheck" Content="自动同步好友与群头像" IsChecked="True" Checked="OptCheck_Changed" Unchecked="OptCheck_Changed" />
-                        </StackPanel>
-
-                        <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <Button Height="30" Padding="12,0" Click="RefreshStatusButton_Click" Content="重新检测状态" FontSize="12" Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                            <Button Height="30" Padding="12,0" Click="GoToCustomersButton_Click" Content="管理客户" FontSize="12" Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                            <Button Height="30" Padding="12,0" Click="GoToGroupsButton_Click" Content="管理群聊" FontSize="12" Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                        </StackPanel>
-                    </Grid>
+                    <StackPanel Orientation="Horizontal" Spacing="20" VerticalAlignment="Center">
+                        <CheckBox x:Name="OptImagesCheck" Content="自动同步聊天图片" IsChecked="True" Checked="OptCheck_Changed" Unchecked="OptCheck_Changed" />
+                        <CheckBox x:Name="OptAvatarsCheck" Content="自动同步好友与群头像" IsChecked="True" Checked="OptCheck_Changed" Unchecked="OptCheck_Changed" />
+                    </StackPanel>
                 </Border>
 
-                <!-- Card 4: Recent Auto-Watch Activity -->
+                <!-- Card 6: Recent Auto-Watch Activity -->
                 <Border
                     Background="{StaticResource AppSurfaceBrush}"
                     BorderBrush="{StaticResource AppBorderBrush}"
@@ -217,7 +425,8 @@
                         </ListView>
                     </Grid>
                 </Border>
-            </StackPanel>
+                </StackPanel>
+            </Grid>
         </ScrollViewer>
     </Grid>
 </Page>

@@ -346,6 +346,20 @@
 
                     <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
                         <Button
+                            x:Name="SearchMessagesButton"
+                            Height="30"
+                            Padding="10,0"
+                            Click="SearchMessagesButton_Click"
+                            FontSize="12"
+                            IsEnabled="False"
+                            Style="{StaticResource SecondaryOutlineButtonStyle}"
+                            ToolTipService.ToolTip="按关键词或日期查找历史聊天记录">
+                            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                <FontIcon FontSize="12" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE721;" />
+                                <TextBlock Text="查找记录" />
+                            </StackPanel>
+                        </Button>
+                        <Button
                             x:Name="SyncTagsNowButton"
                             Height="30"
                             Padding="11,0"
@@ -956,11 +970,6 @@
                 <Grid x:Name="ProfileTabContainer" Grid.Row="1" Visibility="Collapsed">
                     <ScrollViewer x:Name="ProfileContentScroll" Padding="16,14">
                     <StackPanel Spacing="14">
-                        <!-- Feedback Banner -->
-                        <Border x:Name="ProfileStatusBanner" Padding="10,7" Background="{StaticResource SuccessBgBrush}" CornerRadius="7" Visibility="Collapsed">
-                            <TextBlock x:Name="ProfileStatusText" FontSize="12" Foreground="{StaticResource SuccessTextBrush}" TextWrapping="Wrap" />
-                        </Border>
-
                         <!-- Top Avatar & Name Identity (Avatar supports 1-click screen capture / paste / upload) -->
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
@@ -1124,6 +1133,15 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" FontSize="12.5" Foreground="{StaticResource TextMutedBrush}" Text="添加时间" />
                                 <TextBlock x:Name="ViewAddedDateText" Grid.Column="1" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Text="-" />
+                            </Grid>
+
+                            <Grid x:Name="ViewOwnerWeChatRow" ColumnSpacing="10" Visibility="Collapsed">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="12.5" Foreground="{StaticResource TextMutedBrush}" Text="所属微信" />
+                                <TextBlock x:Name="ViewOwnerWeChatText" Grid.Column="1" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" IsTextSelectionEnabled="True" Text="-" TextWrapping="Wrap" />
                             </Grid>
 
                             <Border Height="1" Margin="0,3" Background="{StaticResource AppBorderSubtleBrush}" />

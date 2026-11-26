@@ -306,4 +306,54 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 	if !strings.Contains(agentResult.Reply, "王女士") {
 		t.Fatalf("unexpected agent reply: %s", agentResult.Reply)
 	}
+
+	// 10. Test group auto_reply_enabled toggle + dedicated /api/v1/ai/group-auto-reply endpoint
+	gResp := app.request(t, http.MethodPost, "/api/v1/groups", aliceToken, map[string]any{
+		"group_name":  "重在参与队",
+		"group_key":   "123456@chatroom",
+		"my_nickname": "小美",
+	})
+	if gResp.Code != http.StatusCreated {
+		t.Fatalf("create group failed: %d %s", gResp.Code, gResp.Body.String())
+	}
+	var createdGroup struct {
+		ID               int64 `json:"id"`
+		AutoReplyEnabled bool  `json:"auto_reply_enabled"`
+	}
+	_ = json.Unmarshal(gResp.Body.Bytes(), &createdGroup)
+	if createdGroup.AutoReplyEnabled {
+		t.Fatal("expected auto_reply_enabled default false")
+	}
+
+	patchResp := app.request(t, http.MethodPatch, "/api/v1/groups/1", aliceToken, map[string]any{
+		"auto_reply_enabled": true,
+	})
+	if patchResp.Code != http.StatusOK || !strings.Contains(patchResp.Body.String(), `"auto_reply_enabled":true`) {
+		t.Fatalf("patch group auto_reply_enabled failed: %d %s", patchResp.Code, patchResp.Body.String())
+	}
+
+	arResp := app.request(t, http.MethodPost, "/api/v1/ai/group-auto-reply", aliceToken, map[string]any{
+		"group_id":        createdGroup.ID,
+		"sender_name":     "张启磊",
+		"trigger_message": "@小美 什么时候发货？",
+		"custom_prompt":   "语气亲切简洁",
+		"max_reply_chars": 200,
+		"examples": []map[string]any{
+			{
+				"category":         "物流",
+				"question_pattern": "什么时候发货",
+				"answer_example":   "您好，正常下午 5 点前下单当天顺丰发出哦～",
+			},
+		},
+	})
+	if arResp.Code != http.StatusOK {
+		t.Fatalf("group-auto-reply failed: %d %s", arResp.Code, arResp.Body.String())
+	}
+	var arBody struct {
+		Reply string `json:"reply"`
+	}
+	_ = json.Unmarshal(arResp.Body.Bytes(), &arBody)
+	if strings.TrimSpace(arBody.Reply) == "" {
+		t.Fatalf("expected non-empty auto-reply, got %s", arResp.Body.String())
+	}
 }

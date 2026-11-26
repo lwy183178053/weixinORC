@@ -15,13 +15,19 @@ namespace Client.Pages
         private string _activeTag = "customers";
         private bool _isLoggingOut;
         private Storyboard? _tabFadeStoryboard;
+        private Storyboard? _toastFadeStoryboard;
+        private CancellationTokenSource? _toastDismissCts;
+        private string _lastToastMessage = string.Empty;
+        private bool _lastToastIsError;
+        private DateTimeOffset _lastToastDismissedAtUtc = DateTimeOffset.MinValue;
+        private bool _isToastVisible;
 
         public WorkbenchPage()
         {
             InitializeComponent();
             Current = this;
             WorkspaceFrame.ContentTransitions = [];
-            WorkspaceFrame.CacheSize = 4;
+            WorkspaceFrame.CacheSize = 5;
             Loaded += WorkbenchPage_Loaded;
             Unloaded += WorkbenchPage_Unloaded;
         }
@@ -34,6 +40,7 @@ namespace Client.Pages
             MainWindow.Instance?.SetDragRegion(WorkbenchDragRegion);
             RefreshHeaderAndFooter();
             UpdateThemeToggleVisual(AppServices.Settings.IsDarkMode);
+            AppServices.GroupAutoReply.EnsureInitialized();
             AppServices.WeChat4Sync.StartAutoSyncIfConfigured();
             string initialSection = AppSettingsService.NormalizeWorkbenchSection(AppServices.Settings.Current.LastWorkbenchSection);
             SwitchSection(initialSection, persist: false);
@@ -43,6 +50,154 @@ namespace Client.Pages
         {
             AppServices.Settings.ThemeChanged -= OnThemeChanged;
             AppServices.WeChat4Sync.AutoSyncStatusChanged -= OnAutoSyncStatusChanged;
+            _toastDismissCts?.Cancel();
+            _toastDismissCts?.Dispose();
+            _toastDismissCts = null;
+        }
+
+        /// <summary>
+        /// Displays a floating, non-blocking, auto-dismissing toast at top-center of the workspace
+        /// without pushing or squeezing any page UI. Deduplicates rapid repeated calls for the same message.
+        /// </summary>
+        public void ShowToast(string message, bool isError = false, int? durationMs = null)
+        {
+            string clean = (message ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(clean)) return;
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                bool isProgress = !isError && clean.StartsWith("正在", StringComparison.Ordinal);
+                int hideAfterMs = durationMs ?? (isError ? 4200 : (isProgress ? 8000 : 2800));
+                bool sameMessage = string.Equals(clean, _lastToastMessage, StringComparison.Ordinal) && _lastToastIsError == isError;
+
+                // Prevent rapid duplicate re-pop when user clicks repeatedly
+                if (sameMessage && _isToastVisible)
+                {
+                    ScheduleToastAutoDismiss(hideAfterMs);
+                    return;
+                }
+                if (sameMessage && !_isToastVisible && (DateTimeOffset.UtcNow - _lastToastDismissedAtUtc).TotalMilliseconds < 700)
+                {
+                    return;
+                }
+
+                _lastToastMessage = clean;
+                _lastToastIsError = isError;
+
+                // Clean leading check glyph if we already show a crisp success icon
+                string display = !isError && clean.StartsWith("✓ ", StringComparison.Ordinal)
+                    ? clean[2..].TrimStart()
+                    : clean;
+
+                GlobalToastText.Text = display;
+                if (isError)
+                {
+                    GlobalToastBorder.Background = (Brush)Application.Current.Resources["DangerBgBrush"];
+                    GlobalToastBorder.BorderBrush = (Brush)Application.Current.Resources["DangerBorderBrush"];
+                    GlobalToastIcon.Glyph = "\uEA39";
+                    GlobalToastIcon.Foreground = (Brush)Application.Current.Resources["DangerTextBrush"];
+                    GlobalToastText.Foreground = (Brush)Application.Current.Resources["DangerTextBrush"];
+                }
+                else if (isProgress)
+                {
+                    GlobalToastBorder.Background = (Brush)Application.Current.Resources["BrandSoftBgBrush"];
+                    GlobalToastBorder.BorderBrush = (Brush)Application.Current.Resources["BrandSoftBorderBrush"];
+                    GlobalToastIcon.Glyph = "\uE946";
+                    GlobalToastIcon.Foreground = (Brush)Application.Current.Resources["BrandPrimaryBrush"];
+                    GlobalToastText.Foreground = (Brush)Application.Current.Resources["TextPrimaryBrush"];
+                }
+                else
+                {
+                    GlobalToastBorder.Background = (Brush)Application.Current.Resources["SuccessBgBrush"];
+                    GlobalToastBorder.BorderBrush = (Brush)Application.Current.Resources["SuccessTextBrush"];
+                    GlobalToastIcon.Glyph = "\uE73E";
+                    GlobalToastIcon.Foreground = (Brush)Application.Current.Resources["SuccessTextBrush"];
+                    GlobalToastText.Foreground = (Brush)Application.Current.Resources["SuccessTextBrush"];
+                }
+
+                if (!_isToastVisible)
+                {
+                    _isToastVisible = true;
+                    GlobalToastBorder.Visibility = Visibility.Visible;
+                    AnimateToastOpacity(to: 1.0, durationMs: 140);
+                }
+                else
+                {
+                    GlobalToastBorder.Opacity = 1.0;
+                }
+
+                ScheduleToastAutoDismiss(hideAfterMs);
+            });
+        }
+
+        private void ScheduleToastAutoDismiss(int delayMs)
+        {
+            _toastDismissCts?.Cancel();
+            _toastDismissCts?.Dispose();
+            var cts = new CancellationTokenSource();
+            _toastDismissCts = cts;
+            _ = AutoDismissToastAsync(delayMs, cts.Token);
+        }
+
+        private async Task AutoDismissToastAsync(int delayMs, CancellationToken ct)
+        {
+            try
+            {
+                await Task.Delay(delayMs, ct);
+                if (ct.IsCancellationRequested) return;
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!ct.IsCancellationRequested)
+                    {
+                        HideToast();
+                    }
+                });
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        private void HideToast()
+        {
+            if (!_isToastVisible) return;
+            _isToastVisible = false;
+            _lastToastDismissedAtUtc = DateTimeOffset.UtcNow;
+            AnimateToastOpacity(to: 0.0, durationMs: 160, onCompleted: () =>
+            {
+                if (!_isToastVisible)
+                {
+                    GlobalToastBorder.Visibility = Visibility.Collapsed;
+                }
+            });
+        }
+
+        private void AnimateToastOpacity(double to, int durationMs, Action? onCompleted = null)
+        {
+            _toastFadeStoryboard?.Stop();
+            var anim = new DoubleAnimation
+            {
+                To = to,
+                Duration = new Duration(TimeSpan.FromMilliseconds(durationMs)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(anim, GlobalToastBorder);
+            Storyboard.SetTargetProperty(anim, "Opacity");
+
+            var sb = new Storyboard();
+            sb.Children.Add(anim);
+            if (onCompleted is not null)
+            {
+                sb.Completed += (_, _) => onCompleted();
+            }
+            _toastFadeStoryboard = sb;
+            sb.Begin();
+        }
+
+        private void DismissToastButton_Click(object sender, RoutedEventArgs e)
+        {
+            _toastDismissCts?.Cancel();
+            HideToast();
         }
 
         private void OnAutoSyncStatusChanged(string status)
@@ -107,6 +262,7 @@ namespace Client.Pages
                 "customers" => (typeof(CustomersPage), "客户档案"),
                 "groups" => (typeof(GroupsPage), "群组档案"),
                 "ai" => (typeof(AiAssistantPage), "AI 助手"),
+                "autoreply" => (typeof(AutoReplyPage), "自动回复"),
                 _ => (typeof(WeChatSyncPage), "微信监听")
             };
 
@@ -152,6 +308,7 @@ namespace Client.Pages
             SetRailItemState(RailGroupsButton, RailGroupsIcon, RailGroupsLabel, _activeTag == "groups", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailAiButton, RailAiIcon, RailAiLabel, _activeTag == "ai", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailOcrButton, RailOcrIcon, RailOcrLabel, _activeTag == "ocr", activeBg, activeFg, inactiveBg, inactiveFg);
+            SetRailItemState(RailAutoReplyButton, RailAutoReplyIcon, RailAutoReplyLabel, _activeTag == "autoreply", activeBg, activeFg, inactiveBg, inactiveFg);
         }
 
         private static void SetRailItemState(
@@ -204,13 +361,14 @@ namespace Client.Pages
             _isLoggingOut = true;
             try
             {
-                AppServices.WeChat4Sync.StopAutoSyncTimer();
+                AppServices.GroupAutoReply.ResetRuntimeStateForLogout();
+                AppServices.WeChat4Sync.ResetAccountCachesForLogout();
                 await AppServices.Backend.LogoutAsync();
                 CustomersPage.ClearSessionLocalState();
                 // Evict all cached workspace pages so switching accounts starts with a clean slate.
                 WorkspaceFrame.CacheSize = 0;
                 WorkspaceFrame.Content = null;
-                WorkspaceFrame.CacheSize = 4;
+                WorkspaceFrame.CacheSize = 5;
                 MainWindow.Instance?.ShowLoginView();
             }
             catch (Exception ex)

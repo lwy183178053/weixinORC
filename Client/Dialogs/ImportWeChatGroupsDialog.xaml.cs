@@ -12,7 +12,7 @@ namespace Client.Dialogs
 {
     public sealed partial class ImportWeChatGroupsDialog : ContentDialog
     {
-        private readonly HashSet<string> _existingGroupKeys;
+        private readonly List<GroupDto> _existingGroups;
         private readonly ObservableCollection<WeChat4Group> _visibleGroups = [];
         private readonly HashSet<string> _selectedGroupKeys = new(StringComparer.OrdinalIgnoreCase);
 
@@ -27,10 +27,7 @@ namespace Client.Dialogs
         {
             InitializeComponent();
             RequestedTheme = AppServices.Settings.CurrentElementTheme;
-            _existingGroupKeys = existingGroups
-                .Select(g => g.GroupKey?.Trim())
-                .Where(s => !string.IsNullOrEmpty(s))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase)!;
+            _existingGroups = existingGroups.ToList();
 
             GroupsListView.ItemsSource = _visibleGroups;
             Loaded += ImportWeChatGroupsDialog_Loaded;
@@ -84,15 +81,28 @@ namespace Client.Dialogs
                 }
 
                 var reader = AppServices.WeChat4Sync.ActiveReader;
+                string selfWxid = reader.SelfWxid ?? string.Empty;
+                // Only mark groups already imported under THIS WeChat account (or legacy unassigned records)
+                var existingGroupKeys = _existingGroups
+                    .Where(g => string.IsNullOrWhiteSpace(g.OwnerWxid) ||
+                                string.IsNullOrWhiteSpace(selfWxid) ||
+                                g.OwnerWxid.Equals(selfWxid, StringComparison.OrdinalIgnoreCase))
+                    .Select(g => g.GroupKey?.Trim())
+                    .Where(s => !string.IsNullOrEmpty(s))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase)!;
+
                 _allGroups = reader.Groups.ToList();
                 foreach (var g in _allGroups)
                 {
-                    g.IsAlreadyImported = _existingGroupKeys.Contains(g.Username);
+                    g.IsAlreadyImported = existingGroupKeys.Contains(g.Username);
                     g.IsSelected = _selectedGroupKeys.Contains(g.Username);
                 }
 
                 int withMsgs = _allGroups.Count(g => g.HasMessages);
-                HeaderSubtitleText.Text = $"账号 {reader.SelfWxid} · 共 {_allGroups.Count} 个群聊（其中 {withMsgs} 个有本地聊天记录）";
+                string selfLabel = !string.IsNullOrWhiteSpace(reader.SelfContact?.NickName)
+                    ? $"{reader.SelfContact.NickName} ({selfWxid})"
+                    : selfWxid;
+                HeaderSubtitleText.Text = $"当前微信：{selfLabel} · 共 {_allGroups.Count} 个群聊（其中 {withMsgs} 个有本地聊天记录）";
 
                 SetLoadingState(false);
                 PickerBodyGrid.Visibility = Visibility.Visible;

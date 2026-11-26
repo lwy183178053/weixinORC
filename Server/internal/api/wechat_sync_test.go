@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -421,5 +422,140 @@ func TestWeChatSyncIdempotentUpsertAndDeduplication(t *testing.T) {
 	}
 	if len(latestVidMsg.Items) != 1 || latestVidMsg.Items[0].VideoURL != vidResp.VideoURL {
 		t.Fatalf("expected backfilled video_url=%s, got %+v", vidResp.VideoURL, latestVidMsg.Items)
+	}
+}
+
+func TestMultiWeChatAccountsPerEmployeeIsolation(t *testing.T) {
+	app := newTestApp(t, testVerifier{
+		password: "secret",
+		identities: map[string]auth.Identity{
+			"alice": {EmployeeID: "emp-alice", Account: "alice", DisplayName: "Alice"},
+		},
+	})
+	defer app.db.Close()
+	tok := app.login(t, "alice")
+
+	// 1. Bind two personal WeChat accounts under the same employee without overwriting each other
+	w := app.request(t, http.MethodPost, "/api/v1/wechat-accounts", tok, map[string]any{
+		"account_type": "personal",
+		"wechat_id":    "wxid_work_a",
+		"alias":        "work_a_alias",
+		"nickname":     "工作主号A",
+		"region":       "上海",
+		"signature":    "主号签名",
+		"status":       "online",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("bind A status=%d body=%s", w.Code, w.Body.String())
+	}
+	var accA struct {
+		ID int64 `json:"id"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &accA)
+
+	// Upload avatar for WeChat A
+	pngBytes := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D}
+	w = app.request(t, http.MethodPost, fmt.Sprintf("/api/v1/wechat-accounts/%d/avatar", accA.ID), tok, map[string]any{
+		"image_base64": base64.StdEncoding.EncodeToString(pngBytes),
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload account A avatar status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// Switch to WeChat B (online -> should auto-mark A offline while preserving A's row)
+	w = app.request(t, http.MethodPost, "/api/v1/wechat-accounts", tok, map[string]any{
+		"account_type": "personal",
+		"wechat_id":    "wxid_work_b",
+		"alias":        "work_b_alias",
+		"nickname":     "备用小号B",
+		"status":       "online",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("bind B status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// 2. Sync a legacy customer with no owner_wxid, then sync under WeChat A (should adopt), then sync SAME native_id under WeChat B (should create separate customer!)
+	w = app.request(t, http.MethodPost, "/api/v1/wechat-sync/customers", tok, map[string]any{
+		"items": []map[string]any{
+			{"native_id": "wxid_shared_client", "wechat_name": "张老板", "wechat_account": "boss_zhang"},
+		},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("sync legacy status=%d body=%s", w.Code, w.Body.String())
+	}
+	var syncLegacy struct {
+		Items []struct {
+			ID int64 `json:"id"`
+		} `json:"items"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &syncLegacy)
+	legacyID := syncLegacy.Items[0].ID
+
+	// WeChat A adopts the legacy row
+	w = app.request(t, http.MethodPost, "/api/v1/wechat-sync/customers", tok, map[string]any{
+		"owner_wxid": "wxid_work_a",
+		"items": []map[string]any{
+			{"native_id": "wxid_shared_client", "wechat_name": "张老板", "wechat_remark": "张总(主号)", "wechat_account": "boss_zhang"},
+		},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("sync A status=%d body=%s", w.Code, w.Body.String())
+	}
+	var syncA struct {
+		Items []struct {
+			ID      int64 `json:"id"`
+			Created bool  `json:"created"`
+		} `json:"items"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &syncA)
+	if syncA.Items[0].ID != legacyID || syncA.Items[0].Created {
+		t.Fatalf("expected WeChat A to adopt legacy customer #%d, got %+v", legacyID, syncA.Items[0])
+	}
+
+	// WeChat B syncs the exact same friend -> must create a NEW isolated customer record!
+	w = app.request(t, http.MethodPost, "/api/v1/wechat-sync/customers", tok, map[string]any{
+		"owner_wxid": "wxid_work_b",
+		"items": []map[string]any{
+			{"native_id": "wxid_shared_client", "wechat_name": "张老板", "wechat_remark": "张总(小号)", "wechat_account": "boss_zhang"},
+		},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("sync B status=%d body=%s", w.Code, w.Body.String())
+	}
+	var syncB struct {
+		Items []struct {
+			ID      int64 `json:"id"`
+			Created bool  `json:"created"`
+		} `json:"items"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &syncB)
+	if !syncB.Items[0].Created || syncB.Items[0].ID == legacyID {
+		t.Fatalf("expected WeChat B to create separate customer record, got %+v", syncB.Items[0])
+	}
+
+	// Verify /wechat-accounts returns BOTH accounts with B online, A offline, avatar & customer_count=1 each
+	w = app.request(t, http.MethodGet, "/api/v1/wechat-accounts", tok, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list accounts status=%d body=%s", w.Code, w.Body.String())
+	}
+	var accList struct {
+		Items []struct {
+			WechatID      string `json:"wechat_id"`
+			Alias         string `json:"alias"`
+			Nickname      string `json:"nickname"`
+			AvatarURL     string `json:"avatar_url"`
+			Status        string `json:"status"`
+			CustomerCount int    `json:"customer_count"`
+		} `json:"items"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &accList)
+	if len(accList.Items) != 2 {
+		t.Fatalf("expected 2 wechat accounts, got %d: %+v", len(accList.Items), accList.Items)
+	}
+	if accList.Items[0].WechatID != "wxid_work_b" || accList.Items[0].Status != "online" || accList.Items[0].CustomerCount != 1 {
+		t.Fatalf("expected online B first with customer_count=1, got %+v", accList.Items[0])
+	}
+	if accList.Items[1].WechatID != "wxid_work_a" || accList.Items[1].Status != "offline" || accList.Items[1].AvatarURL == "" || accList.Items[1].CustomerCount != 1 {
+		t.Fatalf("expected offline A second with avatar and customer_count=1, got %+v", accList.Items[1])
 	}
 }

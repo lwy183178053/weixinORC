@@ -30,10 +30,28 @@ namespace Client.Services.WeChat4Db
         private Task? _patrolTask;
         private string _watchedDbDir = string.Empty;
         private string _lastDbFingerprint = string.Empty;
+        private DateTimeOffset _activeAccountLastModified = DateTimeOffset.MinValue;
         private long _syncRevision;
+        private readonly HashSet<string> _uploadedSelfAvatarWxids = new(StringComparer.OrdinalIgnoreCase);
+        private List<WeChatAccountDto> _knownAccounts = [];
 
         public WeChat4Reader? ActiveReader => _activeReader;
         public WeChat4AccountDir? ActiveAccount => _activeAccount;
+        public IReadOnlyList<WeChatAccountDto> KnownAccounts => _knownAccounts;
+        public WeChatAccountDto? CurrentOnlineAccount =>
+            (_activeAccount is not null
+                ? _knownAccounts.FirstOrDefault(a => string.Equals(a.WechatId, _activeAccount.Wxid, StringComparison.OrdinalIgnoreCase))
+                : null)
+            ?? _knownAccounts.FirstOrDefault(a => a.IsOnline)
+            ?? _knownAccounts.FirstOrDefault();
+
+        /// <summary>
+        /// The wxid of the currently logged-in / active WeChat account on this PC (empty if none detected yet).
+        /// </summary>
+        public string ActiveOwnerWxid =>
+            !string.IsNullOrWhiteSpace(_activeReader?.SelfWxid) ? _activeReader.SelfWxid :
+            !string.IsNullOrWhiteSpace(_activeAccount?.Wxid) ? _activeAccount.Wxid :
+            CurrentOnlineAccount?.WechatId ?? string.Empty;
         public bool HasLoadedSnapshot => _activeReader is not null;
         public bool IsFileWatcherRunning => _watcherCts is not null && !_watcherCts.IsCancellationRequested;
         public string WatchedDbStoragePath => _watchedDbDir;
@@ -49,6 +67,34 @@ namespace Client.Services.WeChat4Db
         public event Action<WeChat4SyncReport>? SyncCompleted;
         public event Action<string>? AutoSyncStatusChanged;
         public event Action<string>? ActivityLogged;
+        public event Action? AccountsUpdated;
+        public event Action<WeChat4GroupNewMessagesEvent>? GroupNewMessagesSynced;
+
+        public string ResolveAccountDisplayName(string? ownerWxid)
+        {
+            if (string.IsNullOrWhiteSpace(ownerWxid)) return string.Empty;
+            var acc = _knownAccounts.FirstOrDefault(a => string.Equals(a.WechatId, ownerWxid, StringComparison.OrdinalIgnoreCase));
+            if (acc is not null)
+            {
+                return !string.IsNullOrWhiteSpace(acc.Nickname) && !acc.Nickname.Equals(acc.DisplayAccountId, StringComparison.OrdinalIgnoreCase)
+                    ? $"{acc.Nickname} ({acc.DisplayAccountId})"
+                    : acc.DisplayName;
+            }
+            if (_activeReader is not null && string.Equals(_activeReader.SelfWxid, ownerWxid, StringComparison.OrdinalIgnoreCase))
+            {
+                return _activeReader.SelfContact?.DisplayName ?? ownerWxid;
+            }
+            return ownerWxid;
+        }
+
+        public void ResetAccountCachesForLogout()
+        {
+            StopAutoSyncTimer();
+            _knownAccounts = [];
+            _uploadedSelfAvatarWxids.Clear();
+            _lastSyncedSessionTime.Clear();
+            AccountsUpdated?.Invoke();
+        }
 
         public IReadOnlyList<string> GetRecentActivityLogs()
         {
@@ -116,7 +162,7 @@ namespace Client.Services.WeChat4Db
                     return new LoadSnapshotResult
                     {
                         Success = false,
-                        ErrorMessage = "未检测到本机微信数据目录，请确认电脑已登录微信，或在「微信监听」页手动选择目录。"
+                        ErrorMessage = "未检测到本机微信数据目录，请确认电脑版微信已登录并正常运行。"
                     };
                 }
 
@@ -390,7 +436,11 @@ namespace Client.Services.WeChat4Db
                     : [];
 
                 if (syncCustomers) MonitoredCustomersCount = importedCustomers.Count;
-                if (syncGroups) MonitoredGroupsCount = importedGroups.Count;
+                if (syncGroups)
+                {
+                    MonitoredGroupsCount = importedGroups.Count;
+                    AppServices.GroupAutoReply.SyncGroupsSnapshot(importedGroups);
+                }
 
                 if (importedCustomers.Count == 0 && importedGroups.Count == 0)
                 {
@@ -416,15 +466,24 @@ namespace Client.Services.WeChat4Db
                     return (false, loaded.ErrorMessage, null);
                 }
 
-                // Match ONLY already-imported customers by NativeId (wxid) or Alias
+                // Always keep current WeChat self-profile (nickname, alias, avatar, online status) synced
+                await SyncSelfWeChatAccountUnlockedAsync(_activeReader, ct);
+
+                string currentWxid = _activeReader.SelfWxid;
+
+                // Match ONLY already-imported customers belonging to THIS WeChat account (or unassigned legacy rows)
+                var scopedCustomers = importedCustomers
+                    .Where(c => string.IsNullOrWhiteSpace(c.OwnerWxid) ||
+                                string.Equals(c.OwnerWxid, currentWxid, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
                 var targetCustomerWxids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (syncCustomers && importedCustomers.Count > 0)
+                if (syncCustomers && scopedCustomers.Count > 0)
                 {
-                    var nativeIds = importedCustomers
+                    var nativeIds = scopedCustomers
                         .Select(c => c.NativeId?.Trim())
                         .Where(s => !string.IsNullOrEmpty(s))
                         .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    var accounts = importedCustomers
+                    var accounts = scopedCustomers
                         .Select(c => c.WechatAccount?.Trim())
                         .Where(s => !string.IsNullOrEmpty(s))
                         .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -439,15 +498,19 @@ namespace Client.Services.WeChat4Db
                     }
                 }
 
-                // Match ONLY already-imported groups by GroupKey (xxx@chatroom) or exact GroupName
+                // Match ONLY already-imported groups belonging to THIS WeChat account (or unassigned legacy rows)
+                var scopedGroups = importedGroups
+                    .Where(g => string.IsNullOrWhiteSpace(g.OwnerWxid) ||
+                                string.Equals(g.OwnerWxid, currentWxid, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
                 var targetGroupKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (syncGroups && importedGroups.Count > 0)
+                if (syncGroups && scopedGroups.Count > 0)
                 {
-                    var groupKeys = importedGroups
+                    var groupKeys = scopedGroups
                         .Select(g => g.GroupKey?.Trim())
                         .Where(s => !string.IsNullOrEmpty(s))
                         .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    var groupNames = importedGroups
+                    var groupNames = scopedGroups
                         .Where(g => string.IsNullOrWhiteSpace(g.GroupKey))
                         .Select(g => g.GroupName?.Trim())
                         .Where(s => !string.IsNullOrEmpty(s))
@@ -465,7 +528,8 @@ namespace Client.Services.WeChat4Db
 
                 if (targetCustomerWxids.Count == 0 && targetGroupKeys.Count == 0)
                 {
-                    return (true, "已导入的客户/群聊在当前微信账号中暂无可匹配会话。", null);
+                    await RefreshKnownAccountsInternalAsync(ct);
+                    return (true, $"当前微信（{ResolveAccountDisplayName(currentWxid)}）暂无已导入的匹配客户或群聊，可点左上角「+」导入。", null);
                 }
 
                 var opts = new WeChat4SyncOptions
@@ -532,11 +596,8 @@ namespace Client.Services.WeChat4Db
                 IsBackgroundAuto = isBackgroundAuto
             };
 
-            if (!string.IsNullOrWhiteSpace(reader.SelfWxid))
-            {
-                string nick = reader.SelfContact?.DisplayName ?? reader.SelfWxid;
-                _ = await AppServices.Backend.UpsertWeChatAccountAsync("personal", reader.SelfWxid, nick, "online", ct);
-            }
+            await SyncSelfWeChatAccountUnlockedAsync(reader, ct);
+            string ownerWxid = reader.SelfWxid ?? string.Empty;
 
             // 1. Sync selected customers
             var customerIdByWxid = new Dictionary<string, (long Id, string AvatarUrl)>(StringComparer.OrdinalIgnoreCase);
@@ -560,6 +621,7 @@ namespace Client.Services.WeChat4Db
 
                     var payload = chunk.Select(f => new WeChatSyncCustomerPayload
                     {
+                        OwnerWxid = ownerWxid,
                         NativeId = f.Username,
                         LocalKey = f.Username,
                         WechatRemark = f.Remark,
@@ -574,7 +636,7 @@ namespace Client.Services.WeChat4Db
                         Source = string.Empty
                     }).ToList();
 
-                    var res = await AppServices.Backend.SyncWeChatCustomersAsync(payload, ct);
+                    var res = await AppServices.Backend.SyncWeChatCustomersAsync(payload, ownerWxid, ct);
                     if (!res.IsSuccess || res.Data is null)
                     {
                         throw new InvalidOperationException($"同步客户失败：{res.ErrorMessage}");
@@ -611,6 +673,7 @@ namespace Client.Services.WeChat4Db
 
                     var payload = chunk.Select(g => new WeChatSyncGroupPayload
                     {
+                        OwnerWxid = ownerWxid,
                         GroupKey = g.Username,
                         GroupName = g.GroupName,
                         MyNickname = g.MyNickname,
@@ -631,7 +694,7 @@ namespace Client.Services.WeChat4Db
                         }).ToList()
                     }).ToList();
 
-                    var res = await AppServices.Backend.SyncWeChatGroupsAsync(payload, ct);
+                    var res = await AppServices.Backend.SyncWeChatGroupsAsync(payload, ownerWxid, ct);
                     if (!res.IsSuccess || res.Data is null)
                     {
                         throw new InvalidOperationException($"同步群聊失败：{res.ErrorMessage}");
@@ -654,7 +717,7 @@ namespace Client.Services.WeChat4Db
                     .Where(f => (f.HasMessages || selectedFriends.Count <= 25) && customerIdByWxid.ContainsKey(f.Username))
                     .Where(f => !isBackgroundAuto ||
                                 f.LastMessageTime <= 0 ||
-                                !_lastSyncedSessionTime.TryGetValue(f.Username, out long prevTs) ||
+                                !_lastSyncedSessionTime.TryGetValue($"{ownerWxid}|{f.Username}", out long prevTs) ||
                                 f.LastMessageTime > prevTs)
                     .ToList();
                 for (int i = 0; i < friendsWithMsgs.Count; i++)
@@ -680,7 +743,7 @@ namespace Client.Services.WeChat4Db
 
                     if (f.LastMessageTime > 0)
                     {
-                        _lastSyncedSessionTime[f.Username] = f.LastMessageTime;
+                        _lastSyncedSessionTime[$"{ownerWxid}|{f.Username}"] = f.LastMessageTime;
                     }
                 }
             }
@@ -692,7 +755,7 @@ namespace Client.Services.WeChat4Db
                     .Where(g => (g.HasMessages || selectedGroups.Count <= 25) && groupIdByKey.ContainsKey(g.Username))
                     .Where(g => !isBackgroundAuto ||
                                 g.LastMessageTime <= 0 ||
-                                !_lastSyncedSessionTime.TryGetValue(g.Username, out long prevTs) ||
+                                !_lastSyncedSessionTime.TryGetValue($"{ownerWxid}|{g.Username}", out long prevTs) ||
                                 g.LastMessageTime > prevTs)
                     .ToList();
                 for (int i = 0; i < groupsWithMsgs.Count; i++)
@@ -712,13 +775,36 @@ namespace Client.Services.WeChat4Db
                         () => reader.ReadMessages(g.Username, options.MaxMessagesPerSession, options.SkipSystemMessages, ct),
                         ct);
 
-                    await UploadAndSyncMessagesBatchAsync(
+                    var newlyUploaded = await UploadAndSyncMessagesBatchAsync(
                         reader, g.Username, msgs, isGroup: true, targetId: groupId,
                         syncImages: options.SyncChatImages, report: report, ct: ct);
 
+                    if (isBackgroundAuto && newlyUploaded.Count > 0)
+                    {
+                        try
+                        {
+                            GroupNewMessagesSynced?.Invoke(new WeChat4GroupNewMessagesEvent
+                            {
+                                GroupId = groupId,
+                                OwnerWxid = ownerWxid,
+                                GroupKey = g.Username,
+                                GroupName = g.GroupName,
+                                MyNickname = g.MyNickname,
+                                SelfNickname = reader.SelfContact?.NickName ?? string.Empty,
+                                SelfAlias = reader.SelfContact?.Alias ?? string.Empty,
+                                IsBackgroundAuto = isBackgroundAuto,
+                                NewMessages = newlyUploaded
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            AppServices.Logs.Warn("REPLY", $"分发群新消息自动回复事件异常：{ex.Message}");
+                        }
+                    }
+
                     if (g.LastMessageTime > 0)
                     {
-                        _lastSyncedSessionTime[g.Username] = g.LastMessageTime;
+                        _lastSyncedSessionTime[$"{ownerWxid}|{g.Username}"] = g.LastMessageTime;
                     }
                 }
             }
@@ -825,8 +911,135 @@ namespace Client.Services.WeChat4Db
                 Percent = 100
             });
 
+            await RefreshKnownAccountsInternalAsync(ct);
             SyncCompleted?.Invoke(report);
             return report;
+        }
+
+        /// <summary>
+        /// Explicitly detects the currently running/most-recently-active local WeChat account,
+        /// extracts its self profile (nickname, alias, wxid, region, signature, avatar),
+        /// upserts it to backend as online, and refreshes all linked WeChat accounts of this employee.
+        /// </summary>
+        public async Task<(bool Ok, string Message, WeChatAccountDto? ActiveAccount)> DetectAndSyncCurrentWeChatAccountAsync(
+            bool forceReload = true,
+            CancellationToken ct = default)
+        {
+            if (!AppServices.Backend.IsAuthenticated)
+            {
+                return (false, "请先登录员工账号。", null);
+            }
+
+            await _syncGate.WaitAsync(ct);
+            try
+            {
+                var account = ResolveTargetAccount(AppServices.Settings.Current.WeChatSyncAccountDir, preferMostRecentLocal: true);
+                if (account is null)
+                {
+                    await RefreshKnownAccountsInternalAsync(ct);
+                    return (false, "未检测到本机微信数据目录，请确认电脑已登录微信。", CurrentOnlineAccount);
+                }
+
+                bool switched = _activeAccount is not null &&
+                                !string.Equals(_activeAccount.AccountPath, account.AccountPath, StringComparison.OrdinalIgnoreCase);
+
+                var loaded = await LoadSnapshotUnlockedAsync(account, null, null, ct);
+                if (!loaded.Success || _activeReader is null)
+                {
+                    await RefreshKnownAccountsInternalAsync(ct);
+                    return (false, loaded.ErrorMessage, CurrentOnlineAccount);
+                }
+
+                var synced = await SyncSelfWeChatAccountUnlockedAsync(_activeReader, ct);
+                await RefreshKnownAccountsInternalAsync(ct);
+
+                if (switched && AppServices.Settings.Current.WeChatAutoSyncEnabled)
+                {
+                    RestartFileWatcher();
+                }
+
+                string label = synced?.DisplayName ?? _activeReader.SelfContact?.DisplayName ?? _activeReader.SelfWxid;
+                RecordActivity(switched
+                    ? $"检测到微信切换登录账号，已自动同步当前账号：{label}（{_activeReader.SelfWxid}）"
+                    : $"已识别当前登录微信：{label}（{_activeReader.SelfWxid}）");
+                return (true, $"已识别当前登录微信：{label}", synced ?? CurrentOnlineAccount);
+            }
+            catch (OperationCanceledException)
+            {
+                return (false, "识别已取消。", CurrentOnlineAccount);
+            }
+            catch (Exception ex)
+            {
+                return (false, $"识别当前微信账号失败：{ex.Message}", CurrentOnlineAccount);
+            }
+            finally
+            {
+                _syncGate.Release();
+            }
+        }
+
+        private async Task<WeChatAccountDto?> SyncSelfWeChatAccountUnlockedAsync(WeChat4Reader reader, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(reader.SelfWxid) || !AppServices.Backend.IsAuthenticated)
+            {
+                return null;
+            }
+
+            try
+            {
+                var me = reader.SelfContact;
+                string nick = me?.NickName ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(nick)) nick = me?.DisplayName ?? reader.SelfWxid;
+                string alias = me?.Alias ?? string.Empty;
+                string region = me?.Region ?? string.Empty;
+                string signature = me?.Signature ?? string.Empty;
+
+                var upRes = await AppServices.Backend.UpsertWeChatAccountAsync(
+                    accountType: "personal",
+                    wechatId: reader.SelfWxid,
+                    nickname: nick,
+                    status: "online",
+                    alias: alias,
+                    region: region,
+                    signature: signature,
+                    ct: ct);
+
+                if (!upRes.IsSuccess || upRes.Data is null) return null;
+                var acc = upRes.Data;
+
+                // Upload self avatar when missing or on first detection in this app session
+                if (string.IsNullOrWhiteSpace(acc.AvatarUrl) || !_uploadedSelfAvatarWxids.Contains(reader.SelfWxid))
+                {
+                    byte[]? avatarBytes = await reader.TryGetAvatarBytesAsync(reader.SelfWxid, ct);
+                    if (avatarBytes is { Length: > 0 })
+                    {
+                        var avRes = await AppServices.Backend.UploadWeChatAccountAvatarAsync(acc.Id, avatarBytes, ct);
+                        if (avRes.IsSuccess && avRes.Data is not null)
+                        {
+                            acc = avRes.Data;
+                            _uploadedSelfAvatarWxids.Add(reader.SelfWxid);
+                        }
+                    }
+                }
+                return acc;
+            }
+            catch (Exception ex)
+            {
+                AppServices.Logs.Warn("WX4", $"同步本人微信资料失败：{ex.Message}");
+                return null;
+            }
+        }
+
+        private async Task RefreshKnownAccountsInternalAsync(CancellationToken ct = default)
+        {
+            if (!AppServices.Backend.IsAuthenticated) return;
+            try
+            {
+                var list = await AppServices.Backend.ListWeChatAccountsAsync(ct);
+                _knownAccounts = list;
+                AccountsUpdated?.Invoke();
+            }
+            catch { }
         }
 
         public async Task<(bool Ok, string Message)> SyncSingleCustomerMessagesAsync(CustomerDto target, int maxCount = 500, CancellationToken ct = default)
@@ -909,7 +1122,7 @@ namespace Client.Services.WeChat4Db
             return (true, $"✓ 已同步群聊「{target.DisplayName}」：新增 {report.GroupMessagesInserted} 条消息，上传图片 {report.ChatImagesUploaded} 张。");
         }
 
-        private static async Task UploadAndSyncMessagesBatchAsync(
+        private static async Task<List<WeChat4Message>> UploadAndSyncMessagesBatchAsync(
             WeChat4Reader reader,
             string sessionUsername,
             List<WeChat4Message> msgs,
@@ -919,7 +1132,7 @@ namespace Client.Services.WeChat4Db
             WeChat4SyncReport report,
             CancellationToken ct)
         {
-            if (msgs.Count == 0) return;
+            if (msgs.Count == 0) return [];
 
             var existingIds = new HashSet<string>(StringComparer.Ordinal);
             var allExtIds = msgs.Select(m => m.ExternalId).Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
@@ -941,7 +1154,7 @@ namespace Client.Services.WeChat4Db
             if (isGroup) report.GroupMessagesSkipped += preSkipped;
             else report.CustomerMessagesSkipped += preSkipped;
 
-            if (newMsgs.Count == 0) return;
+            if (newMsgs.Count == 0) return [];
 
             var imageUrlByExtId = new Dictionary<string, string>(StringComparer.Ordinal);
             var audioUrlByExtId = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1051,6 +1264,7 @@ namespace Client.Services.WeChat4Db
                     throw new InvalidOperationException($"{errMsg}（若刚刚更新过服务端，请重启后端服务后重试）");
                 }
             }
+            return newMsgs;
         }
 
         // ---- File-Change-Driven Targeted Auto Watcher ----
@@ -1103,9 +1317,20 @@ namespace Client.Services.WeChat4Db
             {
                 var cTask = AppServices.Backend.ListAllCustomersAsync(2000);
                 var gTask = AppServices.Backend.ListAllGroupsAsync(1000);
-                await Task.WhenAll(cTask, gTask);
-                MonitoredCustomersCount = cTask.Result.Count;
-                MonitoredGroupsCount = gTask.Result.Count;
+                var aTask = AppServices.Backend.ListWeChatAccountsAsync();
+                await Task.WhenAll(cTask, gTask, aTask);
+                _knownAccounts = aTask.Result;
+                string activeWxid = ActiveOwnerWxid;
+                MonitoredCustomersCount = string.IsNullOrWhiteSpace(activeWxid)
+                    ? cTask.Result.Count
+                    : cTask.Result.Count(c => string.IsNullOrWhiteSpace(c.OwnerWxid) ||
+                                              string.Equals(c.OwnerWxid, activeWxid, StringComparison.OrdinalIgnoreCase));
+                MonitoredGroupsCount = string.IsNullOrWhiteSpace(activeWxid)
+                    ? gTask.Result.Count
+                    : gTask.Result.Count(g => string.IsNullOrWhiteSpace(g.OwnerWxid) ||
+                                              string.Equals(g.OwnerWxid, activeWxid, StringComparison.OrdinalIgnoreCase));
+                AppServices.GroupAutoReply.SyncGroupsSnapshot(gTask.Result);
+                AccountsUpdated?.Invoke();
                 if (IsFileWatcherRunning)
                 {
                     UpdateWatchStatus(BuildIdleWatchStatusText());
@@ -1118,7 +1343,7 @@ namespace Client.Services.WeChat4Db
         {
             StopAutoSyncTimer();
 
-            var account = ResolveTargetAccount(AppServices.Settings.Current.WeChatSyncAccountDir);
+            var account = ResolveTargetAccount(AppServices.Settings.Current.WeChatSyncAccountDir, preferMostRecentLocal: true);
             if (account is null || !Directory.Exists(account.DbStoragePath))
             {
                 UpdateWatchStatus("微信自动监听：等待检测到电脑微信");
@@ -1126,6 +1351,7 @@ namespace Client.Services.WeChat4Db
             }
 
             _activeAccount = account;
+            _activeAccountLastModified = account.LastModified;
             _watchedDbDir = account.DbStoragePath;
             _lastDbFingerprint = ComputeDbStorageFingerprint(_watchedDbDir);
 
@@ -1151,20 +1377,51 @@ namespace Client.Services.WeChat4Db
                 RecordActivity($"文件系统事件监听降级为轻量巡检：{ex.Message}");
             }
 
-            // Lightweight 15-second fingerprint patrol catches SQLite WAL writes even when NTFS delays FileSystemWatcher events
+            // Lightweight 15-second patrol: detects both WAL writes AND multi-WeChat account switches on the PC!
             _patrolTask = Task.Run(async () =>
             {
                 await RefreshMonitoredCountsAsync();
+                // Auto-identify current WeChat self profile & avatar once on startup so WeChatSyncPage shows real profile immediately
+                if (WeChat4Paths.FindWeixinProcesses().Count > 0)
+                {
+                    try { await DetectAndSyncCurrentWeChatAccountAsync(forceReload: false, ct: cts.Token); }
+                    catch { }
+                }
+
                 using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
                 try
                 {
                     while (await timer.WaitForNextTickAsync(cts.Token))
                     {
                         if (!AppServices.Backend.IsAuthenticated) continue;
+
+                        // Check whether the user switched to another WeChat account on this PC
+                        var newestLocal = WeChat4Paths.ListAccountDirs().FirstOrDefault();
+                        if (newestLocal is not null &&
+                            !string.Equals(newestLocal.AccountPath, _activeAccount?.AccountPath, StringComparison.OrdinalIgnoreCase) &&
+                            newestLocal.LastModified > _activeAccountLastModified.AddSeconds(2) &&
+                            WeChat4Paths.FindWeixinProcesses().Count > 0)
+                        {
+                            string oldWxid = _activeAccount?.Wxid ?? "-";
+                            RecordActivity($"检测到微信切换账号：{oldWxid} → {newestLocal.Wxid}，正在切换监听上下文...");
+                            _activeAccount = newestLocal;
+                            _activeAccountLastModified = newestLocal.LastModified;
+                            AppServices.Settings.Current.WeChatSyncAccountDir = newestLocal.AccountPath;
+                            AppServices.Settings.Save();
+                            _ = Task.Run(async () =>
+                            {
+                                await DetectAndSyncCurrentWeChatAccountAsync(forceReload: true);
+                                await SyncImportedTargetsAsync(syncCustomers: true, syncGroups: true, isBackgroundAuto: true);
+                            });
+                            RestartFileWatcher();
+                            return;
+                        }
+
                         string fp = ComputeDbStorageFingerprint(_watchedDbDir);
                         if (!string.Equals(fp, _lastDbFingerprint, StringComparison.Ordinal))
                         {
                             _lastDbFingerprint = fp;
+                            _activeAccountLastModified = DateTimeOffset.UtcNow;
                             LastFileChangeAt = DateTimeOffset.Now;
                             ScheduleDebouncedTargetedSync("检测到微信消息文件变化");
                         }
@@ -1174,7 +1431,7 @@ namespace Client.Services.WeChat4Db
             }, cts.Token);
 
             UpdateWatchStatus(BuildIdleWatchStatusText());
-            RecordActivity($"已启动自动监听（账号 {account.Wxid}），仅自动同步已导入客户与群聊的新消息。");
+            RecordActivity($"已启动自动监听（账号 {account.Wxid}），仅自动同步该账号下已导入的客户与群聊。");
         }
 
         private void OnDbFileEvent(object sender, FileSystemEventArgs e)
@@ -1321,8 +1578,17 @@ namespace Client.Services.WeChat4Db
             }
         }
 
-        private WeChat4AccountDir? ResolveTargetAccount(string savedDir)
+        private WeChat4AccountDir? ResolveTargetAccount(string savedDir, bool preferMostRecentLocal = false)
         {
+            var detected = WeChat4Paths.ListAccountDirs();
+            if (preferMostRecentLocal && detected.Count > 1 && WeChat4Paths.FindWeixinProcesses().Count > 0)
+            {
+                var newest = detected[0];
+                if (_activeAccount is null || newest.LastModified > _activeAccount.LastModified.AddSeconds(2))
+                {
+                    return newest;
+                }
+            }
             if (_activeAccount is not null && Directory.Exists(_activeAccount.DbStoragePath))
             {
                 return _activeAccount;
@@ -1336,7 +1602,6 @@ namespace Client.Services.WeChat4Db
                 }
                 catch { }
             }
-            var detected = WeChat4Paths.ListAccountDirs();
             return detected.FirstOrDefault();
         }
 

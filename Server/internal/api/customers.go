@@ -19,6 +19,7 @@ import (
 )
 
 type createCustomerRequest struct {
+	OwnerWxid      string `json:"owner_wxid"`
 	WechatRemark   string `json:"wechat_remark"`
 	WechatName     string `json:"wechat_name"`
 	WechatAccount  string `json:"wechat_account"`
@@ -38,6 +39,7 @@ type createCustomerRequest struct {
 }
 
 type patchCustomerRequest struct {
+	OwnerWxid     *string `json:"owner_wxid"`
 	WechatRemark  *string `json:"wechat_remark"`
 	WechatName    *string `json:"wechat_name"`
 	WechatAccount *string `json:"wechat_account"`
@@ -78,6 +80,7 @@ func (s *server) createCustomer(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
+	req.OwnerWxid = strings.TrimSpace(req.OwnerWxid)
 	req.WechatRemark = strings.TrimSpace(req.WechatRemark)
 	req.WechatName = strings.TrimSpace(req.WechatName)
 	req.WechatAccount = strings.TrimSpace(req.WechatAccount)
@@ -93,7 +96,7 @@ func (s *server) createCustomer(c *gin.Context) {
 	req.Source = strings.TrimSpace(req.Source)
 	req.AddedDate = strings.TrimSpace(req.AddedDate)
 
-	if !validText(req.WechatRemark, 128) || !validText(req.WechatName, 128) || !validText(req.WechatAccount, 128) ||
+	if !validText(req.OwnerWxid, 128) || !validText(req.WechatRemark, 128) || !validText(req.WechatName, 128) || !validText(req.WechatAccount, 128) ||
 		!validText(req.Gender, 16) || !validText(req.Description, 2000) ||
 		!validText(req.Tags, 256) || !validText(req.FollowStatus, 32) || !validText(req.LocalKey, 128) ||
 		!validText(req.NativeID, 128) || !validText(req.Note, 2000) || !validText(req.Region, 128) ||
@@ -105,6 +108,7 @@ func (s *server) createCustomer(c *gin.Context) {
 
 	ownerID := auth.IdentityFromContext(c).EmployeeID
 	customer, err := s.store.CreateCustomer(c.Request.Context(), ownerID, store.CustomerInput{
+		OwnerWxid:      req.OwnerWxid,
 		WechatRemark:   req.WechatRemark,
 		WechatName:     req.WechatName,
 		WechatAccount:  req.WechatAccount,
@@ -153,7 +157,7 @@ func (s *server) updateCustomer(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	if req.WechatRemark == nil && req.WechatName == nil && req.WechatAccount == nil &&
+	if req.OwnerWxid == nil && req.WechatRemark == nil && req.WechatName == nil && req.WechatAccount == nil &&
 		req.Gender == nil && req.Description == nil &&
 		req.Tags == nil && req.FollowStatus == nil && req.LocalKey == nil && req.NativeID == nil &&
 		req.Note == nil && req.Region == nil && req.Phone == nil && req.Signature == nil &&
@@ -162,7 +166,7 @@ func (s *server) updateCustomer(c *gin.Context) {
 		return
 	}
 
-	if !trimAndCheck(&req.WechatRemark, 128) || !trimAndCheck(&req.WechatName, 128) || !trimAndCheck(&req.WechatAccount, 128) ||
+	if !trimAndCheck(&req.OwnerWxid, 128) || !trimAndCheck(&req.WechatRemark, 128) || !trimAndCheck(&req.WechatName, 128) || !trimAndCheck(&req.WechatAccount, 128) ||
 		!trimAndCheck(&req.Gender, 16) || !trimAndCheck(&req.Description, 2000) || !trimAndCheck(&req.Tags, 256) ||
 		!trimAndCheck(&req.FollowStatus, 32) || !trimAndCheck(&req.LocalKey, 128) || !trimAndCheck(&req.NativeID, 128) ||
 		!trimAndCheck(&req.Region, 128) || !trimAndCheck(&req.Phone, 64) ||
@@ -175,6 +179,7 @@ func (s *server) updateCustomer(c *gin.Context) {
 
 	ownerID := auth.IdentityFromContext(c).EmployeeID
 	customer, err := s.store.UpdateCustomer(c.Request.Context(), ownerID, id, store.CustomerPatch{
+		OwnerWxid:     req.OwnerWxid,
 		WechatRemark:  req.WechatRemark,
 		WechatName:    req.WechatName,
 		WechatAccount: req.WechatAccount,

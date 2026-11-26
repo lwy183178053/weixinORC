@@ -17,21 +17,25 @@ import (
 )
 
 type createGroupRequest struct {
-	GroupName   string `json:"group_name"`
-	GroupKey    string `json:"group_key"`
-	MyNickname  string `json:"my_nickname"`
-	MemberCount int    `json:"member_count"`
-	MembersText string `json:"members_text"`
-	Note        string `json:"note"`
+	OwnerWxid        string `json:"owner_wxid"`
+	GroupName        string `json:"group_name"`
+	GroupKey         string `json:"group_key"`
+	MyNickname       string `json:"my_nickname"`
+	MemberCount      int    `json:"member_count"`
+	MembersText      string `json:"members_text"`
+	Note             string `json:"note"`
+	AutoReplyEnabled bool   `json:"auto_reply_enabled"`
 }
 
 type patchGroupRequest struct {
-	GroupName   *string `json:"group_name"`
-	GroupKey    *string `json:"group_key"`
-	MyNickname  *string `json:"my_nickname"`
-	MemberCount *int    `json:"member_count"`
-	MembersText *string `json:"members_text"`
-	Note        *string `json:"note"`
+	OwnerWxid        *string `json:"owner_wxid"`
+	GroupName        *string `json:"group_name"`
+	GroupKey         *string `json:"group_key"`
+	MyNickname       *string `json:"my_nickname"`
+	MemberCount      *int    `json:"member_count"`
+	MembersText      *string `json:"members_text"`
+	Note             *string `json:"note"`
+	AutoReplyEnabled *bool   `json:"auto_reply_enabled"`
 }
 
 type createGroupMessageRequest struct {
@@ -68,6 +72,7 @@ func (s *server) createGroup(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
+	req.OwnerWxid = strings.TrimSpace(req.OwnerWxid)
 	req.GroupName = strings.TrimSpace(req.GroupName)
 	req.GroupKey = strings.TrimSpace(req.GroupKey)
 	req.MyNickname = strings.TrimSpace(req.MyNickname)
@@ -78,7 +83,7 @@ func (s *server) createGroup(c *gin.Context) {
 	if req.MemberCount < 0 {
 		req.MemberCount = 0
 	}
-	if !validText(req.GroupName, 128) || !validText(req.GroupKey, 128) || !validText(req.MyNickname, 128) ||
+	if !validText(req.OwnerWxid, 128) || !validText(req.GroupName, 128) || !validText(req.GroupKey, 128) || !validText(req.MyNickname, 128) ||
 		!validText(req.MembersText, 4000) || !validText(req.Note, 2000) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "field_too_long"})
 		return
@@ -86,12 +91,14 @@ func (s *server) createGroup(c *gin.Context) {
 
 	ownerID := auth.IdentityFromContext(c).EmployeeID
 	group, err := s.store.CreateGroup(c.Request.Context(), ownerID, store.GroupInput{
-		GroupName:   req.GroupName,
-		GroupKey:    req.GroupKey,
-		MyNickname:  req.MyNickname,
-		MemberCount: req.MemberCount,
-		MembersText: req.MembersText,
-		Note:        req.Note,
+		OwnerWxid:        req.OwnerWxid,
+		GroupName:        req.GroupName,
+		GroupKey:         req.GroupKey,
+		MyNickname:       req.MyNickname,
+		MemberCount:      req.MemberCount,
+		MembersText:      req.MembersText,
+		Note:             req.Note,
+		AutoReplyEnabled: req.AutoReplyEnabled,
 	})
 	if err != nil {
 		writeStoreErr(c, err)
@@ -123,11 +130,11 @@ func (s *server) updateGroup(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	if req.GroupName == nil && req.GroupKey == nil && req.MyNickname == nil && req.MemberCount == nil && req.MembersText == nil && req.Note == nil {
+	if req.OwnerWxid == nil && req.GroupName == nil && req.GroupKey == nil && req.MyNickname == nil && req.MemberCount == nil && req.MembersText == nil && req.Note == nil && req.AutoReplyEnabled == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "empty_patch"})
 		return
 	}
-	if !trimAndCheck(&req.GroupName, 128) || !trimAndCheck(&req.GroupKey, 128) || !trimAndCheck(&req.MyNickname, 128) ||
+	if !trimAndCheck(&req.OwnerWxid, 128) || !trimAndCheck(&req.GroupName, 128) || !trimAndCheck(&req.GroupKey, 128) || !trimAndCheck(&req.MyNickname, 128) ||
 		(req.MembersText != nil && !validText(*req.MembersText, 4000)) ||
 		(req.Note != nil && !validText(*req.Note, 2000)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "field_too_long"})
@@ -144,12 +151,14 @@ func (s *server) updateGroup(c *gin.Context) {
 
 	ownerID := auth.IdentityFromContext(c).EmployeeID
 	group, err := s.store.UpdateGroup(c.Request.Context(), ownerID, id, store.GroupPatch{
-		GroupName:   req.GroupName,
-		GroupKey:    req.GroupKey,
-		MyNickname:  req.MyNickname,
-		MemberCount: req.MemberCount,
-		MembersText: req.MembersText,
-		Note:        req.Note,
+		OwnerWxid:        req.OwnerWxid,
+		GroupName:        req.GroupName,
+		GroupKey:         req.GroupKey,
+		MyNickname:       req.MyNickname,
+		MemberCount:      req.MemberCount,
+		MembersText:      req.MembersText,
+		Note:             req.Note,
+		AutoReplyEnabled: req.AutoReplyEnabled,
 	})
 	if err != nil {
 		writeStoreErr(c, err)

@@ -345,6 +345,15 @@ namespace Client.Dialogs
             };
             if (!levelOk) return false;
 
+            string modTag = (LogModuleFilterCombo?.SelectedItem as ComboBoxItem)?.Tag as string ?? "all";
+            if (modTag != "all")
+            {
+                bool modOk = modTag == "SYS_GROUP"
+                    ? entry.Module is "SYS" or "UI" or "AUTH" or "WX" or "WIN32"
+                    : string.Equals(entry.Module, modTag, StringComparison.OrdinalIgnoreCase);
+                if (!modOk) return false;
+            }
+
             string query = LogSearchBox.Text.Trim();
             if (string.IsNullOrEmpty(query)) return true;
 
@@ -379,23 +388,65 @@ namespace Client.Dialogs
         {
             try
             {
-                AppServices.Logs.Info("SYS", "开始执行运行环境自检...");
+                AppServices.Logs.Info("SYS", $"开始执行运行环境自检...（日志文件：{AppServices.Logs.CurrentLogFilePath}）");
                 var procs = Client.Services.WeChat4Db.WeChat4Paths.FindWeixinProcesses();
                 var dirs = Client.Services.WeChat4Db.WeChat4Paths.ListAccountDirs();
                 if (procs.Count > 0 && dirs.Count > 0)
                 {
-                    AppServices.Logs.Success("WX", $"电脑微信连接环境正常（已检测到账号目录 {dirs.Count} 个）。");
+                    AppServices.Logs.Success("WX4", $"电脑微信连接环境正常（已检测到运行进程 {procs.Count} 个、本地账号目录 {dirs.Count} 个）。");
                 }
                 else
                 {
-                    AppServices.Logs.Warn("WX", $"电脑微信检测：未发现运行中的微信或本地账号目录（目录数 {dirs.Count}）。");
+                    AppServices.Logs.Warn("WX4", $"电脑微信检测：未发现运行中的微信或本地账号目录（进程 {procs.Count}、目录 {dirs.Count}）。");
                 }
-                _ = await AppServices.Backend.CheckHealthAsync();
+
+                var snap = AppServices.WeChatWindows.CaptureMonitorSnapshot();
+                var mainWin = snap.Windows.FirstOrDefault(w => w.AccountType == Models.WeChatAccountType.Personal && w.WindowRole == "主窗口");
+                if (mainWin is not null)
+                {
+                    string? mismatch = Win32WindowHelper.GetPrivilegeMismatchDetail(mainWin.Hwnd);
+                    if (!string.IsNullOrWhiteSpace(mismatch))
+                    {
+                        AppServices.Logs.Warn("WIN", mismatch);
+                    }
+                    else
+                    {
+                        AppServices.Logs.Success("WIN", $"微信主窗口就绪：{mainWin.DisplayTitle} ({mainWin.DimensionsLabel}，PID {mainWin.ProcessId})。");
+                    }
+                }
+                else
+                {
+                    AppServices.Logs.Warn("WIN", $"当前未发现可见微信主窗口（微信状态：{snap.OverallStatusLabel}）。");
+                }
+
+                if (AppServices.Ocr.RapidEngine.IsAvailable)
+                {
+                    AppServices.Logs.Success("OCR", $"本地识别引擎就绪（{AppServices.Ocr.RapidEngine.AvailabilityNote}）。");
+                }
+                else
+                {
+                    AppServices.Logs.Error("OCR", AppServices.Ocr.RapidEngine.AvailabilityNote);
+                }
+
+                var health = await AppServices.Backend.CheckHealthAsync();
+                if (health.IsSuccess)
+                {
+                    AppServices.Logs.Success("API", $"后端服务连通正常（{AppServices.Backend.BaseUrl}）。");
+                }
+                else
+                {
+                    AppServices.Logs.Error("API", $"后端服务连接失败：{health.ErrorMessage}");
+                }
             }
             catch (Exception ex)
             {
                 AppServices.Logs.Error("SYS", $"自检异常：{ex.Message}");
             }
+        }
+
+        private void OpenLogFolder_Click(object sender, RoutedEventArgs e)
+        {
+            AppServices.Logs.OpenLogDirectory();
         }
 
         private void CopyLogs_Click(object sender, RoutedEventArgs e)

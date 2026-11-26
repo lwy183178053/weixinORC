@@ -79,6 +79,9 @@ namespace Client.Models
         [JsonPropertyName("id")]
         public long Id { get; set; }
 
+        [JsonPropertyName("owner_wxid")]
+        public string OwnerWxid { get; set; } = string.Empty;
+
         [JsonPropertyName("wechat_remark")]
         public string WechatRemark { get; set; } = string.Empty;
 
@@ -337,11 +340,15 @@ namespace Client.Models
         private bool _isSelectionMode;
         private bool _isChecked;
         private bool _isSelectedRow;
+        private bool _autoReplyEnabled;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
         [JsonPropertyName("id")]
         public long Id { get; set; }
+
+        [JsonPropertyName("owner_wxid")]
+        public string OwnerWxid { get; set; } = string.Empty;
 
         [JsonPropertyName("group_name")]
         public string GroupName { get; set; } = string.Empty;
@@ -363,6 +370,24 @@ namespace Client.Models
 
         [JsonPropertyName("note")]
         public string Note { get; set; } = string.Empty;
+
+        [JsonPropertyName("auto_reply_enabled")]
+        public bool AutoReplyEnabled
+        {
+            get => _autoReplyEnabled;
+            set
+            {
+                if (_autoReplyEnabled != value)
+                {
+                    _autoReplyEnabled = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(AutoReplyBadgeVisibility));
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public Visibility AutoReplyBadgeVisibility => _autoReplyEnabled ? Visibility.Visible : Visibility.Collapsed;
 
         [JsonPropertyName("last_message")]
         public string LastMessage { get; set; } = string.Empty;
@@ -879,6 +904,9 @@ namespace Client.Models
 
     public sealed class WeChatSyncCustomerPayload
     {
+        [JsonPropertyName("owner_wxid")]
+        public string OwnerWxid { get; set; } = string.Empty;
+
         [JsonPropertyName("native_id")]
         public string NativeId { get; set; } = string.Empty;
 
@@ -978,6 +1006,9 @@ namespace Client.Models
 
     public sealed class WeChatSyncGroupPayload
     {
+        [JsonPropertyName("owner_wxid")]
+        public string OwnerWxid { get; set; } = string.Empty;
+
         [JsonPropertyName("group_key")]
         public string GroupKey { get; set; } = string.Empty;
 
@@ -1092,5 +1123,145 @@ namespace Client.Models
     {
         [JsonPropertyName("video_url")]
         public string VideoUrl { get; set; } = string.Empty;
+    }
+
+    public sealed class WeChatAccountDto : INotifyPropertyChanged
+    {
+        private ImageSource? _avatarImage;
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        [JsonPropertyName("id")]
+        public long Id { get; set; }
+
+        [JsonPropertyName("account_type")]
+        public string AccountType { get; set; } = "personal";
+
+        [JsonPropertyName("wechat_id")]
+        public string WechatId { get; set; } = string.Empty;
+
+        [JsonPropertyName("alias")]
+        public string Alias { get; set; } = string.Empty;
+
+        [JsonPropertyName("nickname")]
+        public string Nickname { get; set; } = string.Empty;
+
+        [JsonPropertyName("avatar_url")]
+        public string AvatarUrl { get; set; } = string.Empty;
+
+        [JsonPropertyName("region")]
+        public string Region { get; set; } = string.Empty;
+
+        [JsonPropertyName("signature")]
+        public string Signature { get; set; } = string.Empty;
+
+        [JsonPropertyName("status")]
+        public string Status { get; set; } = "offline";
+
+        [JsonPropertyName("customer_count")]
+        public int CustomerCount { get; set; }
+
+        [JsonPropertyName("group_count")]
+        public int GroupCount { get; set; }
+
+        [JsonPropertyName("last_heartbeat_at")]
+        public string LastHeartbeatAt { get; set; } = string.Empty;
+
+        [JsonPropertyName("created_at")]
+        public string CreatedAt { get; set; } = string.Empty;
+
+        [JsonPropertyName("updated_at")]
+        public string UpdatedAt { get; set; } = string.Empty;
+
+        [JsonIgnore]
+        public ImageSource? AvatarImage
+        {
+            get => _avatarImage;
+            set
+            {
+                if (!ReferenceEquals(_avatarImage, value))
+                {
+                    _avatarImage = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(AvatarImageVisibility));
+                    OnPropertyChanged(nameof(AvatarInitialVisibility));
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public Visibility AvatarImageVisibility => _avatarImage is not null ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public Visibility AvatarInitialVisibility => _avatarImage is null ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public string DisplayName => !string.IsNullOrWhiteSpace(Nickname)
+            ? Nickname
+            : !string.IsNullOrWhiteSpace(Alias) ? Alias : WechatId;
+
+        [JsonIgnore]
+        public string DisplayAccountId => !string.IsNullOrWhiteSpace(Alias) ? Alias : WechatId;
+
+        [JsonIgnore]
+        public string AvatarInitial => DisplayName.Length > 0 ? DisplayName[..1].ToUpperInvariant() : "微";
+
+        [JsonIgnore]
+        public bool IsOnline => string.Equals(Status, "online", StringComparison.OrdinalIgnoreCase);
+
+        [JsonIgnore]
+        public string StatusLabel => IsOnline ? "当前在线" : "已离线";
+
+        [JsonIgnore]
+        public Brush StatusDotBrush => (Brush)Application.Current.Resources[IsOnline ? "SuccessTextBrush" : "TextMutedBrush"];
+
+        [JsonIgnore]
+        public Brush StatusBadgeBgBrush => (Brush)Application.Current.Resources[IsOnline ? "SuccessBgBrush" : "AppInputBgBrush"];
+
+        [JsonIgnore]
+        public Brush StatusBadgeFgBrush => (Brush)Application.Current.Resources[IsOnline ? "SuccessTextBrush" : "TextSecondaryBrush"];
+
+        [JsonIgnore]
+        public string CountsSummary => $"{CustomerCount} 位客户 · {GroupCount} 个群聊";
+
+        [JsonIgnore]
+        public string SubtitleLine
+        {
+            get
+            {
+                var parts = new List<string>(3);
+                if (!string.IsNullOrWhiteSpace(Alias)) parts.Add($"微信号：{Alias}");
+                if (!string.IsNullOrWhiteSpace(WechatId) && !WechatId.Equals(Alias, StringComparison.OrdinalIgnoreCase))
+                    parts.Add(WechatId);
+                if (!string.IsNullOrWhiteSpace(Region)) parts.Add(Region);
+                return parts.Count > 0 ? string.Join(" · ", parts) : "个人微信";
+            }
+        }
+
+        [JsonIgnore]
+        public string LastActiveLabel
+        {
+            get
+            {
+                string t = CustomerDto.FormatShortTime(string.IsNullOrWhiteSpace(LastHeartbeatAt) ? UpdatedAt : LastHeartbeatAt);
+                return string.IsNullOrWhiteSpace(t) ? string.Empty : $"活跃于 {t}";
+            }
+        }
+
+        public void NotifyVisualsChanged()
+        {
+            OnPropertyChanged(nameof(StatusDotBrush));
+            OnPropertyChanged(nameof(StatusBadgeBgBrush));
+            OnPropertyChanged(nameof(StatusBadgeFgBrush));
+        }
+
+        private void OnPropertyChanged([CallerMemberName] string? name = null) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+
+    public sealed class WeChatAccountListResponse
+    {
+        [JsonPropertyName("items")]
+        public List<WeChatAccountDto> Items { get; set; } = [];
     }
 }

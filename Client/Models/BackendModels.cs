@@ -164,11 +164,11 @@ namespace Client.Models
         [JsonIgnore]
         public Visibility AvatarInitialVisibility => _avatarImage is null ? Visibility.Visible : Visibility.Collapsed;
 
-        public string DisplayName => !string.IsNullOrWhiteSpace(WechatName)
-            ? WechatName
-            : !string.IsNullOrWhiteSpace(WechatRemark)
-                ? WechatRemark.Replace("\r", " ").Replace("\n", " ").Trim()
-                : !string.IsNullOrWhiteSpace(WechatAccount) ? WechatAccount : $"客户 #{Id}";
+        public string DisplayName => !string.IsNullOrWhiteSpace(WechatRemark)
+            ? WechatRemark.Replace("\r", " ").Replace("\n", " ").Trim()
+            : !string.IsNullOrWhiteSpace(WechatName)
+                ? WechatName.Trim()
+                : !string.IsNullOrWhiteSpace(WechatAccount) ? WechatAccount.Trim() : $"客户 #{Id}";
 
         public string AvatarInitial => DisplayName.Length > 0 ? DisplayName[..1].ToUpperInvariant() : "客";
 
@@ -180,8 +180,8 @@ namespace Client.Models
                 if (!string.IsNullOrWhiteSpace(WechatAccount)) parts.Add(WechatAccount);
                 if (!string.IsNullOrWhiteSpace(Region)) parts.Add(Region);
                 if (parts.Count > 0) return string.Join(" · ", parts);
-                if (!string.IsNullOrWhiteSpace(WechatRemark))
-                    return $"备注：{WechatRemark.Replace("\r", " ").Replace("\n", " ").Trim()}";
+                if (!string.IsNullOrWhiteSpace(WechatName) && !WechatName.Trim().Equals(DisplayName, StringComparison.OrdinalIgnoreCase))
+                    return $"昵称：{WechatName.Trim()}";
                 if (!string.IsNullOrWhiteSpace(Phone)) return Phone;
                 return $"客户 #{Id}";
             }

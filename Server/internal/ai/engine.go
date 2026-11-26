@@ -1931,11 +1931,11 @@ func cleanModelText(s string) string {
 }
 
 func customerDisplayName(c store.Customer) string {
+	if strings.TrimSpace(c.WechatRemark) != "" {
+		return strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(c.WechatRemark))
+	}
 	if strings.TrimSpace(c.WechatName) != "" {
 		return strings.TrimSpace(c.WechatName)
-	}
-	if strings.TrimSpace(c.WechatRemark) != "" {
-		return strings.TrimSpace(c.WechatRemark)
 	}
 	if strings.TrimSpace(c.WechatAccount) != "" {
 		return strings.TrimSpace(c.WechatAccount)

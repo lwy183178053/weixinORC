@@ -749,9 +749,10 @@ namespace Client.Pages
 
             ActiveCustomerTitle.Text = c.DisplayName;
             string singleLineRemark = c.WechatRemark.Replace("\r", " ").Replace("\n", " ").Trim();
+            string cleanNickname = c.WechatName.Trim();
             var metaParts = new[]
             {
-                string.IsNullOrWhiteSpace(singleLineRemark) || string.IsNullOrWhiteSpace(c.WechatName) ? "" : $"备注: {singleLineRemark}",
+                string.IsNullOrWhiteSpace(singleLineRemark) || string.IsNullOrWhiteSpace(cleanNickname) || singleLineRemark.Equals(cleanNickname, StringComparison.OrdinalIgnoreCase) ? "" : $"昵称: {cleanNickname}",
                 string.IsNullOrWhiteSpace(c.WechatAccount) ? "" : $"微信号: {c.WechatAccount}",
                 string.IsNullOrWhiteSpace(c.Region) ? "" : $"地区: {c.Region}",
                 string.IsNullOrWhiteSpace(c.Phone) ? "" : $"电话: {c.Phone}",

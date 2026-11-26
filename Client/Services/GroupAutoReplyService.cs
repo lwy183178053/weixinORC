@@ -177,7 +177,7 @@ namespace Client.Services
                 Config.BlockedKeywords ??= string.Empty;
                 Config.CooldownSecondsPerGroup = Math.Clamp(Config.CooldownSecondsPerGroup, 0, 600);
                 Config.MaxMessageAgeSeconds = Math.Clamp(Config.MaxMessageAgeSeconds, 30, 1800);
-                Config.MaxReplyChars = Math.Clamp(Config.MaxReplyChars, 40, 800);
+                Config.MaxReplyChars = Math.Clamp(Config.MaxReplyChars, 40, 2000);
                 foreach (var ex in Config.Examples)
                 {
                     if (string.IsNullOrWhiteSpace(ex.Id)) ex.Id = Guid.NewGuid().ToString("N");
@@ -916,8 +916,13 @@ namespace Client.Services
 
             if (aiRes.IsSuccess && !string.IsNullOrWhiteSpace(aiRes.Data?.Reply))
             {
+                string toolInfo = string.Empty;
+                if (aiRes.Data.ToolTrace is { Count: > 0 } traces)
+                {
+                    toolInfo = ", tools=" + string.Join(",", traces.Select(t => $"{t.SkillName}({t.Summary})"));
+                }
                 AppServices.Logs.Info("AI",
-                    $"群自动回复生成成功：model={aiRes.Data.Model}, latency={aiRes.Data.LatencyMs} ms, chars={aiRes.Data.Reply.Length}");
+                    $"群自动回复生成成功：model={aiRes.Data.Model}, latency={aiRes.Data.LatencyMs} ms, chars={aiRes.Data.Reply.Length}{toolInfo}");
                 return (true, aiRes.Data.Reply.Trim(), payloads.Count > 0 ? "AI 示例生成" : "AI 生成", string.Empty);
             }
 

@@ -47,15 +47,12 @@ func (s *server) getAdminAIConfig(c *gin.Context) {
 }
 
 type updateAIConfigRequest struct {
-	Enabled      bool    `json:"enabled"`
-	BaseURL      string  `json:"base_url"`
-	APIKey       string  `json:"api_key"`
-	ClearAPIKey  bool    `json:"clear_api_key"`
-	Model        string  `json:"model"`
-	SystemPrompt string  `json:"system_prompt"`
-	Temperature  float64 `json:"temperature"`
-	MaxTokens    int     `json:"max_tokens"`
-	TimeoutSec   int     `json:"timeout_sec"`
+	Enabled      bool   `json:"enabled"`
+	BaseURL      string `json:"base_url"`
+	APIKey       string `json:"api_key"`
+	ClearAPIKey  bool   `json:"clear_api_key"`
+	Model        string `json:"model"`
+	SystemPrompt string `json:"system_prompt"`
 }
 
 func (s *server) updateAdminAIConfig(c *gin.Context) {
@@ -77,9 +74,6 @@ func (s *server) updateAdminAIConfig(c *gin.Context) {
 		ClearAPIKey:  req.ClearAPIKey,
 		Model:        req.Model,
 		SystemPrompt: req.SystemPrompt,
-		Temperature:  req.Temperature,
-		MaxTokens:    req.MaxTokens,
-		TimeoutSec:   req.TimeoutSec,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal_error"})
@@ -92,10 +86,9 @@ func (s *server) updateAdminAIConfig(c *gin.Context) {
 }
 
 type testAIConfigRequest struct {
-	BaseURL    string `json:"base_url"`
-	APIKey     string `json:"api_key"`
-	Model      string `json:"model"`
-	TimeoutSec int    `json:"timeout_sec"`
+	BaseURL string `json:"base_url"`
+	APIKey  string `json:"api_key"`
+	Model   string `json:"model"`
 }
 
 func (s *server) testAdminAIConfig(c *gin.Context) {
@@ -107,10 +100,9 @@ func (s *server) testAdminAIConfig(c *gin.Context) {
 		}
 		if strings.TrimSpace(req.BaseURL) != "" || strings.TrimSpace(req.Model) != "" || strings.TrimSpace(req.APIKey) != "" {
 			override = &store.AISettings{
-				BaseURL:    req.BaseURL,
-				APIKey:     req.APIKey,
-				Model:      req.Model,
-				TimeoutSec: req.TimeoutSec,
+				BaseURL: req.BaseURL,
+				APIKey:  req.APIKey,
+				Model:   req.Model,
 			}
 		}
 	}

@@ -452,7 +452,6 @@ namespace Client.Pages
                 }
 
                 string replyText;
-                string traceText = string.Empty;
                 List<AiToolTraceDto> traceList = [];
 
                 if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.Reply))
@@ -461,7 +460,6 @@ namespace Client.Pages
                     if (res.Data.ToolTrace is { Count: > 0 })
                     {
                         traceList = res.Data.ToolTrace;
-                        traceText = ChatPageSharedHelper.FormatToolTraceSummary(res.Data.ToolTrace);
                     }
                 }
                 else
@@ -474,7 +472,6 @@ namespace Client.Pages
                     Role = "assistant",
                     Content = replyText,
                     ToolTrace = traceList,
-                    ToolTraceSummary = traceText,
                     Timestamp = DateTime.Now.ToString("HH:mm")
                 };
 

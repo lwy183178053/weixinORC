@@ -178,7 +178,7 @@ namespace Client.Pages
             cfg.MaxMessageAgeSeconds = int.TryParse(MaxMessageAgeBox.Text.Trim(), out int age)
                 ? Math.Clamp(age, 30, 1800) : 180;
             cfg.MaxReplyChars = int.TryParse(MaxReplyCharsBox.Text.Trim(), out int maxC)
-                ? Math.Clamp(maxC, 40, 800) : 260;
+                ? Math.Clamp(maxC, 40, 2000) : 1000;
             cfg.IgnoreAtAll = IgnoreAtAllCheck.IsChecked == true;
             cfg.PrefixMentionSender = PrefixMentionSenderCheck.IsChecked == true;
 

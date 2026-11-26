@@ -3,7 +3,10 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,5 +105,72 @@ func TestChatLookupSkills(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(raw), &detailOut); err != nil || !detailOut.HasOlder || detailOut.NextBeforeMsgID <= 0 {
 		t.Fatalf("expected has_older=true with cursor, got %s", raw)
+	}
+
+	// 5. Shared time tool
+	raw, _, _, ok = svc.executeSkill(ctx, owner, "get_current_time", `{"offset_days":1}`)
+	if !ok || !strings.Contains(raw, "target_weekday") || !strings.Contains(raw, `"offset_days":1`) {
+		t.Fatalf("get_current_time failed: ok=%v raw=%s", ok, raw)
+	}
+
+	// 6. Shared Zhimei knowledge catalog + full detail tools
+	kb, err := st.CreateKnowledge(ctx, store.KnowledgeInput{
+		Title:    "智美超光子嫩肤项目说明书",
+		Category: "产品介绍",
+		Tags:     "超光子,嫩肤,智美",
+		Content:  "智美超光子采用双波段脉冲光技术，主打提亮肤色与改善泛红，单次护理约30分钟，术后注意保湿防晒。",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, _, ok = svc.executeSkill(ctx, owner, "list_knowledge_catalog", `{"category":"产品介绍"}`)
+	if !ok || !strings.Contains(raw, "智美超光子嫩肤项目说明书") {
+		t.Fatalf("list_knowledge_catalog failed: ok=%v raw=%s", ok, raw)
+	}
+	raw, _, _, ok = svc.executeSkill(ctx, owner, "get_knowledge_detail", mustJSON(map[string]any{"id": kb.ID}))
+	if !ok || !strings.Contains(raw, "双波段脉冲光技术") {
+		t.Fatalf("get_knowledge_detail failed: ok=%v raw=%s", ok, raw)
+	}
+
+	// 7. Auto-reply scope isolation: allows get_current_group_history and blocks private customer lookup
+	raw, _, _, ok = svc.executeSkillScoped(ctx, owner, "get_current_group_history", `{"message_limit":10}`, grpID)
+	if !ok || !strings.Contains(raw, "热玛吉术前注意事项") {
+		t.Fatalf("get_current_group_history failed: ok=%v raw=%s", ok, raw)
+	}
+	raw, _, _, ok = svc.executeSkillScoped(ctx, owner, "list_customers", `{}`, grpID)
+	if ok || !strings.Contains(raw, "禁止访问") {
+		t.Fatalf("expected auto-reply scope to block list_customers, got ok=%v raw=%s", ok, raw)
+	}
+
+	// 8. Lightweight free no-key web_search tool (primary Bing RSS XML + HTML fallback)
+	mockSearch := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("format") == "rss" {
+			w.Header().Set("Content-Type", "application/rss+xml; charset=utf-8")
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="utf-8"?><rss version="2.0"><channel>
+				<item>
+					<title>智美护肤科普指南</title>
+					<link>https://example.com/zhimei</link>
+					<description>超光子术后一周内建议温和洁面并做好防晒保湿。</description>
+				</item>
+			</channel></rss>`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body><ol id="b_results">
+			<li class="b_algo">
+				<h2><a href="https://example.com/zhimei">智美护肤科普指南</a></h2>
+				<div class="b_caption"><p>超光子术后一周内建议温和洁面并做好防晒保湿。</p></div>
+			</li>
+		</ol></body></html>`))
+	}))
+	defer mockSearch.Close()
+
+	prevBing := bingSearchBaseURL
+	bingSearchBaseURL = mockSearch.URL
+	defer func() { bingSearchBaseURL = prevBing }()
+
+	raw, _, _, ok = svc.executeSkill(ctx, owner, "web_search", `{"query":"超光子术后护理","limit":3}`)
+	if !ok || !strings.Contains(raw, `"source":"bing_rss"`) || !strings.Contains(raw, "智美护肤科普指南") || !strings.Contains(raw, "温和洁面") {
+		t.Fatalf("web_search failed: ok=%v raw=%s", ok, raw)
 	}
 }

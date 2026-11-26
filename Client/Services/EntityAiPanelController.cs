@@ -352,7 +352,6 @@ namespace Client.Services
                     Role = "assistant",
                     Content = replyText,
                     ToolTrace = traceList,
-                    ToolTraceSummary = ChatPageSharedHelper.FormatToolTraceSummary(traceList),
                     Timestamp = DateTime.Now.ToString("HH:mm")
                 };
                 workspace.Messages.Add(reply);

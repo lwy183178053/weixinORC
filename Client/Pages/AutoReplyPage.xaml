@@ -396,8 +396,8 @@
                                         <TextBox
                                             x:Name="MaxReplyCharsBox"
                                             Grid.Column="2"
-                                            Header="单条回复最大字数"
-                                            PlaceholderText="260"
+                                            Header="单条回复最大字数（40~2000）"
+                                            PlaceholderText="1000"
                                             Style="{StaticResource SoftTextBoxStyle}" />
                                     </Grid>
 

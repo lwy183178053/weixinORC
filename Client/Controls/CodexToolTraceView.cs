@@ -19,10 +19,6 @@ namespace Client.Controls
             nameof(TraceItems), typeof(List<AiToolTraceDto>), typeof(CodexToolTraceView),
             new PropertyMetadata(null, OnVisualPropertyChanged));
 
-        public static readonly DependencyProperty LegacySummaryProperty = DependencyProperty.Register(
-            nameof(LegacySummary), typeof(string), typeof(CodexToolTraceView),
-            new PropertyMetadata(string.Empty, OnVisualPropertyChanged));
-
         private readonly Border _container = new();
         private bool _isExpanded = true;
         private bool _hasExplicitToggle;
@@ -39,12 +35,6 @@ namespace Client.Controls
         {
             get => (List<AiToolTraceDto>?)GetValue(TraceItemsProperty);
             set => SetValue(TraceItemsProperty, value);
-        }
-
-        public string LegacySummary
-        {
-            get => (string)GetValue(LegacySummaryProperty);
-            set => SetValue(LegacySummaryProperty, value);
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
@@ -91,6 +81,12 @@ namespace Client.Controls
 
         private static string GetSkillGlyph(string skillId) => skillId switch
         {
+            "get_current_time" => "\uE823",          // Clock
+            "web_search" => "\uE774",                // Globe
+            "list_knowledge_catalog" => "\uE8F1",    // Library
+            "search_knowledge" => "\uE82D",          // Dictionary / book
+            "get_knowledge_detail" => "\uE8A5",      // Document
+            "get_current_group_history" => "\uE8BD", // Group chat history
             "search_chat_messages" => "\uE721",      // Search
             "get_customer_detail" => "\uE77B",       // Contact
             "list_customers" => "\uE716",            // People
@@ -99,12 +95,17 @@ namespace Client.Controls
             "get_recent_conversations" => "\uE8BD",  // Messages
             "get_tag_customers_chats" => "\uE8EC",   // Tag
             "get_workspace_stats" => "\uE9D2",       // Bar chart
-            "search_knowledge" => "\uE82D",          // Dictionary / book
             _ => "\uE945"                            // Lightning / tool
         };
 
         private static string GetFriendlyActionVerb(string skillId, string fallbackName) => skillId switch
         {
+            "get_current_time" => "查询时间",
+            "web_search" => "联网搜索",
+            "list_knowledge_catalog" => "浏览产品目录",
+            "search_knowledge" => "检索产品知识",
+            "get_knowledge_detail" => "读取产品详情",
+            "get_current_group_history" => "翻阅本群记录",
             "search_chat_messages" => "检索聊天",
             "get_customer_detail" => "查阅客户",
             "list_customers" => "筛选客户",
@@ -113,16 +114,13 @@ namespace Client.Controls
             "get_recent_conversations" => "查看会话",
             "get_tag_customers_chats" => "按标签查阅",
             "get_workspace_stats" => "工作台统计",
-            "search_knowledge" => "检索知识库",
             _ => string.IsNullOrWhiteSpace(fallbackName) ? "调用工具" : fallbackName
         };
 
         private void Render()
         {
             var items = TraceItems;
-            string legacy = (LegacySummary ?? string.Empty).Trim();
-
-            if ((items is null || items.Count == 0) && string.IsNullOrEmpty(legacy))
+            if (items is null || items.Count == 0)
             {
                 _container.Child = null;
                 Visibility = Visibility.Collapsed;
@@ -135,29 +133,6 @@ namespace Client.Controls
             _container.BorderThickness = new Thickness(1);
             _container.CornerRadius = new CornerRadius(10);
             _container.Padding = new Thickness(10, 7, 10, 7);
-
-            // Legacy string fallback for previously persisted sessions
-            if (items is null || items.Count == 0)
-            {
-                var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
-                row.Children.Add(new Border
-                {
-                    Width = 6,
-                    Height = 6,
-                    CornerRadius = new CornerRadius(3),
-                    Background = GetBrush("SuccessTextBrush", Color.FromArgb(255, 22, 163, 74)),
-                    VerticalAlignment = VerticalAlignment.Center
-                });
-                row.Children.Add(new TextBlock
-                {
-                    Text = legacy,
-                    FontSize = 11.5,
-                    Foreground = GetBrush("TextSecondaryBrush", Color.FromArgb(255, 95, 104, 118)),
-                    TextWrapping = TextWrapping.Wrap
-                });
-                _container.Child = row;
-                return;
-            }
 
             var root = new StackPanel { Spacing = 6 };
 

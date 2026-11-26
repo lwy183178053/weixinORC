@@ -811,6 +811,12 @@ namespace Client.Models
 
         [JsonPropertyName("category")]
         public string Category { get; set; } = string.Empty;
+
+        [JsonPropertyName("scope")]
+        public string Scope { get; set; } = string.Empty;
+
+        [JsonPropertyName("scope_label")]
+        public string ScopeLabel { get; set; } = string.Empty;
     }
 
     public sealed class AiStatusResponse

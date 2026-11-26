@@ -371,13 +371,5 @@ namespace Client.Services
             text.FontWeight = active ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
             line.Background = active ? activeFg : transparent;
         }
-
-        public static string FormatToolTraceSummary(IReadOnlyList<AiToolTraceDto>? trace)
-        {
-            if (trace is not { Count: > 0 }) return string.Empty;
-            var labels = trace.Select(t =>
-                string.IsNullOrWhiteSpace(t.Summary) ? t.SkillName : $"{t.SkillName}（{t.Summary}）");
-            return "已调用工具：" + string.Join(" · ", labels);
-        }
     }
 }

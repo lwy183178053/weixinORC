@@ -442,7 +442,6 @@
                                     <!-- Codex-Style Tool Execution Trace -->
                                     <controls:CodexToolTraceView
                                         HorizontalAlignment="Stretch"
-                                        LegacySummary="{x:Bind ToolTraceSummary}"
                                         TraceItems="{x:Bind ToolTrace}"
                                         Visibility="{x:Bind ToolTraceVisibility}" />
 

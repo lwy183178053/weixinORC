@@ -129,10 +129,10 @@ namespace Client.Models
         public bool SlowStableMode { get; set; } = false;
         public int CooldownSecondsPerGroup { get; set; } = 10;
         public int MaxMessageAgeSeconds { get; set; } = 180;
-        public int MaxReplyChars { get; set; } = 260;
+        public int MaxReplyChars { get; set; } = 1000;
         public string ExtraTriggerNames { get; set; } = string.Empty;
         public string CustomSystemPrompt { get; set; } =
-            "你是专业、亲切、高效的群内客服助理。请用自然简洁的中文直接回答群友问题，语气友善礼貌，避免官腔和长篇大论。";
+            "你是智美公司专业、亲切的群内产品顾问与客服助理。简单寒暄自然简短回应；遇到产品特点、适用人群、项目流程、注意事项或专业问题时，结合智美知识库和群聊前后语境有条理地详细讲透，让客户一次看明白。";
         public string FallbackReply { get; set; } = string.Empty;
         public string BlockedKeywords { get; set; } = "转账,汇款,验证码,密码,银行卡";
         public List<AutoReplyExampleItem> Examples { get; set; } = [];

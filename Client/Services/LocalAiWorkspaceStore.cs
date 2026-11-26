@@ -10,7 +10,6 @@ namespace Client.Services
         public string Role { get; set; } = "assistant"; // "user" | "assistant"
         public string Content { get; set; } = string.Empty;
         public string Timestamp { get; set; } = string.Empty;
-        public string ToolTraceSummary { get; set; } = string.Empty;
         public List<AiToolTraceDto> ToolTrace { get; set; } = [];
         public List<string> Images { get; set; } = [];
 
@@ -39,8 +38,7 @@ namespace Client.Services
         public Visibility AssistantContentVisibility => !IsUser && !IsPending ? Visibility.Visible : Visibility.Collapsed;
 
         [JsonIgnore]
-        public Visibility ToolTraceVisibility => !IsUser && !IsPending &&
-            ((ToolTrace is { Count: > 0 }) || !string.IsNullOrWhiteSpace(ToolTraceSummary))
+        public Visibility ToolTraceVisibility => !IsUser && !IsPending && ToolTrace is { Count: > 0 }
             ? Visibility.Visible
             : Visibility.Collapsed;
 

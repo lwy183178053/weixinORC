@@ -54,6 +54,14 @@ CREATE INDEX IF NOT EXISTS customers_owner_wechat_account_idx
 CREATE INDEX IF NOT EXISTS customers_owner_id_id
 	ON customers(owner_id, id DESC);
 
+CREATE INDEX IF NOT EXISTS customers_owner_native_id_idx
+	ON customers(owner_id, native_id)
+	WHERE native_id <> '';
+
+CREATE INDEX IF NOT EXISTS customers_owner_wxid_native_idx
+	ON customers(owner_id, owner_wxid, native_id)
+	WHERE native_id <> '';
+
 CREATE TABLE IF NOT EXISTS messages (
 	id          INTEGER PRIMARY KEY AUTOINCREMENT,
 	owner_id    TEXT NOT NULL,
@@ -61,6 +69,9 @@ CREATE TABLE IF NOT EXISTS messages (
 	direction   TEXT NOT NULL CHECK (direction IN ('incoming', 'outgoing')),
 	content     TEXT NOT NULL,
 	image_url   TEXT NOT NULL DEFAULT '',
+	audio_url   TEXT NOT NULL DEFAULT '',
+	video_url   TEXT NOT NULL DEFAULT '',
+	external_id TEXT NOT NULL DEFAULT '',
 	sent_at     TEXT NOT NULL,
 	created_at  TEXT NOT NULL,
 	FOREIGN KEY (customer_id, owner_id) REFERENCES customers(id, owner_id) ON DELETE CASCADE
@@ -68,6 +79,13 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS messages_owner_customer_id
 	ON messages(owner_id, customer_id, id DESC);
+
+CREATE INDEX IF NOT EXISTS messages_owner_customer_sent_idx
+	ON messages(owner_id, customer_id, sent_at DESC, id DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS messages_owner_customer_ext_uidx
+	ON messages(owner_id, customer_id, external_id)
+	WHERE external_id <> '';
 
 CREATE TABLE IF NOT EXISTS groups (
 	id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,6 +106,14 @@ CREATE TABLE IF NOT EXISTS groups (
 
 CREATE INDEX IF NOT EXISTS groups_owner_id_id
 	ON groups(owner_id, id DESC);
+
+CREATE INDEX IF NOT EXISTS groups_owner_group_key_idx
+	ON groups(owner_id, group_key)
+	WHERE group_key <> '';
+
+CREATE INDEX IF NOT EXISTS groups_owner_wxid_key_idx
+	ON groups(owner_id, owner_wxid, group_key)
+	WHERE group_key <> '';
 
 CREATE TABLE IF NOT EXISTS group_members (
 	id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,6 +141,10 @@ CREATE TABLE IF NOT EXISTS group_members (
 CREATE INDEX IF NOT EXISTS group_members_owner_group_id
 	ON group_members(owner_id, group_id, id DESC);
 
+CREATE INDEX IF NOT EXISTS group_members_owner_group_native_idx
+	ON group_members(owner_id, group_id, native_id)
+	WHERE native_id <> '';
+
 CREATE TABLE IF NOT EXISTS group_messages (
 	id          INTEGER PRIMARY KEY AUTOINCREMENT,
 	owner_id    TEXT NOT NULL,
@@ -123,6 +153,9 @@ CREATE TABLE IF NOT EXISTS group_messages (
 	direction   TEXT NOT NULL CHECK (direction IN ('incoming', 'outgoing')),
 	content     TEXT NOT NULL,
 	image_url   TEXT NOT NULL DEFAULT '',
+	audio_url   TEXT NOT NULL DEFAULT '',
+	video_url   TEXT NOT NULL DEFAULT '',
+	external_id TEXT NOT NULL DEFAULT '',
 	sent_at     TEXT NOT NULL,
 	created_at  TEXT NOT NULL,
 	FOREIGN KEY (group_id, owner_id) REFERENCES groups(id, owner_id) ON DELETE CASCADE
@@ -130,6 +163,13 @@ CREATE TABLE IF NOT EXISTS group_messages (
 
 CREATE INDEX IF NOT EXISTS group_messages_owner_group_id
 	ON group_messages(owner_id, group_id, id DESC);
+
+CREATE INDEX IF NOT EXISTS group_messages_owner_group_sent_idx
+	ON group_messages(owner_id, group_id, sent_at DESC, id DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS group_messages_owner_group_ext_uidx
+	ON group_messages(owner_id, group_id, external_id)
+	WHERE external_id <> '';
 
 CREATE TABLE IF NOT EXISTS wechat_accounts (
 	id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,9 +211,6 @@ CREATE TABLE IF NOT EXISTS ai_settings (
 	api_key       TEXT NOT NULL DEFAULT '',
 	model         TEXT NOT NULL DEFAULT '',
 	system_prompt TEXT NOT NULL DEFAULT '',
-	temperature   REAL NOT NULL DEFAULT 0.5,
-	max_tokens    INTEGER NOT NULL DEFAULT 1500,
-	timeout_sec   INTEGER NOT NULL DEFAULT 60,
 	updated_at    TEXT NOT NULL DEFAULT ''
 );
 
@@ -235,11 +272,6 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("initialize schema: %w", err)
-	}
-
-	if err := migrateCustomerColumns(db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("migrate customers table: %w", err)
 	}
 
 	hasFTS5 := initChatFTS5(db)
@@ -339,150 +371,6 @@ func (s *Store) ChatAudioDir() string {
 // ChatVideoDir returns the local directory where uploaded chat video MP4/MOV files are stored.
 func (s *Store) ChatVideoDir() string {
 	return filepath.Join(s.dataDir, "chat_video")
-}
-
-// migrateCustomerColumns safely adds new columns to pre-existing SQLite databases.
-func migrateCustomerColumns(db *sql.DB) error {
-	extraCols := []string{
-		"owner_wxid", "wechat_remark", "region", "phone", "signature", "source", "added_date",
-		"gender", "avatar_url", "description", "tags", "follow_status", "local_key", "native_id",
-	}
-	for _, col := range extraCols {
-		_, err := db.Exec(fmt.Sprintf(`ALTER TABLE customers ADD COLUMN %s TEXT NOT NULL DEFAULT ''`, col))
-		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-			return err
-		}
-	}
-	for _, tbl := range []string{"messages", "group_messages"} {
-		_, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN image_url TEXT NOT NULL DEFAULT ''`, tbl))
-		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-			return err
-		}
-		_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN audio_url TEXT NOT NULL DEFAULT ''`, tbl))
-		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-			return err
-		}
-		_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN video_url TEXT NOT NULL DEFAULT ''`, tbl))
-		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-			return err
-		}
-		_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN external_id TEXT NOT NULL DEFAULT ''`, tbl))
-		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-			return err
-		}
-	}
-	syncIndexes := []string{
-		`CREATE INDEX IF NOT EXISTS customers_owner_native_id_idx ON customers(owner_id, native_id) WHERE native_id <> ''`,
-		`CREATE INDEX IF NOT EXISTS groups_owner_group_key_idx ON groups(owner_id, group_key) WHERE group_key <> ''`,
-		`CREATE INDEX IF NOT EXISTS group_members_owner_group_native_idx ON group_members(owner_id, group_id, native_id) WHERE native_id <> ''`,
-		`CREATE INDEX IF NOT EXISTS messages_owner_customer_sent_idx ON messages(owner_id, customer_id, sent_at DESC, id DESC)`,
-		`CREATE INDEX IF NOT EXISTS group_messages_owner_group_sent_idx ON group_messages(owner_id, group_id, sent_at DESC, id DESC)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS messages_owner_customer_ext_uidx ON messages(owner_id, customer_id, external_id) WHERE external_id <> ''`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS group_messages_owner_group_ext_uidx ON group_messages(owner_id, group_id, external_id) WHERE external_id <> ''`,
-	}
-	for _, stmt := range syncIndexes {
-		if _, err := db.Exec(stmt); err != nil {
-			return err
-		}
-	}
-	if _, err := db.Exec(`ALTER TABLE groups ADD COLUMN my_nickname TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-		return err
-	}
-	if _, err := db.Exec(`ALTER TABLE groups ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-		return err
-	}
-	if _, err := db.Exec(`ALTER TABLE groups ADD COLUMN owner_wxid TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-		return err
-	}
-	if _, err := db.Exec(`ALTER TABLE groups ADD COLUMN auto_reply_enabled INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-		return err
-	}
-	if err := migrateWeChatAccountsTable(db); err != nil {
-		return err
-	}
-	multiAccountIndexes := []string{
-		`CREATE INDEX IF NOT EXISTS customers_owner_wxid_native_idx ON customers(owner_id, owner_wxid, native_id) WHERE native_id <> ''`,
-		`CREATE INDEX IF NOT EXISTS groups_owner_wxid_key_idx ON groups(owner_id, owner_wxid, group_key) WHERE group_key <> ''`,
-	}
-	for _, stmt := range multiAccountIndexes {
-		if _, err := db.Exec(stmt); err != nil {
-			return err
-		}
-	}
-	memberExtraCols := []string{"wechat_remark", "gender", "avatar_url", "region", "phone", "signature", "source"}
-	for _, col := range memberExtraCols {
-		_, err := db.Exec(fmt.Sprintf(`ALTER TABLE group_members ADD COLUMN %s TEXT NOT NULL DEFAULT ''`, col))
-		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-			return err
-		}
-	}
-	// Replace legacy unique index so explicit user-confirmed duplicates are allowed.
-	if _, err := db.Exec(`DROP INDEX IF EXISTS customers_owner_wechat_account`); err != nil {
-		return err
-	}
-	return nil
-}
-
-// migrateWeChatAccountsTable upgrades legacy UNIQUE(owner_id, account_type) tables to UNIQUE(owner_id, wechat_id)
-// so one employee can link multiple personal/enterprise WeChat accounts without overwriting previous ones.
-func migrateWeChatAccountsTable(db *sql.DB) error {
-	var createSQL string
-	if err := db.QueryRow(`SELECT COALESCE(sql, '') FROM sqlite_master WHERE type = 'table' AND name = 'wechat_accounts'`).Scan(&createSQL); err != nil {
-		return err
-	}
-	lower := strings.ToLower(createSQL)
-	if strings.Contains(lower, "unique (owner_id, account_type)") || strings.Contains(lower, "unique(owner_id, account_type)") {
-		tx, err := db.Begin()
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-
-		stmts := []string{
-			`CREATE TABLE wechat_accounts_v2 (
-				id                INTEGER PRIMARY KEY AUTOINCREMENT,
-				owner_id          TEXT NOT NULL,
-				account_type      TEXT NOT NULL CHECK (account_type IN ('personal', 'enterprise')),
-				wechat_id         TEXT NOT NULL DEFAULT '',
-				alias             TEXT NOT NULL DEFAULT '',
-				nickname          TEXT NOT NULL DEFAULT '',
-				avatar_url        TEXT NOT NULL DEFAULT '',
-				region            TEXT NOT NULL DEFAULT '',
-				signature         TEXT NOT NULL DEFAULT '',
-				status            TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline', 'disconnected', 'paused')),
-				last_heartbeat_at TEXT NOT NULL DEFAULT '',
-				created_at        TEXT NOT NULL,
-				updated_at        TEXT NOT NULL,
-				UNIQUE (owner_id, wechat_id)
-			)`,
-			`INSERT OR IGNORE INTO wechat_accounts_v2 (
-				id, owner_id, account_type, wechat_id, alias, nickname, avatar_url, region, signature,
-				status, last_heartbeat_at, created_at, updated_at
-			)
-			SELECT id, owner_id, account_type,
-			       CASE WHEN TRIM(wechat_id) <> '' THEN wechat_id ELSE account_type || '_' || id END,
-			       '', nickname, '', '', '',
-			       status, last_heartbeat_at, created_at, updated_at
-			FROM wechat_accounts`,
-			`DROP TABLE wechat_accounts`,
-			`ALTER TABLE wechat_accounts_v2 RENAME TO wechat_accounts`,
-			`CREATE INDEX IF NOT EXISTS wechat_accounts_owner ON wechat_accounts(owner_id, id DESC)`,
-		}
-		for _, s := range stmts {
-			if _, err := tx.Exec(s); err != nil {
-				return err
-			}
-		}
-		return tx.Commit()
-	}
-
-	for _, col := range []string{"alias", "avatar_url", "region", "signature"} {
-		_, err := db.Exec(fmt.Sprintf(`ALTER TABLE wechat_accounts ADD COLUMN %s TEXT NOT NULL DEFAULT ''`, col))
-		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-			return err
-		}
-	}
-	return nil
 }
 
 func (s *Store) Close() error {

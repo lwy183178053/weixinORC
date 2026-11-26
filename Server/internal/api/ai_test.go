@@ -39,7 +39,9 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 	var statusBody struct {
 		Configured bool `json:"configured"`
 		Skills     []struct {
-			ID string `json:"id"`
+			ID         string `json:"id"`
+			Scope      string `json:"scope"`
+			ScopeLabel string `json:"scope_label"`
 		} `json:"skills"`
 	}
 	if err := json.Unmarshal(statusResp.Body.Bytes(), &statusBody); err != nil {
@@ -48,8 +50,15 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 	if statusBody.Configured {
 		t.Fatal("expected initial AI status configured=false")
 	}
-	if len(statusBody.Skills) != 9 {
-		t.Fatalf("expected 9 builtin skills, got %d", len(statusBody.Skills))
+	if len(statusBody.Skills) != 14 {
+		t.Fatalf("expected 14 builtin skills across shared/autoreply/workbench toolsets, got %d", len(statusBody.Skills))
+	}
+	scopeCounts := map[string]int{}
+	for _, sk := range statusBody.Skills {
+		scopeCounts[sk.Scope]++
+	}
+	if scopeCounts["shared"] != 5 || scopeCounts["autoreply"] != 1 || scopeCounts["workbench"] != 8 {
+		t.Fatalf("unexpected skill scope counts: %+v", scopeCounts)
 	}
 
 	// 3. Seed one customer for Alice and one for Bob to verify owner-scoped Skills
@@ -124,8 +133,12 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 		}
 
 		var reqBody struct {
-			Model    string `json:"model"`
-			Tools    []any  `json:"tools"`
+			Model string `json:"model"`
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
 			Messages []struct {
 				Role    string `json:"role"`
 				Content any    `json:"content"`
@@ -138,11 +151,28 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 
-		// Tool-enabled calls (AgentChat & CustomerChat): Round 1 invokes list_customers; Round 2 verifies Alice only sees her own customer
+		// Tool-enabled calls: distinguish Workbench toolset (has list_customers) vs AutoReply toolset (has get_current_group_history, NO list_customers)
 		if len(reqBody.Tools) > 0 {
+			hasListCustomers := false
+			hasGroupHistory := false
+			for _, tl := range reqBody.Tools {
+				if tl.Function.Name == "list_customers" {
+					hasListCustomers = true
+				}
+				if tl.Function.Name == "get_current_group_history" {
+					hasGroupHistory = true
+				}
+			}
+
 			hasToolReply := false
 			joined := ""
+			sysPrompt := ""
 			for _, m := range reqBody.Messages {
+				if m.Role == "system" {
+					if s, ok := m.Content.(string); ok {
+						sysPrompt += s
+					}
+				}
 				if m.Role == "tool" {
 					hasToolReply = true
 					if s, ok := m.Content.(string); ok {
@@ -150,6 +180,52 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 					}
 				}
 			}
+
+			// Group Auto-Reply toolset branch
+			if hasGroupHistory {
+				if hasListCustomers {
+					t.Errorf("auto-reply toolset must NOT expose list_customers!")
+				}
+				if !strings.Contains(sysPrompt, "李四") || !strings.Contains(sysPrompt, "当前系统时间：") {
+					t.Errorf("auto-reply prompt missing other group members' context or current time")
+				}
+				if !hasToolReply {
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"choices": []map[string]any{
+							{
+								"message": map[string]any{
+									"role":    "assistant",
+									"content": "",
+									"tool_calls": []map[string]any{
+										{
+											"id":   "call_ar_1",
+											"type": "function",
+											"function": map[string]any{
+												"name":      "search_knowledge",
+												"arguments": `{"query":"热玛吉"}`,
+											},
+										},
+									},
+								},
+							},
+						},
+					})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"choices": []map[string]any{
+						{
+							"message": map[string]any{
+								"role":    "assistant",
+								"content": "您好，正常下午 5 点前下单当天顺丰发出，热玛吉体验价详情已同步给您～",
+							},
+						},
+					},
+				})
+				return
+			}
+
+			// Workbench AI toolset branch (AgentChat & CustomerChat)
 			if !hasToolReply {
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"choices": []map[string]any{
@@ -211,13 +287,10 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 
 	// 6. Save AI config via Admin API and confirm key is masked on GET
 	saveCfgResp := app.request(t, http.MethodPut, "/api/v1/admin/ai-config", aliceToken, map[string]any{
-		"enabled":     true,
-		"base_url":    mockLLM.URL + "/v1",
-		"api_key":     "sk-test-secret-123456",
-		"model":       "mock-gpt",
-		"temperature": 0.4,
-		"max_tokens":  1024,
-		"timeout_sec": 30,
+		"enabled":  true,
+		"base_url": mockLLM.URL + "/v1",
+		"api_key":  "sk-test-secret-123456",
+		"model":    "mock-gpt",
 	})
 	if saveCfgResp.Code != http.StatusOK {
 		t.Fatalf("PUT /api/v1/admin/ai-config: got %d %s", saveCfgResp.Code, saveCfgResp.Body.String())
@@ -332,12 +405,22 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 		t.Fatalf("patch group auto_reply_enabled failed: %d %s", patchResp.Code, patchResp.Body.String())
 	}
 
+	// Seed another group member's message so GroupAutoReply verifies multi-sender context injection
+	seedMsgResp := app.request(t, http.MethodPost, "/api/v1/groups/1/messages", aliceToken, map[string]any{
+		"direction":   "incoming",
+		"sender_name": "李四",
+		"content":     "大家刚才说的那个热玛吉体验套餐还有名额吗？",
+	})
+	if seedMsgResp.Code != http.StatusCreated {
+		t.Fatalf("seed group message failed: %d %s", seedMsgResp.Code, seedMsgResp.Body.String())
+	}
+
 	arResp := app.request(t, http.MethodPost, "/api/v1/ai/group-auto-reply", aliceToken, map[string]any{
 		"group_id":        createdGroup.ID,
 		"sender_name":     "张启磊",
 		"trigger_message": "@小美 什么时候发货？",
-		"custom_prompt":   "语气亲切简洁",
-		"max_reply_chars": 200,
+		"custom_prompt":   "语气亲切详细",
+		"max_reply_chars": 1000,
 		"examples": []map[string]any{
 			{
 				"category":         "物流",
@@ -350,10 +433,17 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 		t.Fatalf("group-auto-reply failed: %d %s", arResp.Code, arResp.Body.String())
 	}
 	var arBody struct {
-		Reply string `json:"reply"`
+		Reply     string `json:"reply"`
+		ToolTrace []struct {
+			SkillID string `json:"skill_id"`
+			OK      bool   `json:"ok"`
+		} `json:"tool_trace"`
 	}
 	_ = json.Unmarshal(arResp.Body.Bytes(), &arBody)
 	if strings.TrimSpace(arBody.Reply) == "" {
 		t.Fatalf("expected non-empty auto-reply, got %s", arResp.Body.String())
+	}
+	if len(arBody.ToolTrace) != 1 || arBody.ToolTrace[0].SkillID != "search_knowledge" || !arBody.ToolTrace[0].OK {
+		t.Fatalf("expected auto-reply search_knowledge tool_trace, got %+v", arBody.ToolTrace)
 	}
 }

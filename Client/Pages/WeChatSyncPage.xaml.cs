@@ -19,6 +19,7 @@ namespace Client.Pages
         public WeChatSyncPage()
         {
             InitializeComponent();
+            NavigationCacheMode = Microsoft.UI.Xaml.Navigation.NavigationCacheMode.Required;
             ActivityLogListView.ItemsSource = _activityLogs;
             Loaded += WeChatSyncPage_Loaded;
             Unloaded += WeChatSyncPage_Unloaded;
@@ -26,11 +27,14 @@ namespace Client.Pages
 
         private async void WeChatSyncPage_Loaded(object sender, RoutedEventArgs e)
         {
-            Loaded -= WeChatSyncPage_Loaded;
+            AppServices.WeChat4Sync.AutoSyncStatusChanged -= OnAutoSyncStatusChanged;
+            AppServices.WeChat4Sync.ActivityLogged -= OnActivityLogged;
+            AppServices.WeChat4Sync.SyncCompleted -= OnSyncCompleted;
             AppServices.WeChat4Sync.AutoSyncStatusChanged += OnAutoSyncStatusChanged;
             AppServices.WeChat4Sync.ActivityLogged += OnActivityLogged;
             AppServices.WeChat4Sync.SyncCompleted += OnSyncCompleted;
 
+            _isInitializingUi = true;
             var cfg = AppServices.Settings.Current;
             AutoWatchToggle.IsOn = cfg.WeChatAutoSyncEnabled;
             OptImagesCheck.IsChecked = cfg.WeChatSyncIncludeImages;

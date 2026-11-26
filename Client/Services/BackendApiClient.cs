@@ -25,9 +25,13 @@ namespace Client.Services
     {
         private readonly HttpClient _httpClient;
         private readonly HttpClient _aiHttpClient;
-        private readonly ConcurrentDictionary<string, byte[]> _avatarCache = new(StringComparer.Ordinal);
-        private readonly ConcurrentDictionary<string, byte[]> _chatImageCache = new(StringComparer.Ordinal);
-        private readonly ConcurrentDictionary<string, byte[]> _chatAudioCache = new(StringComparer.Ordinal);
+        private readonly BoundedLruCache<string, byte[]> _avatarCache = new(
+            maxEntries: 400, maxTotalBytes: 24L * 1024 * 1024, sizeSelector: b => b.Length, comparer: StringComparer.Ordinal);
+        private readonly BoundedLruCache<string, byte[]> _chatImageCache = new(
+            maxEntries: 150, maxTotalBytes: 48L * 1024 * 1024, sizeSelector: b => b.Length, comparer: StringComparer.Ordinal);
+        private readonly BoundedLruCache<string, byte[]> _chatAudioCache = new(
+            maxEntries: 80, maxTotalBytes: 24L * 1024 * 1024, sizeSelector: b => b.Length, comparer: StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, Task<byte[]?>> _inflightMediaDownloads = new(StringComparer.Ordinal);
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
             PropertyNameCaseInsensitive = true
@@ -232,7 +236,7 @@ namespace Client.Services
                 ct);
             if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.AvatarUrl))
             {
-                _avatarCache[res.Data.AvatarUrl] = imageBytes;
+                _avatarCache.Set(res.Data.AvatarUrl, imageBytes);
             }
             return res;
         }
@@ -242,47 +246,13 @@ namespace Client.Services
             var res = await SendAuthedAsync<CustomerDto>(HttpMethod.Delete, $"/api/v1/customers/{customerId}/avatar", null, ct);
             if (res.IsSuccess && !string.IsNullOrWhiteSpace(oldAvatarUrl))
             {
-                _avatarCache.TryRemove(oldAvatarUrl, out _);
+                _avatarCache.Remove(oldAvatarUrl);
             }
             return res;
         }
 
-        public async Task<byte[]?> DownloadAvatarBytesAsync(string? avatarUrl, CancellationToken ct = default)
-        {
-            if (string.IsNullOrWhiteSpace(avatarUrl) || !IsAuthenticated) return null;
-            if (_avatarCache.TryGetValue(avatarUrl, out var cached)) return cached;
-
-            try
-            {
-                // Only send Bearer token to relative paths on our configured backend host.
-                if (avatarUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                    avatarUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!avatarUrl.StartsWith(BaseUrl, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return null;
-                    }
-                }
-                string path = avatarUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                    ? avatarUrl
-                    : $"{BaseUrl}{(avatarUrl.StartsWith('/') ? avatarUrl : "/" + avatarUrl)}";
-                using var req = new HttpRequestMessage(HttpMethod.Get, path);
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", AccessToken);
-                using var resp = await _httpClient.SendAsync(req, ct);
-                if (!resp.IsSuccessStatusCode) return null;
-
-                byte[] bytes = await resp.Content.ReadAsByteArrayAsync(ct);
-                if (bytes.Length > 0)
-                {
-                    _avatarCache[avatarUrl] = bytes;
-                }
-                return bytes;
-            }
-            catch
-            {
-                return null;
-            }
-        }
+        public Task<byte[]?> DownloadAvatarBytesAsync(string? avatarUrl, CancellationToken ct = default) =>
+            DownloadCachedMediaBytesAsync(avatarUrl, _avatarCache, "avatar:", ct);
 
         public async Task<ApiResult<UploadChatImageResponse>> UploadChatImageAsync(byte[] imageBytes, CancellationToken ct = default)
         {
@@ -294,46 +264,13 @@ namespace Client.Services
                 ct);
             if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.ImageUrl))
             {
-                _chatImageCache[res.Data.ImageUrl] = imageBytes;
+                _chatImageCache.Set(res.Data.ImageUrl, imageBytes);
             }
             return res;
         }
 
-        public async Task<byte[]?> DownloadChatImageBytesAsync(string? imageUrl, CancellationToken ct = default)
-        {
-            if (string.IsNullOrWhiteSpace(imageUrl) || !IsAuthenticated) return null;
-            if (_chatImageCache.TryGetValue(imageUrl, out var cached)) return cached;
-
-            try
-            {
-                if (imageUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                    imageUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!imageUrl.StartsWith(BaseUrl, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return null;
-                    }
-                }
-                string path = imageUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                    ? imageUrl
-                    : $"{BaseUrl}{(imageUrl.StartsWith('/') ? imageUrl : "/" + imageUrl)}";
-                using var req = new HttpRequestMessage(HttpMethod.Get, path);
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", AccessToken);
-                using var resp = await _httpClient.SendAsync(req, ct);
-                if (!resp.IsSuccessStatusCode) return null;
-
-                byte[] bytes = await resp.Content.ReadAsByteArrayAsync(ct);
-                if (bytes.Length > 0)
-                {
-                    _chatImageCache[imageUrl] = bytes;
-                }
-                return bytes;
-            }
-            catch
-            {
-                return null;
-            }
-        }
+        public Task<byte[]?> DownloadChatImageBytesAsync(string? imageUrl, CancellationToken ct = default) =>
+            DownloadCachedMediaBytesAsync(imageUrl, _chatImageCache, "image:", ct);
 
         public async Task<ApiResult<UploadChatAudioResponse>> UploadChatAudioAsync(byte[] audioBytes, CancellationToken ct = default)
         {
@@ -345,44 +282,79 @@ namespace Client.Services
                 ct);
             if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.AudioUrl))
             {
-                _chatAudioCache[res.Data.AudioUrl] = audioBytes;
+                _chatAudioCache.Set(res.Data.AudioUrl, audioBytes);
             }
             return res;
         }
 
-        public async Task<byte[]?> DownloadChatAudioBytesAsync(string? audioUrl, CancellationToken ct = default)
+        public Task<byte[]?> DownloadChatAudioBytesAsync(string? audioUrl, CancellationToken ct = default) =>
+            DownloadCachedMediaBytesAsync(audioUrl, _chatAudioCache, "audio:", ct);
+
+        private async Task<byte[]?> DownloadCachedMediaBytesAsync(
+            string? mediaUrl,
+            BoundedLruCache<string, byte[]> cache,
+            string inflightPrefix,
+            CancellationToken ct)
         {
-            if (string.IsNullOrWhiteSpace(audioUrl) || !IsAuthenticated) return null;
-            if (_chatAudioCache.TryGetValue(audioUrl, out var cached)) return cached;
+            if (string.IsNullOrWhiteSpace(mediaUrl) || !IsAuthenticated) return null;
+            if (cache.TryGetValue(mediaUrl, out var cached)) return cached;
+
+            // Only send Bearer token to relative paths or our configured backend host.
+            if (mediaUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                mediaUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!mediaUrl.StartsWith(BaseUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+            }
+
+            string path = mediaUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                ? mediaUrl
+                : $"{BaseUrl}{(mediaUrl.StartsWith('/') ? mediaUrl : "/" + mediaUrl)}";
+
+            string inflightKey = inflightPrefix + mediaUrl;
+            var downloadTask = _inflightMediaDownloads.GetOrAdd(inflightKey, _ => FetchMediaAndCacheAsync(path, mediaUrl, cache, inflightKey));
 
             try
             {
-                if (audioUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                    audioUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!audioUrl.StartsWith(BaseUrl, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return null;
-                    }
-                }
-                string path = audioUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                    ? audioUrl
-                    : $"{BaseUrl}{(audioUrl.StartsWith('/') ? audioUrl : "/" + audioUrl)}";
-                using var req = new HttpRequestMessage(HttpMethod.Get, path);
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", AccessToken);
-                using var resp = await _httpClient.SendAsync(req, ct);
+                return ct.CanBeCanceled ? await downloadTask.WaitAsync(ct) : await downloadTask;
+            }
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
+        }
+
+        private async Task<byte[]?> FetchMediaAndCacheAsync(
+            string fullUrl,
+            string cacheKey,
+            BoundedLruCache<string, byte[]> cache,
+            string inflightKey)
+        {
+            try
+            {
+                string? token = AccessToken;
+                if (string.IsNullOrEmpty(token)) return null;
+                using var req = new HttpRequestMessage(HttpMethod.Get, fullUrl);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using var resp = await _httpClient.SendAsync(req);
                 if (!resp.IsSuccessStatusCode) return null;
 
-                byte[] bytes = await resp.Content.ReadAsByteArrayAsync(ct);
-                if (bytes.Length > 0)
+                byte[] bytes = await resp.Content.ReadAsByteArrayAsync();
+                if (bytes.Length > 0 && IsAuthenticated)
                 {
-                    _chatAudioCache[audioUrl] = bytes;
+                    cache.Set(cacheKey, bytes);
                 }
-                return bytes;
+                return bytes.Length > 0 ? bytes : null;
             }
             catch
             {
                 return null;
+            }
+            finally
+            {
+                _inflightMediaDownloads.TryRemove(inflightKey, out _);
             }
         }
 
@@ -535,7 +507,7 @@ namespace Client.Services
                 ct);
             if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.AvatarUrl))
             {
-                _avatarCache[res.Data.AvatarUrl] = imageBytes;
+                _avatarCache.Set(res.Data.AvatarUrl, imageBytes);
             }
             return res;
         }
@@ -589,7 +561,7 @@ namespace Client.Services
                 ct);
             if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.AvatarUrl))
             {
-                _avatarCache[res.Data.AvatarUrl] = imageBytes;
+                _avatarCache.Set(res.Data.AvatarUrl, imageBytes);
             }
             return res;
         }
@@ -836,6 +808,7 @@ namespace Client.Services
             _avatarCache.Clear();
             _chatImageCache.Clear();
             _chatAudioCache.Clear();
+            _inflightMediaDownloads.Clear();
         }
 
         private static async Task<string> ReadFriendlyErrorAsync(HttpResponseMessage response, CancellationToken ct)

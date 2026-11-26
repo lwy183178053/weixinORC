@@ -553,6 +553,24 @@
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
+
+                <!-- Floating New Messages Pill (shown when sync appends messages while user scrolled up) -->
+                <Button
+                    x:Name="NewMessagesJumpButton"
+                    Grid.Row="2"
+                    Margin="0,0,18,14"
+                    Padding="11,5"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Click="NewMessagesJumpButton_Click"
+                    CornerRadius="14"
+                    Style="{StaticResource PrimaryVioletButtonStyle}"
+                    Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                        <FontIcon FontSize="11" Foreground="#FFFFFF" Glyph="&#xE74B;" />
+                        <TextBlock x:Name="NewMessagesJumpText" FontSize="11.5" FontWeight="SemiBold" Foreground="#FFFFFF" Text="有新消息" />
+                    </StackPanel>
+                </Button>
             </Grid>
 
             <!-- Draggable Horizontal Splitter -->

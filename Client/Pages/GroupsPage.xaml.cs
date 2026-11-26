@@ -25,31 +25,65 @@ namespace Client.Pages
         private readonly HashSet<long> _selectedGroupIds = [];
         private readonly ObservableCollection<ChatBubbleItem> _currentMessages = [];
         private readonly ObservableCollection<GroupMemberDto> _currentMembers = [];
-        private readonly ObservableCollection<AiChatMessageItem> _aiChatMessages = [];
-        private readonly ObservableCollection<AiImageAttachment> _aiChatPendingImages = [];
         private readonly HashSet<long> _locallyDeletedMessageIds = [];
+        private readonly EntityAiPanelController _aiPanel;
         private PendingChatImage? _pendingChatImage;
-        private GroupAiWorkspaceData? _currentAiWorkspace;
         private CancellationTokenSource? _chatImageHydrationCts;
         private CancellationTokenSource? _groupAvatarHydrationCts;
         private CancellationTokenSource? _memberAvatarHydrationCts;
         private string _activeRightTab = "profile";
+        private bool _hasLoadedOnce;
+        private long _handledSyncRevision = -1;
+        private int _unreadNewMessagesCount;
         private bool _isGroupMultiSelectMode;
         private bool _isMultiSelectMode;
         private long _nextOlderMessageCursor;
         private bool _isLoadingOlderMessages;
         private bool _isEditing;
         private bool _isIncomingDirection;
-        private bool _isAiSummaryBusy;
-        private bool _isAiChatBusy;
 
         public GroupsPage()
         {
             InitializeComponent();
+            NavigationCacheMode = NavigationCacheMode.Required;
+            _activeRightTab = AppSettingsService.NormalizeRightTab(AppServices.Settings.Current.LastGroupRightTab);
             MessagesListView.ItemsSource = _currentMessages;
             GroupMembersListView.ItemsSource = _currentMembers;
-            AiChatListView.ItemsSource = _aiChatMessages;
-            AiChatPendingImagesItems.ItemsSource = _aiChatPendingImages;
+            _aiPanel = new EntityAiPanelController(
+                new EntityAiPanelControls
+                {
+                    SummaryErrorBanner = AiSummaryErrorBanner,
+                    SummaryErrorText = AiSummaryErrorText,
+                    SummaryNoticeText = AiSummaryNoticeText,
+                    SummaryEmptyPanel = AiSummaryEmptyPanel,
+                    SummaryResultScroll = AiSummaryResultScroll,
+                    SummaryFooterBar = AiSummaryFooterBar,
+                    SummaryLoadingPanel = AiSummaryLoadingPanel,
+                    SummarySpinner = AiSummarySpinner,
+                    SummaryMarkdownView = AiSummaryMarkdownView,
+                    SummaryTimeText = AiSummaryTimeText,
+                    ChatEmptyPanel = AiChatEmptyPanel,
+                    ChatListView = AiChatListView,
+                    ClearChatButton = ClearAiChatButton,
+                    PendingImagesScroll = AiChatPendingImagesScroll,
+                    PendingImagesItems = AiChatPendingImagesItems,
+                    ChatInputBox = AiChatInputBox,
+                    ChatSendButton = AiChatSendButton,
+                    ChatAttachButton = AiChatAttachButton,
+                    ChatSendIcon = AiChatSendIcon,
+                    ChatSendBusyRing = AiChatSendBusyRing
+                },
+                new EntityAiPanelHooks
+                {
+                    GetActiveEntityId = () => _selectedGroup?.Id,
+                    LoadWorkspace = id => AppServices.AiWorkspace.LoadGroup(id),
+                    SaveWorkspace = ws => AppServices.AiWorkspace.SaveGroup((GroupAiWorkspaceData)ws),
+                    SummarizeAsync = id => AppServices.Backend.SummarizeGroupWithAiAsync(id),
+                    ChatAsync = (id, history, prompt, imgs) => AppServices.Backend.GroupAiChatAsync(id, history, prompt, imgs),
+                    UpdateContextLabels = UpdateAiContextLabels,
+                    PendingThinkingText = "正在查阅群聊记录并分析...",
+                    LogPrefix = "群 AI"
+                });
             _ = ThreePaneResizeController.Attach(
                 RootThreePaneGrid,
                 LeftPaneColumn, LeftPaneSplitter,
@@ -65,10 +99,13 @@ namespace Client.Pages
 
         private void GroupsPage_Loaded(object sender, RoutedEventArgs e)
         {
+            AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
+            AppServices.WeChat4Sync.SyncCompleted -= OnWeChatSyncCompleted;
             AppServices.Settings.ThemeChanged += OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted += OnWeChatSyncCompleted;
             UpdateRightTabVisuals();
             UpdateDirectionToggleVisuals();
+            ChatPageSharedHelper.AttachScrollNearBottomWatcher(MessagesListView, ClearNewMessagesJumpHint);
         }
 
         private void GroupsPage_Unloaded(object sender, RoutedEventArgs e)
@@ -94,14 +131,21 @@ namespace Client.Pages
             {
                 try
                 {
-                    await LoadGroupsAsync(_selectedGroup?.Id);
-                    if (_selectedGroup is not null)
-                    {
-                        await LoadGroupMessagesAsync(_selectedGroup);
-                    }
+                    _handledSyncRevision = AppServices.WeChat4Sync.SyncRevision;
+                    await RefreshAfterSyncAsync();
                 }
                 catch { }
             });
+        }
+
+        private async Task RefreshAfterSyncAsync()
+        {
+            await LoadGroupsAsync(_selectedGroup?.Id, preserveCurrentDetail: true);
+            if (_selectedGroup is not null)
+            {
+                await LoadGroupMembersAsync(_selectedGroup);
+                await RefreshGroupMessagesIncrementallyAsync(_selectedGroup);
+            }
         }
 
         private async void SyncActiveGroupsNowButton_Click(object sender, RoutedEventArgs e)
@@ -113,11 +157,8 @@ namespace Client.Pages
                 var (ok, msg, _) = await AppServices.WeChat4Sync.SyncImportedTargetsAsync(
                     syncCustomers: false,
                     syncGroups: true);
-                await LoadGroupsAsync(_selectedGroup?.Id);
-                if (_selectedGroup is not null)
-                {
-                    await LoadGroupMessagesAsync(_selectedGroup);
-                }
+                _handledSyncRevision = AppServices.WeChat4Sync.SyncRevision;
+                await RefreshAfterSyncAsync();
                 if (!ok)
                 {
                     ShowDetailStatus(msg, isError: true);
@@ -145,7 +186,27 @@ namespace Client.Pages
         protected override async void OnNavigatedTo(NavigationEventArgs e)
         {
             base.OnNavigatedTo(e);
-            try { await LoadGroupsAsync(); }
+            try
+            {
+                if (!_hasLoadedOnce)
+                {
+                    _hasLoadedOnce = true;
+                    _handledSyncRevision = AppServices.WeChat4Sync.SyncRevision;
+                    long? lastId = AppServices.Settings.Current.LastSelectedGroupId > 0
+                        ? AppServices.Settings.Current.LastSelectedGroupId
+                        : null;
+                    await LoadGroupsAsync(lastId);
+                }
+                else if (_handledSyncRevision != AppServices.WeChat4Sync.SyncRevision)
+                {
+                    _handledSyncRevision = AppServices.WeChat4Sync.SyncRevision;
+                    await RefreshAfterSyncAsync();
+                }
+                else
+                {
+                    StartGroupAvatarHydration(_allGroups);
+                }
+            }
             catch (Exception ex) { AppServices.Logs.Error("UI", $"加载群组列表异常：{ex.Message}"); }
         }
 
@@ -155,14 +216,32 @@ namespace Client.Pages
             ApplyFilter(_selectedGroup?.Id, forceReloadDetail: false);
         }
 
-        private async Task LoadGroupsAsync(long? selectId = null)
+        private async Task LoadGroupsAsync(long? selectId = null, bool preserveCurrentDetail = false)
         {
             try
             {
-                _allGroups = await AppServices.Backend.ListAllGroupsAsync(1000);
+                var prevAvatars = _allGroups
+                    .Where(g => g.AvatarImage is not null && !string.IsNullOrWhiteSpace(g.AvatarUrl))
+                    .ToDictionary(g => g.Id, g => (g.AvatarUrl, g.AvatarImage!));
+
+                var items = await AppServices.Backend.ListAllGroupsAsync(1000);
+                foreach (var item in items)
+                {
+                    if (prevAvatars.TryGetValue(item.Id, out var cached) &&
+                        string.Equals(cached.AvatarUrl, item.AvatarUrl, StringComparison.Ordinal))
+                    {
+                        item.AvatarImage = cached.Item2;
+                    }
+                }
+
+                _allGroups = items;
                 var validIds = _allGroups.Select(g => g.Id).ToHashSet();
                 _selectedGroupIds.RemoveWhere(id => !validIds.Contains(id));
-                ApplyFilter(selectId, forceReloadDetail: true);
+                ApplyFilter(selectId, forceReloadDetail: !preserveCurrentDetail);
+                if (preserveCurrentDetail && _selectedGroup is not null)
+                {
+                    UpdateSelectedGroupUi();
+                }
                 StartGroupAvatarHydration(_allGroups);
             }
             catch (Exception ex)
@@ -177,35 +256,22 @@ namespace Client.Pages
             _groupAvatarHydrationCts?.Dispose();
             var cts = new CancellationTokenSource();
             _groupAvatarHydrationCts = cts;
-            _ = HydrateGroupAvatarsAsync(groups, cts.Token);
-        }
-
-        private async Task HydrateGroupAvatarsAsync(List<GroupDto> groups, CancellationToken ct)
-        {
-            try
-            {
-                foreach (var g in groups)
+            _ = ChatPageSharedHelper.HydrateAvatarsConcurrentlyAsync(
+                groups,
+                g => g.AvatarUrl,
+                g => g.AvatarImage is not null,
+                (g, img) =>
                 {
-                    if (ct.IsCancellationRequested) return;
-                    if (string.IsNullOrWhiteSpace(g.AvatarUrl) || g.AvatarImage is not null) continue;
-                    byte[]? bytes = await AppServices.Backend.DownloadAvatarBytesAsync(g.AvatarUrl, ct);
-                    if (bytes is null || ct.IsCancellationRequested) continue;
-                    var img = await AvatarImageService.BytesToBitmapImageAsync(bytes);
-                    if (img is not null && !ct.IsCancellationRequested)
+                    g.AvatarImage = img;
+                    if (_selectedGroup?.Id == g.Id)
                     {
-                        g.AvatarImage = img;
-                        if (_selectedGroup?.Id == g.Id)
-                        {
-                            ApplyDetailGroupAvatarVisual(g);
-                        }
+                        ApplyDetailGroupAvatarVisual(g);
                     }
-                }
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                AppServices.Logs.Warn("UI", $"加载群头像异常：{ex.Message}");
-            }
+                },
+                DispatcherQueue,
+                cts.Token,
+                maxConcurrency: 4,
+                logLabel: "群头像");
         }
 
         private void ApplyDetailGroupAvatarVisual(GroupDto g)
@@ -258,6 +324,10 @@ namespace Client.Pages
 
             if (selectionChanged || forceReloadDetail)
             {
+                if (nextSelected is not null)
+                {
+                    GroupsListView.ScrollIntoView(nextSelected);
+                }
                 _ = ActivateSelectedGroupAsync(nextSelected);
             }
         }
@@ -298,12 +368,18 @@ namespace Client.Pages
             SetMultiSelectMode(false);
             SetEditMode(false);
             ClearPendingChatImage();
+            ClearNewMessagesJumpHint();
             DetailStatusBanner.Visibility = Visibility.Collapsed;
             UpdateSelectedGroupUi();
 
             if (selected is not null)
             {
-                LoadGroupAiWorkspace(selected);
+                if (AppServices.Settings.Current.LastSelectedGroupId != selected.Id)
+                {
+                    AppServices.Settings.Current.LastSelectedGroupId = selected.Id;
+                    AppServices.Settings.Save();
+                }
+                _aiPanel.LoadForEntity(selected.Id);
                 try
                 {
                     await LoadGroupMembersAsync(selected);
@@ -318,8 +394,7 @@ namespace Client.Pages
                 _currentMessages.Clear();
                 _nextOlderMessageCursor = 0;
                 LoadOlderMessagesBar.Visibility = Visibility.Collapsed;
-                _aiChatMessages.Clear();
-                _currentAiWorkspace = null;
+                _aiPanel.ClearForNoEntity();
                 MultiSelectMessagesButton.IsEnabled = false;
                 EmptyChatTitle.Text = "暂无群聊记录";
                 EmptyChatHint.Visibility = Visibility.Visible;
@@ -674,34 +749,19 @@ namespace Client.Pages
             _memberAvatarHydrationCts?.Dispose();
             var cts = new CancellationTokenSource();
             _memberAvatarHydrationCts = cts;
-            _ = HydrateGroupMemberAvatarsAsync(members, cts.Token);
-        }
-
-        private async Task HydrateGroupMemberAvatarsAsync(List<GroupMemberDto> members, CancellationToken ct)
-        {
-            try
-            {
-                foreach (var m in members)
+            _ = ChatPageSharedHelper.HydrateAvatarsConcurrentlyAsync(
+                members,
+                m => m.AvatarUrl,
+                m => m.AvatarImage is not null,
+                (m, img) =>
                 {
-                    if (ct.IsCancellationRequested) return;
-                    if (string.IsNullOrWhiteSpace(m.AvatarUrl) || m.AvatarImage is not null) continue;
-                    byte[]? bytes = await AppServices.Backend.DownloadAvatarBytesAsync(m.AvatarUrl, ct);
-                    if (bytes is null || ct.IsCancellationRequested) continue;
-                    var img = await AvatarImageService.BytesToBitmapImageAsync(bytes);
-                    if (img is not null && !ct.IsCancellationRequested)
-                    {
-                        m.AvatarImage = img;
-                        ApplyMemberAvatarToMatchingBubbles(m, img);
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                AppServices.Logs.Warn("UI", $"加载群成员头像异常：{ex.Message}");
-            }
+                    m.AvatarImage = img;
+                    ApplyMemberAvatarToMatchingBubbles(m, img);
+                },
+                DispatcherQueue,
+                cts.Token,
+                maxConcurrency: 4,
+                logLabel: "群成员头像");
         }
 
         private void ApplyMemberAvatarToMatchingBubbles(GroupMemberDto member, ImageSource avatar)
@@ -897,6 +957,112 @@ namespace Client.Pages
 
             StartChatImageHydration(_currentMessages.ToList());
             RefreshMessageListEmptyState(group.DisplayName);
+            ClearNewMessagesJumpHint();
+            if (_currentMessages.Count > 0)
+            {
+                MessagesListView.ScrollIntoView(_currentMessages[^1]);
+            }
+        }
+
+        private async Task RefreshGroupMessagesIncrementallyAsync(GroupDto group)
+        {
+            if (_currentMessages.Count == 0)
+            {
+                await LoadGroupMessagesAsync(group);
+                return;
+            }
+
+            bool wasNearBottom = ChatPageSharedHelper.IsListNearBottom(MessagesListView);
+            var res = await AppServices.Backend.ListGroupMessagesAsync(group.Id, limit: 100);
+            if (_selectedGroup?.Id != group.Id || !res.IsSuccess || res.Data is null) return;
+
+            var existingById = new Dictionary<long, ChatBubbleItem>();
+            long maxExistingServerId = 0;
+            foreach (var item in _currentMessages)
+            {
+                if (item.Id > 0)
+                {
+                    existingById[item.Id] = item;
+                    if (item.Id > maxExistingServerId) maxExistingServerId = item.Id;
+                }
+            }
+
+            var bubblesToHydrate = new List<ChatBubbleItem>();
+            int appendedCount = 0;
+
+            foreach (var m in res.Data.Items.AsEnumerable().Reverse())
+            {
+                if (_locallyDeletedMessageIds.Contains(m.Id)) continue;
+
+                if (existingById.TryGetValue(m.Id, out var existing))
+                {
+                    if (!string.IsNullOrWhiteSpace(m.Content) && !string.Equals(existing.Content, m.Content, StringComparison.Ordinal))
+                    {
+                        existing.Content = m.Content;
+                    }
+                    if (string.IsNullOrWhiteSpace(existing.AudioUrl) && !string.IsNullOrWhiteSpace(m.AudioUrl))
+                    {
+                        existing.AudioUrl = m.AudioUrl;
+                    }
+                    if (string.IsNullOrWhiteSpace(existing.ImageUrl) && !string.IsNullOrWhiteSpace(m.ImageUrl))
+                    {
+                        existing.ImageUrl = m.ImageUrl;
+                        bubblesToHydrate.Add(existing);
+                    }
+                    continue;
+                }
+
+                if (m.Id > maxExistingServerId)
+                {
+                    var bubble = BuildGroupBubbleItem(m);
+                    _currentMessages.Add(bubble);
+                    if (!string.IsNullOrWhiteSpace(bubble.ImageUrl))
+                    {
+                        bubblesToHydrate.Add(bubble);
+                    }
+                    appendedCount++;
+                }
+            }
+
+            if (bubblesToHydrate.Count > 0)
+            {
+                _ = ChatPageSharedHelper.HydrateChatBubbleImagesConcurrentlyAsync(
+                    bubblesToHydrate,
+                    DispatcherQueue,
+                    _chatImageHydrationCts?.Token ?? CancellationToken.None,
+                    maxConcurrency: 4,
+                    logLabel: "群聊图片");
+            }
+
+            if (appendedCount > 0)
+            {
+                RefreshMessageListEmptyState(group.DisplayName);
+                if (wasNearBottom)
+                {
+                    ClearNewMessagesJumpHint();
+                    MessagesListView.ScrollIntoView(_currentMessages[^1]);
+                }
+                else
+                {
+                    _unreadNewMessagesCount += appendedCount;
+                    NewMessagesJumpText.Text = $"有 {_unreadNewMessagesCount} 条新消息";
+                    NewMessagesJumpButton.Visibility = Visibility.Visible;
+                }
+            }
+        }
+
+        private void ClearNewMessagesJumpHint()
+        {
+            _unreadNewMessagesCount = 0;
+            if (NewMessagesJumpButton is not null)
+            {
+                NewMessagesJumpButton.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void NewMessagesJumpButton_Click(object sender, RoutedEventArgs e)
+        {
+            ClearNewMessagesJumpHint();
             if (_currentMessages.Count > 0)
             {
                 MessagesListView.ScrollIntoView(_currentMessages[^1]);
@@ -988,35 +1154,13 @@ namespace Client.Pages
             _chatImageHydrationCts?.Dispose();
             var cts = new CancellationTokenSource();
             _chatImageHydrationCts = cts;
-            _ = HydrateChatBubbleImagesAsync(bubbles, cts.Token);
+            _ = ChatPageSharedHelper.HydrateChatBubbleImagesConcurrentlyAsync(
+                bubbles, DispatcherQueue, cts.Token, maxConcurrency: 4, logLabel: "群聊图片");
         }
 
-        private async Task HydrateChatBubbleImagesAsync(List<ChatBubbleItem> bubbles, CancellationToken ct)
-        {
-            try
-            {
-                foreach (var b in bubbles)
-                {
-                    if (ct.IsCancellationRequested) return;
-                    if (string.IsNullOrWhiteSpace(b.ImageUrl) || b.BubbleImage is not null) continue;
-                    byte[]? bytes = await AppServices.Backend.DownloadChatImageBytesAsync(b.ImageUrl, ct);
-                    if (bytes is null || ct.IsCancellationRequested) continue;
-                    var img = await ChatImageHelper.BytesToBitmapImageAsync(bytes);
-                    if (img is not null && !ct.IsCancellationRequested)
-                    {
-                        b.BubbleImageBytes = bytes;
-                        b.BubbleImage = img;
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                AppServices.Logs.Warn("UI", $"加载群聊图片异常：{ex.Message}");
-            }
-        }
+        private Task HydrateChatBubbleImagesAsync(List<ChatBubbleItem> bubbles, CancellationToken ct) =>
+            ChatPageSharedHelper.HydrateChatBubbleImagesConcurrentlyAsync(
+                bubbles, DispatcherQueue, ct, maxConcurrency: 4, logLabel: "群聊图片");
 
         private void RefreshMessageListEmptyState(string groupName)
         {
@@ -1086,85 +1230,33 @@ namespace Client.Pages
                 UpdateMultiSelectSummary();
                 return;
             }
-
-            byte[]? bytes = item.BubbleImageBytes;
-            if ((bytes is null || bytes.Length == 0) && !string.IsNullOrWhiteSpace(item.ImageUrl))
-            {
-                bytes = await AppServices.Backend.DownloadChatImageBytesAsync(item.ImageUrl);
-                if (bytes is { Length: > 0 })
-                {
-                    item.BubbleImageBytes = bytes;
-                }
-            }
-
-            if (bytes is { Length: > 0 })
-            {
-                string kind = item.IsVideoMessage ? "视频封面" : "群聊图片";
-                string title = _selectedGroup is not null
-                    ? $"{_selectedGroup.DisplayName} · {kind}"
-                    : $"{kind}查看器";
-                ImageViewerWindow.ShowImage(bytes, title);
-            }
+            await ChatPageSharedHelper.OpenBubbleImageViewerAsync(item, _selectedGroup?.DisplayName, "群聊图片");
         }
 
-        private void BubbleContextFlyout_Opening(object sender, object e)
-        {
-            if (sender is not MenuFlyout flyout || flyout.Target is not FrameworkElement target || target.DataContext is not ChatBubbleItem item)
-            {
-                return;
-            }
-            foreach (var mi in flyout.Items.OfType<MenuFlyoutItem>())
-            {
-                if (mi.Tag as string == "VoiceTranscribe")
-                {
-                    mi.Visibility = item.VoiceTranscribeMenuVisibility;
-                    mi.Text = VoiceTranscriptionService.HasSavedTranscript(item.Content) ? "重新转文字" : "语音转文字";
-                }
-            }
-        }
+        private void BubbleContextFlyout_Opening(object sender, object e) =>
+            ChatPageSharedHelper.ConfigureBubbleContextFlyout(sender);
 
         private async void TranscribeVoiceBubbleMenuItem_Click(object sender, RoutedEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
-            if (string.IsNullOrWhiteSpace(item.AudioUrl))
-            {
-                ComposerHintText.Text = "该条语音暂无音频文件，请先点击顶部「刷新同步」。";
-                return;
-            }
-
             var group = _selectedGroup;
             ComposerHintText.Text = "正在将语音转为文字...";
-            var res = await VoiceTranscriptionService.TranscribeAsync(item.AudioUrl);
-            if (!res.Success || string.IsNullOrWhiteSpace(res.Text))
-            {
-                ComposerHintText.Text = res.ErrorMessage;
-                return;
-            }
-
-            string mergedContent = VoiceTranscriptionService.MergeTranscriptIntoContent(item.Content, res.Text);
-            item.Content = mergedContent;
-
-            if (item.Id > 0 && group is not null)
-            {
-                string dir = item.IsOutgoing ? "outgoing" : "incoming";
-                string senderName = item.IsOutgoing
-                    ? (AppServices.Backend.CurrentEmployee?.DisplayName ?? "我")
-                    : item.SenderName;
-                var patchRes = await AppServices.Backend.UpdateGroupMessageAsync(
-                    group.Id, item.Id, senderName, dir, mergedContent, item.ImageUrl);
-                if (patchRes.IsSuccess)
-                {
-                    ComposerHintText.Text = $"✓ 语音转文字已完成并永久保存（{res.EngineLabel}）。";
-                }
-                else
-                {
-                    ComposerHintText.Text = $"已识别文字，但保存到服务端失败：{patchRes.ErrorMessage}";
-                }
-            }
-            else
-            {
-                ComposerHintText.Text = $"✓ 语音转文字已完成（{res.EngineLabel}）。";
-            }
+            ComposerHintText.Text = await ChatPageSharedHelper.TranscribeVoiceBubbleAsync(
+                item,
+                group is not null
+                    ? async mergedContent =>
+                    {
+                        string dir = item.IsOutgoing ? "outgoing" : "incoming";
+                        string senderName = item.IsOutgoing
+                            ? (AppServices.Backend.CurrentEmployee?.DisplayName ?? "我")
+                            : item.SenderName;
+                        var patchRes = await AppServices.Backend.UpdateGroupMessageAsync(
+                            group.Id, item.Id, senderName, dir, mergedContent, item.ImageUrl);
+                        return patchRes.IsSuccess
+                            ? (true, string.Empty)
+                            : (false, patchRes.ErrorMessage);
+                    }
+                    : null);
         }
 
         private async void EditBubbleMenuItem_Click(object sender, RoutedEventArgs e)
@@ -1282,29 +1374,7 @@ namespace Client.Pages
         private async void CopyBubbleMenuItem_Click(object sender, RoutedEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
-            try
-            {
-                var pkg = new DataPackage();
-                if (!string.IsNullOrWhiteSpace(item.Content))
-                {
-                    pkg.SetText(item.Content);
-                    Clipboard.SetContent(pkg);
-                    ComposerHintText.Text = "已复制该条消息内容。";
-                }
-                else if (item.BubbleImageBytes is { Length: > 0 } bytes)
-                {
-                    var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
-                    await stream.WriteAsync(bytes.AsBuffer());
-                    stream.Seek(0);
-                    pkg.SetBitmap(Windows.Storage.Streams.RandomAccessStreamReference.CreateFromStream(stream));
-                    Clipboard.SetContent(pkg);
-                    ComposerHintText.Text = "已复制该条消息图片。";
-                }
-            }
-            catch (Exception ex)
-            {
-                ComposerHintText.Text = $"复制失败：{ex.Message}";
-            }
+            ComposerHintText.Text = await ChatPageSharedHelper.CopyBubbleToClipboardAsync(item);
         }
 
         private void MultiSelectFromBubbleMenuItem_Click(object sender, RoutedEventArgs e)
@@ -1523,7 +1593,13 @@ namespace Client.Pages
         {
             if (sender is Button btn && btn.Tag is string tab)
             {
-                _activeRightTab = tab;
+                string normalized = AppSettingsService.NormalizeRightTab(tab);
+                _activeRightTab = normalized;
+                if (!string.Equals(AppServices.Settings.Current.LastGroupRightTab, normalized, StringComparison.OrdinalIgnoreCase))
+                {
+                    AppServices.Settings.Current.LastGroupRightTab = normalized;
+                    AppServices.Settings.Save();
+                }
                 UpdateRightTabVisuals();
                 UpdateRightTabVisibility();
             }
@@ -1537,42 +1613,12 @@ namespace Client.Pages
             AiChatTabContainer.Visibility = hasGroup && _activeRightTab == "aichat" ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private void UpdateRightTabVisuals()
-        {
-            var activeFg = (Brush)Application.Current.Resources["BrandPrimaryBrush"];
-            var inactiveFg = (Brush)Application.Current.Resources["TextSecondaryBrush"];
-            var transparent = new SolidColorBrush(Colors.Transparent);
-
-            ApplyTabVisual(RightTabProfileIcon, RightTabProfileText, RightTabProfileLine, _activeRightTab == "profile", activeFg, inactiveFg, transparent);
-            ApplyTabVisual(RightTabSummaryIcon, RightTabSummaryText, RightTabSummaryLine, _activeRightTab == "summary", activeFg, inactiveFg, transparent);
-            ApplyTabVisual(RightTabChatIcon, RightTabChatText, RightTabChatLine, _activeRightTab == "aichat", activeFg, inactiveFg, transparent);
-        }
-
-        private static void ApplyTabVisual(FontIcon icon, TextBlock text, Border line, bool active, Brush activeFg, Brush inactiveFg, Brush transparent)
-        {
-            icon.Foreground = active ? activeFg : inactiveFg;
-            text.Foreground = active ? activeFg : inactiveFg;
-            text.FontWeight = active ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
-            line.Background = active ? activeFg : transparent;
-        }
-
-        private void LoadGroupAiWorkspace(GroupDto group)
-        {
-            _currentAiWorkspace = AppServices.AiWorkspace.LoadGroup(group.Id);
-            _aiChatPendingImages.Clear();
-            UpdateGroupAiPendingImagesUi();
-            AiSummaryErrorBanner.Visibility = Visibility.Collapsed;
-            AiSummaryNoticeText.Visibility = Visibility.Collapsed;
-            RenderAiSummaryState();
-
-            _aiChatMessages.Clear();
-            foreach (var msg in _currentAiWorkspace.Messages)
-            {
-                _aiChatMessages.Add(msg);
-            }
-            UpdateAiChatEmptyState();
-            UpdateAiContextLabels();
-        }
+        private void UpdateRightTabVisuals() =>
+            ChatPageSharedHelper.ApplyRightTabVisuals(
+                _activeRightTab,
+                RightTabProfileIcon, RightTabProfileText, RightTabProfileLine,
+                RightTabSummaryIcon, RightTabSummaryText, RightTabSummaryLine,
+                RightTabChatIcon, RightTabChatText, RightTabChatLine);
 
         private void UpdateAiContextLabels()
         {
@@ -1583,330 +1629,42 @@ namespace Client.Pages
             AiChatContextTitle.Text = $"{_selectedGroup.DisplayName} · {msgCount} 条对话";
         }
 
-        private void RenderAiSummaryState()
-        {
-            bool hasSummary = _currentAiWorkspace is not null && !string.IsNullOrWhiteSpace(_currentAiWorkspace.SummaryText);
-            AiSummaryLoadingPanel.Visibility = Visibility.Collapsed;
-            AiSummarySpinner.IsActive = false;
-            AiSummaryEmptyPanel.Visibility = hasSummary ? Visibility.Collapsed : Visibility.Visible;
-            AiSummaryResultScroll.Visibility = hasSummary ? Visibility.Visible : Visibility.Collapsed;
-            AiSummaryFooterBar.Visibility = hasSummary ? Visibility.Visible : Visibility.Collapsed;
+        private async void GenerateAiSummaryButton_Click(object sender, RoutedEventArgs e) =>
+            await _aiPanel.GenerateSummaryAsync();
 
-            if (hasSummary && _currentAiWorkspace is not null)
-            {
-                AiSummaryMarkdownView.Text = _currentAiWorkspace.SummaryText;
-                AiSummaryTimeText.Text = string.IsNullOrWhiteSpace(_currentAiWorkspace.SummaryUpdatedAt)
-                    ? string.Empty
-                    : $"更新于 {_currentAiWorkspace.SummaryUpdatedAt}";
-            }
-        }
+        private void CopyAiSummaryButton_Click(object sender, RoutedEventArgs e) =>
+            _aiPanel.CopySummary();
 
-        private async void GenerateAiSummaryButton_Click(object sender, RoutedEventArgs e)
-        {
-            var group = _selectedGroup;
-            if (group is null || _isAiSummaryBusy) return;
-
-            _isAiSummaryBusy = true;
-            AiSummaryErrorBanner.Visibility = Visibility.Collapsed;
-            AiSummaryNoticeText.Visibility = Visibility.Collapsed;
-            AiSummaryEmptyPanel.Visibility = Visibility.Collapsed;
-            AiSummaryResultScroll.Visibility = Visibility.Collapsed;
-            AiSummaryFooterBar.Visibility = Visibility.Collapsed;
-            AiSummaryLoadingPanel.Visibility = Visibility.Visible;
-            AiSummarySpinner.IsActive = true;
-
-            try
-            {
-                var res = await AppServices.Backend.SummarizeGroupWithAiAsync(group.Id);
-                if (_selectedGroup?.Id != group.Id) return;
-
-                if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.Summary))
-                {
-                    string timestamp = DateTime.Now.ToString("MM-dd HH:mm");
-                    _currentAiWorkspace ??= new GroupAiWorkspaceData { GroupId = group.Id };
-                    _currentAiWorkspace.SummaryText = res.Data.Summary;
-                    _currentAiWorkspace.SummaryUpdatedAt = timestamp;
-                    _currentAiWorkspace.SummaryContextMeta = $"{res.Data.MessageCount} 条消息";
-                    AppServices.AiWorkspace.SaveGroup(_currentAiWorkspace);
-                }
-                else
-                {
-                    AiSummaryErrorText.Text = $"生成失败：{res.ErrorMessage}";
-                    AiSummaryErrorBanner.Visibility = Visibility.Visible;
-                    AiSummaryNoticeText.Foreground = (Brush)Application.Current.Resources["DangerTextBrush"];
-                    AiSummaryNoticeText.Text = $"生成失败：{res.ErrorMessage}";
-                    AiSummaryNoticeText.Visibility = Visibility.Visible;
-                }
-            }
-            catch (Exception ex)
-            {
-                if (_selectedGroup?.Id == group.Id)
-                {
-                    AiSummaryErrorText.Text = $"生成异常：{ex.Message}";
-                    AiSummaryErrorBanner.Visibility = Visibility.Visible;
-                }
-            }
-            finally
-            {
-                _isAiSummaryBusy = false;
-                if (_selectedGroup?.Id == group.Id)
-                {
-                    RenderAiSummaryState();
-                }
-            }
-        }
-
-        private void CopyAiSummaryButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_currentAiWorkspace is null || string.IsNullOrWhiteSpace(_currentAiWorkspace.SummaryText)) return;
-            try
-            {
-                var pkg = new DataPackage();
-                pkg.SetText(_currentAiWorkspace.SummaryText);
-                Clipboard.SetContent(pkg);
-                AiSummaryNoticeText.Foreground = (Brush)Application.Current.Resources["SuccessTextBrush"];
-                AiSummaryNoticeText.Text = "已复制到剪贴板";
-                AiSummaryNoticeText.Visibility = Visibility.Visible;
-            }
-            catch (Exception ex)
-            {
-                AiSummaryNoticeText.Foreground = (Brush)Application.Current.Resources["DangerTextBrush"];
-                AiSummaryNoticeText.Text = $"复制失败：{ex.Message}";
-                AiSummaryNoticeText.Visibility = Visibility.Visible;
-            }
-        }
-
-        private void CopyAiChatMessageMenuItem_Click(object sender, RoutedEventArgs e)
-        {
-            if ((sender as FrameworkElement)?.DataContext is not AiChatMessageItem item) return;
-            try
-            {
-                var pkg = new DataPackage();
-                pkg.SetText(item.Content);
-                Clipboard.SetContent(pkg);
-            }
-            catch (Exception ex)
-            {
-                AppServices.Logs.Warn("AI", $"复制群 AI 回复失败：{ex.Message}");
-            }
-        }
-
-        private void UpdateAiChatEmptyState()
-        {
-            bool hasMsgs = _aiChatMessages.Count > 0;
-            AiChatEmptyPanel.Visibility = hasMsgs ? Visibility.Collapsed : Visibility.Visible;
-            AiChatListView.Visibility = hasMsgs ? Visibility.Visible : Visibility.Collapsed;
-            ClearAiChatButton.IsEnabled = hasMsgs && !_isAiChatBusy;
-        }
+        private void CopyAiChatMessageMenuItem_Click(object sender, RoutedEventArgs e) =>
+            _aiPanel.CopyChatMessage(sender);
 
         private async void AiQuickPrompt_Click(object sender, RoutedEventArgs e)
         {
             if (sender is Button btn && btn.Content is string prompt)
             {
-                await SendAiChatMessageAsync(prompt);
+                await _aiPanel.SendMessageAsync(prompt);
             }
         }
 
-        private void UpdateGroupAiPendingImagesUi()
-        {
-            AiChatPendingImagesScroll.Visibility = _aiChatPendingImages.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        private async void UploadGroupAiImage_Click(object sender, RoutedEventArgs e)
-        {
-            if (_isAiChatBusy || _aiChatPendingImages.Count >= AiImageAttachmentHelper.MaxAttachmentsPerMessage) return;
-            string? path = Win32WindowHelper.PickImageFilePath(AppServices.MainWindowHandle);
-            if (string.IsNullOrWhiteSpace(path)) return;
-            try
-            {
-                var item = await AiImageAttachmentHelper.TryCreateFromFileAsync(path);
-                if (item is not null)
-                {
-                    _aiChatPendingImages.Add(item);
-                    UpdateGroupAiPendingImagesUi();
-                }
-            }
-            catch (Exception ex)
-            {
-                AppServices.Logs.Warn("AI", $"加载图片失败：{ex.Message}");
-            }
-        }
+        private async void UploadGroupAiImage_Click(object sender, RoutedEventArgs e) =>
+            await _aiPanel.UploadImageAsync();
 
         private async void PasteGroupAiImage_Click(object sender, RoutedEventArgs e) =>
-            await TryAttachGroupAiClipboardImageAsync();
+            await _aiPanel.PasteClipboardImageAsync();
 
-        private async void AiChatInputBox_Paste(object sender, TextControlPasteEventArgs e)
-        {
-            try
-            {
-                var content = Clipboard.GetContent();
-                if (content.Contains(StandardDataFormats.Bitmap))
-                {
-                    e.Handled = true;
-                    await TryAttachGroupAiClipboardImageAsync();
-                }
-            }
-            catch
-            {
-            }
-        }
+        private async void AiChatInputBox_Paste(object sender, TextControlPasteEventArgs e) =>
+            await _aiPanel.HandleInputPasteAsync(e);
 
-        private async Task TryAttachGroupAiClipboardImageAsync()
-        {
-            if (_isAiChatBusy || _aiChatPendingImages.Count >= AiImageAttachmentHelper.MaxAttachmentsPerMessage) return;
-            try
-            {
-                var item = await AiImageAttachmentHelper.TryCreateFromClipboardAsync();
-                if (item is not null)
-                {
-                    _aiChatPendingImages.Add(item);
-                    UpdateGroupAiPendingImagesUi();
-                }
-            }
-            catch (Exception ex)
-            {
-                AppServices.Logs.Warn("AI", $"粘贴图片失败：{ex.Message}");
-            }
-        }
-
-        private void RemoveGroupAiImage_Click(object sender, RoutedEventArgs e)
-        {
-            if (sender is Button btn && btn.Tag is string id)
-            {
-                var target = _aiChatPendingImages.FirstOrDefault(x => x.Id == id);
-                if (target is not null)
-                {
-                    _aiChatPendingImages.Remove(target);
-                    UpdateGroupAiPendingImagesUi();
-                }
-            }
-        }
+        private void RemoveGroupAiImage_Click(object sender, RoutedEventArgs e) =>
+            _aiPanel.RemovePendingImage(sender);
 
         private async void AiChatSendButton_Click(object sender, RoutedEventArgs e) =>
-            await SendAiChatMessageAsync(AiChatInputBox.Text);
+            await _aiPanel.SendMessageAsync(AiChatInputBox.Text);
 
-        private async void AiChatInputBox_KeyDown(object sender, KeyRoutedEventArgs e)
-        {
-            if (e.Key != VirtualKey.Enter) return;
-            var shiftState = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift);
-            if ((shiftState & CoreVirtualKeyStates.Down) == CoreVirtualKeyStates.Down) return;
+        private async void AiChatInputBox_KeyDown(object sender, KeyRoutedEventArgs e) =>
+            await _aiPanel.HandleInputKeyDownAsync(e);
 
-            e.Handled = true;
-            await SendAiChatMessageAsync(AiChatInputBox.Text);
-        }
-
-        private async Task SendAiChatMessageAsync(string rawText)
-        {
-            var group = _selectedGroup;
-            string prompt = rawText.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
-            var attachedUris = _aiChatPendingImages.Select(x => x.DataUri).ToList();
-            if (group is null || (string.IsNullOrEmpty(prompt) && attachedUris.Count == 0) || _isAiChatBusy) return;
-
-            _isAiChatBusy = true;
-            AiChatSendButton.IsEnabled = false;
-            AiChatAttachButton.IsEnabled = false;
-            AiChatSendIcon.Visibility = Visibility.Collapsed;
-            AiChatSendBusyRing.Visibility = Visibility.Visible;
-            AiChatSendBusyRing.IsActive = true;
-            ClearAiChatButton.IsEnabled = false;
-
-            AiChatInputBox.Text = string.Empty;
-            _aiChatPendingImages.Clear();
-            UpdateGroupAiPendingImagesUi();
-
-            AiChatMessageItem? pendingBubble = null;
-            try
-            {
-                _currentAiWorkspace ??= new GroupAiWorkspaceData { GroupId = group.Id };
-
-                var historyTurns = _currentAiWorkspace.Messages
-                    .TakeLast(12)
-                    .Select(m => new AiChatTurnDto { Role = m.Role, Content = m.Content })
-                    .ToList();
-
-                var userMsg = new AiChatMessageItem
-                {
-                    Role = "user",
-                    Content = prompt,
-                    Images = attachedUris,
-                    Timestamp = DateTime.Now.ToString("HH:mm")
-                };
-                _currentAiWorkspace.Messages.Add(userMsg);
-                _aiChatMessages.Add(userMsg);
-
-                pendingBubble = new AiChatMessageItem
-                {
-                    Role = "assistant",
-                    IsPending = true,
-                    Content = "正在查阅群聊记录并分析..."
-                };
-                _aiChatMessages.Add(pendingBubble);
-
-                UpdateAiChatEmptyState();
-                AiChatListView.ScrollIntoView(pendingBubble);
-                AppServices.AiWorkspace.SaveGroup(_currentAiWorkspace);
-
-                var res = await AppServices.Backend.GroupAiChatAsync(group.Id, historyTurns, prompt, attachedUris);
-
-                if (pendingBubble is not null)
-                {
-                    _aiChatMessages.Remove(pendingBubble);
-                    pendingBubble = null;
-                }
-
-                if (_selectedGroup?.Id != group.Id) return;
-
-                string replyText = res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.Reply)
-                    ? res.Data.Reply
-                    : $"请求失败：{res.ErrorMessage}";
-
-                List<AiToolTraceDto> traceList = res.IsSuccess && res.Data?.ToolTrace is { Count: > 0 }
-                    ? res.Data.ToolTrace
-                    : [];
-                string traceText = traceList.Count > 0
-                    ? "已调用工具：" + string.Join(" · ", traceList.Select(t => string.IsNullOrWhiteSpace(t.Summary) ? t.SkillName : $"{t.SkillName}（{t.Summary}）"))
-                    : string.Empty;
-
-                var reply = new AiChatMessageItem
-                {
-                    Role = "assistant",
-                    Content = replyText,
-                    ToolTrace = traceList,
-                    ToolTraceSummary = traceText,
-                    Timestamp = DateTime.Now.ToString("HH:mm")
-                };
-                _currentAiWorkspace.Messages.Add(reply);
-                _aiChatMessages.Add(reply);
-                AiChatListView.ScrollIntoView(reply);
-                AppServices.AiWorkspace.SaveGroup(_currentAiWorkspace);
-            }
-            catch (Exception ex)
-            {
-                if (pendingBubble is not null)
-                {
-                    _aiChatMessages.Remove(pendingBubble);
-                }
-                AppServices.Logs.Error("AI", $"群 AI 对话异常：{ex.Message}");
-            }
-            finally
-            {
-                _isAiChatBusy = false;
-                AiChatSendButton.IsEnabled = true;
-                AiChatAttachButton.IsEnabled = true;
-                AiChatSendBusyRing.IsActive = false;
-                AiChatSendBusyRing.Visibility = Visibility.Collapsed;
-                AiChatSendIcon.Visibility = Visibility.Visible;
-                UpdateAiChatEmptyState();
-            }
-        }
-
-        private void ClearAiChatButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_selectedGroup is null || _currentAiWorkspace is null) return;
-            _currentAiWorkspace.Messages.Clear();
-            _aiChatMessages.Clear();
-            AppServices.AiWorkspace.SaveGroup(_currentAiWorkspace);
-            UpdateAiChatEmptyState();
-        }
+        private void ClearAiChatButton_Click(object sender, RoutedEventArgs e) =>
+            _aiPanel.ClearChat();
     }
 }

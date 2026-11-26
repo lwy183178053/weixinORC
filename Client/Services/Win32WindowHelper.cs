@@ -128,6 +128,7 @@ namespace Client.Services
         private const uint WM_LBUTTONUP = 0x0202;
         private const nuint MK_LBUTTON = 0x0001;
         private const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+        private const int DWMWA_CLOAK = 13;
         private const uint MONITOR_DEFAULTTONEAREST = 2;
         private const int SM_XVIRTUALSCREEN = 76;
         private const int SM_YVIRTUALSCREEN = 77;
@@ -251,6 +252,16 @@ namespace Client.Services
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmGetWindowAttribute(nint hwnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(nint hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+
+        internal static bool SetWindowCloaked(nint hWnd, bool cloaked)
+        {
+            if (hWnd == nint.Zero || !IsWindow(hWnd)) return false;
+            int value = cloaked ? 1 : 0;
+            return DwmSetWindowAttribute(hWnd, DWMWA_CLOAK, ref value, sizeof(int)) == 0;
+        }
 
         [DllImport("user32.dll")]
         private static extern nint MonitorFromWindow(nint hwnd, uint dwFlags);

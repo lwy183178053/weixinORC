@@ -21,6 +21,7 @@ namespace Client.Pages
             InitializeComponent();
             Current = this;
             WorkspaceFrame.ContentTransitions = [];
+            WorkspaceFrame.CacheSize = 4;
             Loaded += WorkbenchPage_Loaded;
             Unloaded += WorkbenchPage_Unloaded;
         }
@@ -34,7 +35,8 @@ namespace Client.Pages
             RefreshHeaderAndFooter();
             UpdateThemeToggleVisual(AppServices.Settings.IsDarkMode);
             AppServices.WeChat4Sync.StartAutoSyncIfConfigured();
-            SwitchSection("customers");
+            string initialSection = AppSettingsService.NormalizeWorkbenchSection(AppServices.Settings.Current.LastWorkbenchSection);
+            SwitchSection(initialSection, persist: false);
         }
 
         private void WorkbenchPage_Unloaded(object sender, RoutedEventArgs e)
@@ -88,17 +90,23 @@ namespace Client.Pages
             }
         }
 
-        public void SwitchSection(string tag)
+        public void SwitchSection(string tag, bool persist = true)
         {
-            _activeTag = tag;
+            string normalized = AppSettingsService.NormalizeWorkbenchSection(tag);
+            _activeTag = normalized;
             UpdateRailVisuals();
 
-            (Type pageType, string title) = tag switch
+            if (persist && !string.Equals(AppServices.Settings.Current.LastWorkbenchSection, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                AppServices.Settings.Current.LastWorkbenchSection = normalized;
+                AppServices.Settings.Save();
+            }
+
+            (Type pageType, string title) = normalized switch
             {
                 "customers" => (typeof(CustomersPage), "客户档案"),
                 "groups" => (typeof(GroupsPage), "群组档案"),
                 "ai" => (typeof(AiAssistantPage), "AI 助手"),
-                "guide" => (typeof(GuidePage), "使用介绍"),
                 _ => (typeof(WeChatSyncPage), "微信监听")
             };
 
@@ -144,7 +152,6 @@ namespace Client.Pages
             SetRailItemState(RailGroupsButton, RailGroupsIcon, RailGroupsLabel, _activeTag == "groups", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailAiButton, RailAiIcon, RailAiLabel, _activeTag == "ai", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailOcrButton, RailOcrIcon, RailOcrLabel, _activeTag == "ocr", activeBg, activeFg, inactiveBg, inactiveFg);
-            SetRailItemState(RailGuideButton, RailGuideIcon, RailGuideLabel, _activeTag == "guide", activeBg, activeFg, inactiveBg, inactiveFg);
         }
 
         private static void SetRailItemState(
@@ -199,6 +206,11 @@ namespace Client.Pages
             {
                 AppServices.WeChat4Sync.StopAutoSyncTimer();
                 await AppServices.Backend.LogoutAsync();
+                CustomersPage.ClearSessionLocalState();
+                // Evict all cached workspace pages so switching accounts starts with a clean slate.
+                WorkspaceFrame.CacheSize = 0;
+                WorkspaceFrame.Content = null;
+                WorkspaceFrame.CacheSize = 4;
                 MainWindow.Instance?.ShowLoginView();
             }
             catch (Exception ex)

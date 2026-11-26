@@ -36,33 +36,74 @@ namespace Client.Pages
         private static readonly Dictionary<long, LocalBubbleEdit> SessionEditedMessages = [];
         private static readonly Dictionary<long, List<LocalBubbleInsert>> SessionInsertedMessages = [];
 
+        public static void ClearSessionLocalState()
+        {
+            SessionDeletedMessageIds.Clear();
+            SessionEditedMessages.Clear();
+            SessionInsertedMessages.Clear();
+        }
+
         private readonly ObservableCollection<ChatBubbleItem> _currentMessages = [];
-        private readonly ObservableCollection<AiChatMessageItem> _aiChatMessages = [];
-        private readonly ObservableCollection<AiImageAttachment> _aiChatPendingImages = [];
+        private readonly EntityAiPanelController _aiPanel;
         private PendingChatImage? _pendingChatImage;
-        private CustomerAiWorkspaceData? _currentAiWorkspace;
         private CancellationTokenSource? _avatarHydrationCts;
         private CancellationTokenSource? _chatImageHydrationCts;
         private string _activeRightTab = "profile";
+        private bool _hasLoadedOnce;
+        private long _handledSyncRevision = -1;
+        private int _unreadNewMessagesCount;
         private bool _isCustomerMultiSelectMode;
         private bool _isMultiSelectMode;
         private long _nextOlderMessageCursor;
         private bool _isLoadingOlderMessages;
-        private bool _isAiSummaryBusy;
-        private bool _isAiChatBusy;
         private bool _isIncomingDirection;
 
         public CustomersPage()
         {
             InitializeComponent();
+            NavigationCacheMode = NavigationCacheMode.Required;
+            _activeRightTab = AppSettingsService.NormalizeRightTab(AppServices.Settings.Current.LastCustomerRightTab);
             foreach (string tag in AppServices.Settings.Current.CollapsedCustomerTags)
             {
                 if (!string.IsNullOrWhiteSpace(tag)) _collapsedTags.Add(tag);
             }
             CustomersListView.ItemsSource = _customerRows;
             MessagesListView.ItemsSource = _currentMessages;
-            AiChatListView.ItemsSource = _aiChatMessages;
-            AiChatPendingImagesItems.ItemsSource = _aiChatPendingImages;
+            _aiPanel = new EntityAiPanelController(
+                new EntityAiPanelControls
+                {
+                    SummaryErrorBanner = AiSummaryErrorBanner,
+                    SummaryErrorText = AiSummaryErrorText,
+                    SummaryNoticeText = AiSummaryNoticeText,
+                    SummaryEmptyPanel = AiSummaryEmptyPanel,
+                    SummaryResultScroll = AiSummaryResultScroll,
+                    SummaryFooterBar = AiSummaryFooterBar,
+                    SummaryLoadingPanel = AiSummaryLoadingPanel,
+                    SummarySpinner = AiSummarySpinner,
+                    SummaryMarkdownView = AiSummaryMarkdownView,
+                    SummaryTimeText = AiSummaryTimeText,
+                    ChatEmptyPanel = AiChatEmptyPanel,
+                    ChatListView = AiChatListView,
+                    ClearChatButton = ClearAiChatButton,
+                    PendingImagesScroll = AiChatPendingImagesScroll,
+                    PendingImagesItems = AiChatPendingImagesItems,
+                    ChatInputBox = AiChatInputBox,
+                    ChatSendButton = AiChatSendButton,
+                    ChatAttachButton = AiChatAttachButton,
+                    ChatSendIcon = AiChatSendIcon,
+                    ChatSendBusyRing = AiChatSendBusyRing
+                },
+                new EntityAiPanelHooks
+                {
+                    GetActiveEntityId = () => _selectedCustomer?.Id,
+                    LoadWorkspace = id => AppServices.AiWorkspace.Load(id),
+                    SaveWorkspace = ws => AppServices.AiWorkspace.Save((CustomerAiWorkspaceData)ws),
+                    SummarizeAsync = id => AppServices.Backend.SummarizeCustomerWithAiAsync(id),
+                    ChatAsync = (id, history, prompt, imgs) => AppServices.Backend.CustomerAiChatAsync(id, history, prompt, imgs),
+                    UpdateContextLabels = UpdateAiContextLabels,
+                    PendingThinkingText = "正在查阅记录并思考回复...",
+                    LogPrefix = "客户 AI"
+                });
             _ = ThreePaneResizeController.Attach(
                 RootThreePaneGrid,
                 LeftPaneColumn, LeftPaneSplitter,
@@ -78,10 +119,13 @@ namespace Client.Pages
 
         private void CustomersPage_Loaded(object sender, RoutedEventArgs e)
         {
+            AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
+            AppServices.WeChat4Sync.SyncCompleted -= OnWeChatSyncCompleted;
             AppServices.Settings.ThemeChanged += OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted += OnWeChatSyncCompleted;
             UpdateRightTabVisuals();
             UpdateDirectionToggleVisuals();
+            ChatPageSharedHelper.AttachScrollNearBottomWatcher(MessagesListView, ClearNewMessagesJumpHint);
         }
 
         private void CustomersPage_Unloaded(object sender, RoutedEventArgs e)
@@ -104,14 +148,20 @@ namespace Client.Pages
             {
                 try
                 {
-                    await LoadCustomersAsync(_selectedCustomer?.Id);
-                    if (_selectedCustomer is not null)
-                    {
-                        await LoadCustomerMessagesAsync(_selectedCustomer);
-                    }
+                    _handledSyncRevision = AppServices.WeChat4Sync.SyncRevision;
+                    await RefreshAfterSyncAsync();
                 }
                 catch { }
             });
+        }
+
+        private async Task RefreshAfterSyncAsync()
+        {
+            await LoadCustomersAsync(_selectedCustomer?.Id, preserveCurrentDetail: true);
+            if (_selectedCustomer is not null)
+            {
+                await RefreshCustomerMessagesIncrementallyAsync(_selectedCustomer);
+            }
         }
 
         private async void SyncTagsNowButton_Click(object sender, RoutedEventArgs e)
@@ -123,11 +173,8 @@ namespace Client.Pages
                 var (ok, msg, _) = await AppServices.WeChat4Sync.SyncImportedTargetsAsync(
                     syncCustomers: true,
                     syncGroups: false);
-                await LoadCustomersAsync(_selectedCustomer?.Id);
-                if (_selectedCustomer is not null)
-                {
-                    await LoadCustomerMessagesAsync(_selectedCustomer);
-                }
+                _handledSyncRevision = AppServices.WeChat4Sync.SyncRevision;
+                await RefreshAfterSyncAsync();
                 if (!ok)
                 {
                     ShowProfileStatus(msg, isError: true);
@@ -154,7 +201,27 @@ namespace Client.Pages
         protected override async void OnNavigatedTo(NavigationEventArgs e)
         {
             base.OnNavigatedTo(e);
-            try { await LoadCustomersAsync(); }
+            try
+            {
+                if (!_hasLoadedOnce)
+                {
+                    _hasLoadedOnce = true;
+                    _handledSyncRevision = AppServices.WeChat4Sync.SyncRevision;
+                    long? lastId = AppServices.Settings.Current.LastSelectedCustomerId > 0
+                        ? AppServices.Settings.Current.LastSelectedCustomerId
+                        : null;
+                    await LoadCustomersAsync(lastId);
+                }
+                else if (_handledSyncRevision != AppServices.WeChat4Sync.SyncRevision)
+                {
+                    _handledSyncRevision = AppServices.WeChat4Sync.SyncRevision;
+                    await RefreshAfterSyncAsync();
+                }
+                else
+                {
+                    StartAvatarHydration(_allCustomers);
+                }
+            }
             catch (Exception ex) { AppServices.Logs.Error("UI", $"加载客户列表异常：{ex.Message}"); }
         }
 
@@ -164,15 +231,32 @@ namespace Client.Pages
             ApplyFilter(_selectedCustomer?.Id, forceReloadDetail: false);
         }
 
-        private async Task LoadCustomersAsync(long? selectId = null)
+        private async Task LoadCustomersAsync(long? selectId = null, bool preserveCurrentDetail = false)
         {
             try
             {
+                var prevAvatars = _allCustomers
+                    .Where(c => c.AvatarImage is not null && !string.IsNullOrWhiteSpace(c.AvatarUrl))
+                    .ToDictionary(c => c.Id, c => (c.AvatarUrl, c.AvatarImage!));
+
                 var items = await AppServices.Backend.ListAllCustomersAsync(2000);
+                foreach (var item in items)
+                {
+                    if (prevAvatars.TryGetValue(item.Id, out var cached) &&
+                        string.Equals(cached.AvatarUrl, item.AvatarUrl, StringComparison.Ordinal))
+                    {
+                        item.AvatarImage = cached.Item2;
+                    }
+                }
+
                 _allCustomers = items;
                 var validIds = _allCustomers.Select(c => c.Id).ToHashSet();
                 _selectedCustomerIds.RemoveWhere(id => !validIds.Contains(id));
-                ApplyFilter(selectId, forceReloadDetail: true);
+                ApplyFilter(selectId, forceReloadDetail: !preserveCurrentDetail);
+                if (preserveCurrentDetail && _selectedCustomer is not null)
+                {
+                    UpdateSelectedCustomerUi();
+                }
                 StartAvatarHydration(_allCustomers);
             }
             catch (Exception ex)
@@ -187,38 +271,23 @@ namespace Client.Pages
             _avatarHydrationCts?.Dispose();
             var cts = new CancellationTokenSource();
             _avatarHydrationCts = cts;
-            _ = HydrateCustomerAvatarsAsync(customers, cts.Token);
-        }
-
-        private async Task HydrateCustomerAvatarsAsync(List<CustomerDto> customers, CancellationToken ct)
-        {
-            try
-            {
-                foreach (var c in customers)
+            _ = ChatPageSharedHelper.HydrateAvatarsConcurrentlyAsync(
+                customers,
+                c => c.AvatarUrl,
+                c => c.AvatarImage is not null,
+                (c, img) =>
                 {
-                    if (ct.IsCancellationRequested) return;
-                    if (string.IsNullOrWhiteSpace(c.AvatarUrl) || c.AvatarImage is not null) continue;
-                    byte[]? bytes = await AppServices.Backend.DownloadAvatarBytesAsync(c.AvatarUrl, ct);
-                    if (bytes is null || ct.IsCancellationRequested) continue;
-                    var img = await AvatarImageService.BytesToBitmapImageAsync(bytes);
-                    if (img is not null && !ct.IsCancellationRequested)
+                    c.AvatarImage = img;
+                    NotifyCustomerRowAvatarUpdated(c.Id);
+                    if (_selectedCustomer?.Id == c.Id)
                     {
-                        c.AvatarImage = img;
-                        NotifyCustomerRowAvatarUpdated(c.Id);
-                        if (_selectedCustomer?.Id == c.Id)
-                        {
-                            ApplyProfileAvatarVisual(c);
-                        }
+                        ApplyProfileAvatarVisual(c);
                     }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                AppServices.Logs.Warn("UI", $"加载客户头像异常：{ex.Message}");
-            }
+                },
+                DispatcherQueue,
+                cts.Token,
+                maxConcurrency: 4,
+                logLabel: "客户头像");
         }
 
         private void NotifyCustomerRowAvatarUpdated(long customerId)
@@ -270,13 +339,33 @@ namespace Client.Pages
                 nextSelected ??= _filteredCustomers[0];
             }
 
+            bool isInitialRestore = _selectedCustomer is null
+                && preferredSelectId.HasValue
+                && nextSelected is not null
+                && nextSelected.Id == preferredSelectId.Value
+                && string.IsNullOrEmpty(q);
             bool selectionChanged = _selectedCustomer?.Id != nextSelected?.Id;
             _selectedCustomer = nextSelected;
+
+            if (isInitialRestore)
+            {
+                // Ensure the restored customer's tag group is visible in the left list on initial open.
+                _collapsedTags.Remove(GetPrimaryTag(nextSelected!));
+            }
 
             RebuildCustomerRows(expandAllForSearch: !string.IsNullOrEmpty(q));
             CustomersListView.Visibility = _filteredCustomers.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
             EmptyListHint.Visibility = _filteredCustomers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             UpdateCustomerMultiSelectSummary();
+
+            if (nextSelected is not null && (selectionChanged || forceReloadDetail))
+            {
+                var activeRow = _customerRows.FirstOrDefault(r => !r.IsGroupHeader && r.Customer?.Id == nextSelected.Id);
+                if (activeRow is not null)
+                {
+                    CustomersListView.ScrollIntoView(activeRow);
+                }
+            }
 
             if (selectionChanged || forceReloadDetail)
             {
@@ -425,12 +514,18 @@ namespace Client.Pages
         {
             SetMultiSelectMode(false);
             ClearPendingChatImage();
+            ClearNewMessagesJumpHint();
             ProfileStatusBanner.Visibility = Visibility.Collapsed;
             UpdateSelectedCustomerUi();
 
             if (selected is not null)
             {
-                LoadCustomerAiWorkspace(selected);
+                if (AppServices.Settings.Current.LastSelectedCustomerId != selected.Id)
+                {
+                    AppServices.Settings.Current.LastSelectedCustomerId = selected.Id;
+                    AppServices.Settings.Save();
+                }
+                _aiPanel.LoadForEntity(selected.Id);
                 try { await LoadCustomerMessagesAsync(selected); }
                 catch (Exception ex) { AppServices.Logs.Error("UI", $"加载聊天记录异常：{ex.Message}"); }
                 UpdateAiContextLabels();
@@ -440,8 +535,7 @@ namespace Client.Pages
                 _currentMessages.Clear();
                 _nextOlderMessageCursor = 0;
                 LoadOlderMessagesBar.Visibility = Visibility.Collapsed;
-                _aiChatMessages.Clear();
-                _currentAiWorkspace = null;
+                _aiPanel.ClearForNoEntity();
                 MultiSelectMessagesButton.IsEnabled = false;
                 EmptyChatTitle.Text = "暂无聊天记录";
                 EmptyChatHint.Visibility = Visibility.Visible;
@@ -927,6 +1021,116 @@ namespace Client.Pages
 
             StartChatImageHydration(_currentMessages.ToList());
             RefreshMessageListEmptyState(customer.DisplayName);
+            ClearNewMessagesJumpHint();
+            if (_currentMessages.Count > 0)
+            {
+                MessagesListView.ScrollIntoView(_currentMessages[^1]);
+            }
+        }
+
+        private async Task RefreshCustomerMessagesIncrementallyAsync(CustomerDto customer)
+        {
+            if (_currentMessages.Count == 0)
+            {
+                await LoadCustomerMessagesAsync(customer);
+                return;
+            }
+
+            bool wasNearBottom = ChatPageSharedHelper.IsListNearBottom(MessagesListView);
+            var res = await AppServices.Backend.ListCustomerMessagesAsync(customer.Id, limit: 100);
+            if (_selectedCustomer?.Id != customer.Id || !res.IsSuccess || res.Data is null) return;
+
+            var existingById = new Dictionary<long, ChatBubbleItem>();
+            long maxExistingServerId = 0;
+            foreach (var item in _currentMessages)
+            {
+                if (item.Id > 0)
+                {
+                    existingById[item.Id] = item;
+                    if (item.Id > maxExistingServerId) maxExistingServerId = item.Id;
+                }
+            }
+
+            var bubblesToHydrate = new List<ChatBubbleItem>();
+            int appendedCount = 0;
+
+            foreach (var m in res.Data.Items.AsEnumerable().Reverse())
+            {
+                if (SessionDeletedMessageIds.Contains(m.Id)) continue;
+
+                if (existingById.TryGetValue(m.Id, out var existing))
+                {
+                    // In-place media/content backfill without disturbing scroll position
+                    if (!SessionEditedMessages.ContainsKey(m.Id))
+                    {
+                        if (!string.IsNullOrWhiteSpace(m.Content) && !string.Equals(existing.Content, m.Content, StringComparison.Ordinal))
+                        {
+                            existing.Content = m.Content;
+                        }
+                        if (string.IsNullOrWhiteSpace(existing.AudioUrl) && !string.IsNullOrWhiteSpace(m.AudioUrl))
+                        {
+                            existing.AudioUrl = m.AudioUrl;
+                        }
+                        if (string.IsNullOrWhiteSpace(existing.ImageUrl) && !string.IsNullOrWhiteSpace(m.ImageUrl))
+                        {
+                            existing.ImageUrl = m.ImageUrl;
+                            bubblesToHydrate.Add(existing);
+                        }
+                    }
+                    continue;
+                }
+
+                if (m.Id > maxExistingServerId)
+                {
+                    var bubble = BuildCustomerBubbleItem(customer, m);
+                    _currentMessages.Add(bubble);
+                    if (!string.IsNullOrWhiteSpace(bubble.ImageUrl))
+                    {
+                        bubblesToHydrate.Add(bubble);
+                    }
+                    appendedCount++;
+                }
+            }
+
+            if (bubblesToHydrate.Count > 0)
+            {
+                _ = ChatPageSharedHelper.HydrateChatBubbleImagesConcurrentlyAsync(
+                    bubblesToHydrate,
+                    DispatcherQueue,
+                    _chatImageHydrationCts?.Token ?? CancellationToken.None,
+                    maxConcurrency: 4,
+                    logLabel: "聊天图片");
+            }
+
+            if (appendedCount > 0)
+            {
+                RefreshMessageListEmptyState(customer.DisplayName);
+                if (wasNearBottom)
+                {
+                    ClearNewMessagesJumpHint();
+                    MessagesListView.ScrollIntoView(_currentMessages[^1]);
+                }
+                else
+                {
+                    _unreadNewMessagesCount += appendedCount;
+                    NewMessagesJumpText.Text = $"有 {_unreadNewMessagesCount} 条新消息";
+                    NewMessagesJumpButton.Visibility = Visibility.Visible;
+                }
+            }
+        }
+
+        private void ClearNewMessagesJumpHint()
+        {
+            _unreadNewMessagesCount = 0;
+            if (NewMessagesJumpButton is not null)
+            {
+                NewMessagesJumpButton.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void NewMessagesJumpButton_Click(object sender, RoutedEventArgs e)
+        {
+            ClearNewMessagesJumpHint();
             if (_currentMessages.Count > 0)
             {
                 MessagesListView.ScrollIntoView(_currentMessages[^1]);
@@ -1029,35 +1233,13 @@ namespace Client.Pages
             _chatImageHydrationCts?.Dispose();
             var cts = new CancellationTokenSource();
             _chatImageHydrationCts = cts;
-            _ = HydrateChatBubbleImagesAsync(bubbles, cts.Token);
+            _ = ChatPageSharedHelper.HydrateChatBubbleImagesConcurrentlyAsync(
+                bubbles, DispatcherQueue, cts.Token, maxConcurrency: 4, logLabel: "聊天图片");
         }
 
-        private async Task HydrateChatBubbleImagesAsync(List<ChatBubbleItem> bubbles, CancellationToken ct)
-        {
-            try
-            {
-                foreach (var b in bubbles)
-                {
-                    if (ct.IsCancellationRequested) return;
-                    if (string.IsNullOrWhiteSpace(b.ImageUrl) || b.BubbleImage is not null) continue;
-                    byte[]? bytes = await AppServices.Backend.DownloadChatImageBytesAsync(b.ImageUrl, ct);
-                    if (bytes is null || ct.IsCancellationRequested) continue;
-                    var img = await ChatImageHelper.BytesToBitmapImageAsync(bytes);
-                    if (img is not null && !ct.IsCancellationRequested)
-                    {
-                        b.BubbleImageBytes = bytes;
-                        b.BubbleImage = img;
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                AppServices.Logs.Warn("UI", $"加载聊天图片异常：{ex.Message}");
-            }
-        }
+        private Task HydrateChatBubbleImagesAsync(List<ChatBubbleItem> bubbles, CancellationToken ct) =>
+            ChatPageSharedHelper.HydrateChatBubbleImagesConcurrentlyAsync(
+                bubbles, DispatcherQueue, ct, maxConcurrency: 4, logLabel: "聊天图片");
 
         // ---- Chat Bubble Right-Click & Multi-Select Delete ----
 
@@ -1139,83 +1321,33 @@ namespace Client.Pages
                 UpdateMultiSelectSummary();
                 return;
             }
-
-            byte[]? bytes = item.BubbleImageBytes;
-            if ((bytes is null || bytes.Length == 0) && !string.IsNullOrWhiteSpace(item.ImageUrl))
-            {
-                bytes = await AppServices.Backend.DownloadChatImageBytesAsync(item.ImageUrl);
-                if (bytes is { Length: > 0 })
-                {
-                    item.BubbleImageBytes = bytes;
-                }
-            }
-
-            if (bytes is { Length: > 0 })
-            {
-                string kind = item.IsVideoMessage ? "视频封面" : "聊天图片";
-                string title = _selectedCustomer is not null
-                    ? $"{_selectedCustomer.DisplayName} · {kind}"
-                    : $"{kind}查看器";
-                ImageViewerWindow.ShowImage(bytes, title);
-            }
+            await ChatPageSharedHelper.OpenBubbleImageViewerAsync(item, _selectedCustomer?.DisplayName, "聊天图片");
         }
 
-        private void BubbleContextFlyout_Opening(object sender, object e)
-        {
-            if (sender is not MenuFlyout flyout || flyout.Target is not FrameworkElement target || target.DataContext is not ChatBubbleItem item)
-            {
-                return;
-            }
-            foreach (var mi in flyout.Items.OfType<MenuFlyoutItem>())
-            {
-                if (mi.Tag as string == "VoiceTranscribe")
-                {
-                    mi.Visibility = item.VoiceTranscribeMenuVisibility;
-                    mi.Text = VoiceTranscriptionService.HasSavedTranscript(item.Content) ? "重新转文字" : "语音转文字";
-                }
-            }
-        }
+        private void BubbleContextFlyout_Opening(object sender, object e) =>
+            ChatPageSharedHelper.ConfigureBubbleContextFlyout(sender);
 
         private async void TranscribeVoiceBubbleMenuItem_Click(object sender, RoutedEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
-            if (string.IsNullOrWhiteSpace(item.AudioUrl))
-            {
-                ComposerHintText.Text = "该条语音暂无音频文件，请先点击顶部「刷新同步」。";
-                return;
-            }
-
             var customer = _selectedCustomer;
             ComposerHintText.Text = "正在将语音转为文字...";
-            var res = await VoiceTranscriptionService.TranscribeAsync(item.AudioUrl);
-            if (!res.Success || string.IsNullOrWhiteSpace(res.Text))
-            {
-                ComposerHintText.Text = res.ErrorMessage;
-                return;
-            }
-
-            string mergedContent = VoiceTranscriptionService.MergeTranscriptIntoContent(item.Content, res.Text);
-            item.Content = mergedContent;
-
-            if (item.Id > 0 && customer is not null)
-            {
-                string dir = item.IsOutgoing ? "outgoing" : "incoming";
-                var patchRes = await AppServices.Backend.UpdateCustomerMessageAsync(
-                    customer.Id, item.Id, dir, mergedContent, item.ImageUrl);
-                if (patchRes.IsSuccess)
-                {
-                    SessionEditedMessages.Remove(item.Id);
-                    ComposerHintText.Text = $"✓ 语音转文字已完成并永久保存（{res.EngineLabel}）。";
-                }
-                else
-                {
-                    ComposerHintText.Text = $"已识别文字，但保存到服务端失败：{patchRes.ErrorMessage}";
-                }
-            }
-            else
-            {
-                ComposerHintText.Text = $"✓ 语音转文字已完成（{res.EngineLabel}）。";
-            }
+            ComposerHintText.Text = await ChatPageSharedHelper.TranscribeVoiceBubbleAsync(
+                item,
+                customer is not null
+                    ? async mergedContent =>
+                    {
+                        string dir = item.IsOutgoing ? "outgoing" : "incoming";
+                        var patchRes = await AppServices.Backend.UpdateCustomerMessageAsync(
+                            customer.Id, item.Id, dir, mergedContent, item.ImageUrl);
+                        if (patchRes.IsSuccess)
+                        {
+                            SessionEditedMessages.Remove(item.Id);
+                            return (true, string.Empty);
+                        }
+                        return (false, patchRes.ErrorMessage);
+                    }
+                    : null);
         }
 
         private async void EditBubbleMenuItem_Click(object sender, RoutedEventArgs e)
@@ -1343,29 +1475,7 @@ namespace Client.Pages
         private async void CopyBubbleMenuItem_Click(object sender, RoutedEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
-            try
-            {
-                var pkg = new DataPackage();
-                if (!string.IsNullOrWhiteSpace(item.Content))
-                {
-                    pkg.SetText(item.Content);
-                    Clipboard.SetContent(pkg);
-                    ComposerHintText.Text = "已复制该条消息内容。";
-                }
-                else if (item.BubbleImageBytes is { Length: > 0 } bytes)
-                {
-                    var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
-                    await stream.WriteAsync(bytes.AsBuffer());
-                    stream.Seek(0);
-                    pkg.SetBitmap(Windows.Storage.Streams.RandomAccessStreamReference.CreateFromStream(stream));
-                    Clipboard.SetContent(pkg);
-                    ComposerHintText.Text = "已复制该条消息图片。";
-                }
-            }
-            catch (Exception ex)
-            {
-                ComposerHintText.Text = $"复制失败：{ex.Message}";
-            }
+            ComposerHintText.Text = await ChatPageSharedHelper.CopyBubbleToClipboardAsync(item);
         }
 
         private void MultiSelectFromBubbleMenuItem_Click(object sender, RoutedEventArgs e)
@@ -1416,7 +1526,13 @@ namespace Client.Pages
         {
             if (sender is Button btn && btn.Tag is string tab)
             {
-                _activeRightTab = tab;
+                string normalized = AppSettingsService.NormalizeRightTab(tab);
+                _activeRightTab = normalized;
+                if (!string.Equals(AppServices.Settings.Current.LastCustomerRightTab, normalized, StringComparison.OrdinalIgnoreCase))
+                {
+                    AppServices.Settings.Current.LastCustomerRightTab = normalized;
+                    AppServices.Settings.Save();
+                }
                 UpdateRightTabVisuals();
                 UpdateRightTabVisibility();
             }
@@ -1430,42 +1546,12 @@ namespace Client.Pages
             AiChatTabContainer.Visibility = hasCustomer && _activeRightTab == "aichat" ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private void UpdateRightTabVisuals()
-        {
-            var activeFg = (Brush)Application.Current.Resources["BrandPrimaryBrush"];
-            var inactiveFg = (Brush)Application.Current.Resources["TextSecondaryBrush"];
-            var transparent = new SolidColorBrush(Colors.Transparent);
-
-            ApplyTabVisual(RightTabProfileIcon, RightTabProfileText, RightTabProfileLine, _activeRightTab == "profile", activeFg, inactiveFg, transparent);
-            ApplyTabVisual(RightTabSummaryIcon, RightTabSummaryText, RightTabSummaryLine, _activeRightTab == "summary", activeFg, inactiveFg, transparent);
-            ApplyTabVisual(RightTabChatIcon, RightTabChatText, RightTabChatLine, _activeRightTab == "aichat", activeFg, inactiveFg, transparent);
-        }
-
-        private static void ApplyTabVisual(FontIcon icon, TextBlock text, Border line, bool active, Brush activeFg, Brush inactiveFg, Brush transparent)
-        {
-            icon.Foreground = active ? activeFg : inactiveFg;
-            text.Foreground = active ? activeFg : inactiveFg;
-            text.FontWeight = active ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
-            line.Background = active ? activeFg : transparent;
-        }
-
-        private void LoadCustomerAiWorkspace(CustomerDto customer)
-        {
-            _currentAiWorkspace = AppServices.AiWorkspace.Load(customer.Id);
-            _aiChatPendingImages.Clear();
-            UpdateCustomerAiPendingImagesUi();
-            AiSummaryErrorBanner.Visibility = Visibility.Collapsed;
-            AiSummaryNoticeText.Visibility = Visibility.Collapsed;
-            RenderAiSummaryState();
-
-            _aiChatMessages.Clear();
-            foreach (var msg in _currentAiWorkspace.Messages)
-            {
-                _aiChatMessages.Add(msg);
-            }
-            UpdateAiChatEmptyState();
-            UpdateAiContextLabels();
-        }
+        private void UpdateRightTabVisuals() =>
+            ChatPageSharedHelper.ApplyRightTabVisuals(
+                _activeRightTab,
+                RightTabProfileIcon, RightTabProfileText, RightTabProfileLine,
+                RightTabSummaryIcon, RightTabSummaryText, RightTabSummaryLine,
+                RightTabChatIcon, RightTabChatText, RightTabChatLine);
 
         private void UpdateAiContextLabels()
         {
@@ -1475,335 +1561,43 @@ namespace Client.Pages
             AiChatContextTitle.Text = $"{_selectedCustomer.DisplayName} · {msgCount} 条对话";
         }
 
-        private void RenderAiSummaryState()
-        {
-            bool hasSummary = _currentAiWorkspace is not null && !string.IsNullOrWhiteSpace(_currentAiWorkspace.SummaryText);
-            AiSummaryLoadingPanel.Visibility = Visibility.Collapsed;
-            AiSummarySpinner.IsActive = false;
-            AiSummaryEmptyPanel.Visibility = hasSummary ? Visibility.Collapsed : Visibility.Visible;
-            AiSummaryResultScroll.Visibility = hasSummary ? Visibility.Visible : Visibility.Collapsed;
-            AiSummaryFooterBar.Visibility = hasSummary ? Visibility.Visible : Visibility.Collapsed;
+        private async void GenerateAiSummaryButton_Click(object sender, RoutedEventArgs e) =>
+            await _aiPanel.GenerateSummaryAsync();
 
-            if (hasSummary && _currentAiWorkspace is not null)
-            {
-                AiSummaryMarkdownView.Text = _currentAiWorkspace.SummaryText;
-                AiSummaryTimeText.Text = string.IsNullOrWhiteSpace(_currentAiWorkspace.SummaryUpdatedAt)
-                    ? string.Empty
-                    : $"更新于 {_currentAiWorkspace.SummaryUpdatedAt}";
-            }
-        }
+        private void CopyAiSummaryButton_Click(object sender, RoutedEventArgs e) =>
+            _aiPanel.CopySummary();
 
-        private async void GenerateAiSummaryButton_Click(object sender, RoutedEventArgs e)
-        {
-            var customer = _selectedCustomer;
-            if (customer is null || _isAiSummaryBusy) return;
-
-            _isAiSummaryBusy = true;
-            AiSummaryErrorBanner.Visibility = Visibility.Collapsed;
-            AiSummaryNoticeText.Visibility = Visibility.Collapsed;
-            AiSummaryEmptyPanel.Visibility = Visibility.Collapsed;
-            AiSummaryResultScroll.Visibility = Visibility.Collapsed;
-            AiSummaryFooterBar.Visibility = Visibility.Collapsed;
-            AiSummaryLoadingPanel.Visibility = Visibility.Visible;
-            AiSummarySpinner.IsActive = true;
-
-            try
-            {
-                var res = await AppServices.Backend.SummarizeCustomerWithAiAsync(customer.Id);
-                if (_selectedCustomer?.Id != customer.Id) return;
-
-                if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.Summary))
-                {
-                    string timestamp = DateTime.Now.ToString("MM-dd HH:mm");
-                    _currentAiWorkspace ??= new CustomerAiWorkspaceData { CustomerId = customer.Id };
-                    _currentAiWorkspace.SummaryText = res.Data.Summary;
-                    _currentAiWorkspace.SummaryUpdatedAt = timestamp;
-                    _currentAiWorkspace.SummaryContextMeta = $"{res.Data.MessageCount} 条消息";
-                    AppServices.AiWorkspace.Save(_currentAiWorkspace);
-                }
-                else
-                {
-                    AiSummaryErrorText.Text = $"生成失败：{res.ErrorMessage}";
-                    AiSummaryErrorBanner.Visibility = Visibility.Visible;
-                    AiSummaryNoticeText.Foreground = (Brush)Application.Current.Resources["DangerTextBrush"];
-                    AiSummaryNoticeText.Text = $"生成失败：{res.ErrorMessage}";
-                    AiSummaryNoticeText.Visibility = Visibility.Visible;
-                }
-            }
-            catch (Exception ex)
-            {
-                if (_selectedCustomer?.Id == customer.Id)
-                {
-                    AiSummaryErrorText.Text = $"生成异常：{ex.Message}";
-                    AiSummaryErrorBanner.Visibility = Visibility.Visible;
-                }
-            }
-            finally
-            {
-                _isAiSummaryBusy = false;
-                if (_selectedCustomer?.Id == customer.Id)
-                {
-                    RenderAiSummaryState();
-                }
-            }
-        }
-
-        private void CopyAiSummaryButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_currentAiWorkspace is null || string.IsNullOrWhiteSpace(_currentAiWorkspace.SummaryText)) return;
-            try
-            {
-                var pkg = new DataPackage();
-                pkg.SetText(_currentAiWorkspace.SummaryText);
-                Clipboard.SetContent(pkg);
-                AiSummaryNoticeText.Foreground = (Brush)Application.Current.Resources["SuccessTextBrush"];
-                AiSummaryNoticeText.Text = "已复制到剪贴板";
-                AiSummaryNoticeText.Visibility = Visibility.Visible;
-            }
-            catch (Exception ex)
-            {
-                AiSummaryNoticeText.Foreground = (Brush)Application.Current.Resources["DangerTextBrush"];
-                AiSummaryNoticeText.Text = $"复制失败：{ex.Message}";
-                AiSummaryNoticeText.Visibility = Visibility.Visible;
-            }
-        }
-
-        private void CopyAiChatMessageMenuItem_Click(object sender, RoutedEventArgs e)
-        {
-            if ((sender as FrameworkElement)?.DataContext is not AiChatMessageItem item) return;
-            try
-            {
-                var pkg = new DataPackage();
-                pkg.SetText(item.Content);
-                Clipboard.SetContent(pkg);
-            }
-            catch (Exception ex)
-            {
-                AppServices.Logs.Warn("AI", $"复制回复失败：{ex.Message}");
-            }
-        }
-
-        private void UpdateAiChatEmptyState()
-        {
-            bool hasMsgs = _aiChatMessages.Count > 0;
-            AiChatEmptyPanel.Visibility = hasMsgs ? Visibility.Collapsed : Visibility.Visible;
-            AiChatListView.Visibility = hasMsgs ? Visibility.Visible : Visibility.Collapsed;
-            ClearAiChatButton.IsEnabled = hasMsgs && !_isAiChatBusy;
-        }
+        private void CopyAiChatMessageMenuItem_Click(object sender, RoutedEventArgs e) =>
+            _aiPanel.CopyChatMessage(sender);
 
         private async void AiQuickPrompt_Click(object sender, RoutedEventArgs e)
         {
             if (sender is Button btn && btn.Content is string prompt)
             {
-                await SendAiChatMessageAsync(prompt);
+                await _aiPanel.SendMessageAsync(prompt);
             }
         }
 
-        private void UpdateCustomerAiPendingImagesUi()
-        {
-            AiChatPendingImagesScroll.Visibility = _aiChatPendingImages.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        }
+        private async void UploadCustomerAiImage_Click(object sender, RoutedEventArgs e) =>
+            await _aiPanel.UploadImageAsync();
 
-        private async void UploadCustomerAiImage_Click(object sender, RoutedEventArgs e)
-        {
-            if (_isAiChatBusy || _aiChatPendingImages.Count >= AiImageAttachmentHelper.MaxAttachmentsPerMessage) return;
-            string? path = Win32WindowHelper.PickImageFilePath(AppServices.MainWindowHandle);
-            if (string.IsNullOrWhiteSpace(path)) return;
-            try
-            {
-                var item = await AiImageAttachmentHelper.TryCreateFromFileAsync(path);
-                if (item is not null)
-                {
-                    _aiChatPendingImages.Add(item);
-                    UpdateCustomerAiPendingImagesUi();
-                }
-            }
-            catch (Exception ex)
-            {
-                AppServices.Logs.Warn("AI", $"加载图片失败：{ex.Message}");
-            }
-        }
+        private async void PasteCustomerAiImage_Click(object sender, RoutedEventArgs e) =>
+            await _aiPanel.PasteClipboardImageAsync();
 
-        private async void PasteCustomerAiImage_Click(object sender, RoutedEventArgs e)
-        {
-            await TryAttachCustomerAiClipboardImageAsync();
-        }
+        private async void AiChatInputBox_Paste(object sender, TextControlPasteEventArgs e) =>
+            await _aiPanel.HandleInputPasteAsync(e);
 
-        private async void AiChatInputBox_Paste(object sender, TextControlPasteEventArgs e)
-        {
-            try
-            {
-                var content = Clipboard.GetContent();
-                if (content.Contains(StandardDataFormats.Bitmap))
-                {
-                    e.Handled = true;
-                    await TryAttachCustomerAiClipboardImageAsync();
-                }
-            }
-            catch
-            {
-            }
-        }
+        private void RemoveCustomerAiImage_Click(object sender, RoutedEventArgs e) =>
+            _aiPanel.RemovePendingImage(sender);
 
-        private async Task TryAttachCustomerAiClipboardImageAsync()
-        {
-            if (_isAiChatBusy || _aiChatPendingImages.Count >= AiImageAttachmentHelper.MaxAttachmentsPerMessage) return;
-            try
-            {
-                var item = await AiImageAttachmentHelper.TryCreateFromClipboardAsync();
-                if (item is not null)
-                {
-                    _aiChatPendingImages.Add(item);
-                    UpdateCustomerAiPendingImagesUi();
-                }
-            }
-            catch (Exception ex)
-            {
-                AppServices.Logs.Warn("AI", $"粘贴图片失败：{ex.Message}");
-            }
-        }
+        private async void AiChatSendButton_Click(object sender, RoutedEventArgs e) =>
+            await _aiPanel.SendMessageAsync(AiChatInputBox.Text);
 
-        private void RemoveCustomerAiImage_Click(object sender, RoutedEventArgs e)
-        {
-            if (sender is Button btn && btn.Tag is string id)
-            {
-                var target = _aiChatPendingImages.FirstOrDefault(x => x.Id == id);
-                if (target is not null)
-                {
-                    _aiChatPendingImages.Remove(target);
-                    UpdateCustomerAiPendingImagesUi();
-                }
-            }
-        }
+        private async void AiChatInputBox_KeyDown(object sender, KeyRoutedEventArgs e) =>
+            await _aiPanel.HandleInputKeyDownAsync(e);
 
-        private async void AiChatSendButton_Click(object sender, RoutedEventArgs e)
-        {
-            await SendAiChatMessageAsync(AiChatInputBox.Text);
-        }
-
-        private async void AiChatInputBox_KeyDown(object sender, KeyRoutedEventArgs e)
-        {
-            if (e.Key != VirtualKey.Enter) return;
-            var shiftState = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift);
-            if ((shiftState & CoreVirtualKeyStates.Down) == CoreVirtualKeyStates.Down) return;
-
-            e.Handled = true;
-            await SendAiChatMessageAsync(AiChatInputBox.Text);
-        }
-
-        private async Task SendAiChatMessageAsync(string rawText)
-        {
-            var customer = _selectedCustomer;
-            string prompt = rawText.Trim();
-            var attachedUris = _aiChatPendingImages.Select(x => x.DataUri).ToList();
-            if (customer is null || (string.IsNullOrEmpty(prompt) && attachedUris.Count == 0) || _isAiChatBusy) return;
-
-            _isAiChatBusy = true;
-            AiChatSendButton.IsEnabled = false;
-            AiChatAttachButton.IsEnabled = false;
-            AiChatSendIcon.Visibility = Visibility.Collapsed;
-            AiChatSendBusyRing.Visibility = Visibility.Visible;
-            AiChatSendBusyRing.IsActive = true;
-            ClearAiChatButton.IsEnabled = false;
-
-            AiChatInputBox.Text = string.Empty;
-            _aiChatPendingImages.Clear();
-            UpdateCustomerAiPendingImagesUi();
-
-            AiChatMessageItem? pendingBubble = null;
-            try
-            {
-                _currentAiWorkspace ??= new CustomerAiWorkspaceData { CustomerId = customer.Id };
-
-                var historyTurns = _currentAiWorkspace.Messages
-                    .TakeLast(12)
-                    .Select(m => new AiChatTurnDto { Role = m.Role, Content = m.Content })
-                    .ToList();
-
-                var userMsg = new AiChatMessageItem
-                {
-                    Role = "user",
-                    Content = prompt,
-                    Images = attachedUris,
-                    Timestamp = DateTime.Now.ToString("HH:mm")
-                };
-                _currentAiWorkspace.Messages.Add(userMsg);
-                _aiChatMessages.Add(userMsg);
-
-                pendingBubble = new AiChatMessageItem
-                {
-                    Role = "assistant",
-                    IsPending = true,
-                    Content = "正在查阅记录并思考回复..."
-                };
-                _aiChatMessages.Add(pendingBubble);
-
-                UpdateAiChatEmptyState();
-                AiChatListView.ScrollIntoView(pendingBubble);
-                AppServices.AiWorkspace.Save(_currentAiWorkspace);
-
-                var res = await AppServices.Backend.CustomerAiChatAsync(customer.Id, historyTurns, prompt, attachedUris);
-
-                if (pendingBubble is not null)
-                {
-                    _aiChatMessages.Remove(pendingBubble);
-                    pendingBubble = null;
-                }
-
-                if (_selectedCustomer?.Id != customer.Id) return;
-
-                string replyText = res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.Reply)
-                    ? res.Data.Reply
-                    : $"请求失败：{res.ErrorMessage}";
-
-                List<AiToolTraceDto> traceList = res.IsSuccess && res.Data?.ToolTrace is { Count: > 0 }
-                    ? res.Data.ToolTrace
-                    : [];
-                string traceText = traceList.Count > 0
-                    ? "已调用工具：" + string.Join(" · ", traceList.Select(t => string.IsNullOrWhiteSpace(t.Summary) ? t.SkillName : $"{t.SkillName}（{t.Summary}）"))
-                    : string.Empty;
-
-                var reply = new AiChatMessageItem
-                {
-                    Role = "assistant",
-                    Content = replyText,
-                    ToolTrace = traceList,
-                    ToolTraceSummary = traceText,
-                    Timestamp = DateTime.Now.ToString("HH:mm")
-                };
-                _currentAiWorkspace.Messages.Add(reply);
-                _aiChatMessages.Add(reply);
-                AiChatListView.ScrollIntoView(reply);
-                AppServices.AiWorkspace.Save(_currentAiWorkspace);
-            }
-            catch (Exception ex)
-            {
-                if (pendingBubble is not null)
-                {
-                    _aiChatMessages.Remove(pendingBubble);
-                }
-                AppServices.Logs.Error("AI", $"客户 AI 对话异常：{ex.Message}");
-            }
-            finally
-            {
-                _isAiChatBusy = false;
-                AiChatSendButton.IsEnabled = true;
-                AiChatAttachButton.IsEnabled = true;
-                AiChatSendBusyRing.IsActive = false;
-                AiChatSendBusyRing.Visibility = Visibility.Collapsed;
-                AiChatSendIcon.Visibility = Visibility.Visible;
-                UpdateAiChatEmptyState();
-            }
-        }
-
-        private void ClearAiChatButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_selectedCustomer is null || _currentAiWorkspace is null) return;
-            _currentAiWorkspace.Messages.Clear();
-            _aiChatMessages.Clear();
-            AppServices.AiWorkspace.Save(_currentAiWorkspace);
-            UpdateAiChatEmptyState();
-        }
+        private void ClearAiChatButton_Click(object sender, RoutedEventArgs e) =>
+            _aiPanel.ClearChat();
 
         private void DirToggleBtn_Click(object sender, RoutedEventArgs e)
         {

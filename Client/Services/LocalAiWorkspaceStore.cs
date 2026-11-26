@@ -50,7 +50,15 @@ namespace Client.Services
             : Visibility.Collapsed;
     }
 
-    public sealed class CustomerAiWorkspaceData
+    public interface IEntityAiWorkspace
+    {
+        string SummaryText { get; set; }
+        string SummaryUpdatedAt { get; set; }
+        string SummaryContextMeta { get; set; }
+        List<AiChatMessageItem> Messages { get; set; }
+    }
+
+    public sealed class CustomerAiWorkspaceData : IEntityAiWorkspace
     {
         public long CustomerId { get; set; }
         public string SummaryText { get; set; } = string.Empty;
@@ -59,7 +67,7 @@ namespace Client.Services
         public List<AiChatMessageItem> Messages { get; set; } = [];
     }
 
-    public sealed class GroupAiWorkspaceData
+    public sealed class GroupAiWorkspaceData : IEntityAiWorkspace
     {
         public long GroupId { get; set; }
         public string SummaryText { get; set; } = string.Empty;
@@ -142,13 +150,24 @@ namespace Client.Services
             return new GroupAiWorkspaceData { GroupId = groupId };
         }
 
+        private static void WriteFileAtomic(string path, string content)
+        {
+            string? dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+            string tmpPath = path + ".tmp";
+            File.WriteAllText(tmpPath, content);
+            File.Move(tmpPath, path, overwrite: true);
+        }
+
         public void SaveGroup(GroupAiWorkspaceData data)
         {
             try
             {
-                Directory.CreateDirectory(_rootDir);
                 string json = JsonSerializer.Serialize(data, JsonOpts);
-                File.WriteAllText(GetGroupFilePath(data.GroupId), json);
+                WriteFileAtomic(GetGroupFilePath(data.GroupId), json);
             }
             catch
             {
@@ -183,9 +202,8 @@ namespace Client.Services
         {
             try
             {
-                Directory.CreateDirectory(_rootDir);
                 string json = JsonSerializer.Serialize(data, JsonOpts);
-                File.WriteAllText(GetCustomerFilePath(data.CustomerId), json);
+                WriteFileAtomic(GetCustomerFilePath(data.CustomerId), json);
             }
             catch
             {
@@ -218,9 +236,8 @@ namespace Client.Services
         {
             try
             {
-                Directory.CreateDirectory(_rootDir);
                 string json = JsonSerializer.Serialize(sessions, JsonOpts);
-                File.WriteAllText(_agentSessionsPath, json);
+                WriteFileAtomic(_agentSessionsPath, json);
             }
             catch
             {

@@ -30,12 +30,14 @@ namespace Client.Services.WeChat4Db
         private Task? _patrolTask;
         private string _watchedDbDir = string.Empty;
         private string _lastDbFingerprint = string.Empty;
+        private long _syncRevision;
 
         public WeChat4Reader? ActiveReader => _activeReader;
         public WeChat4AccountDir? ActiveAccount => _activeAccount;
         public bool HasLoadedSnapshot => _activeReader is not null;
         public bool IsFileWatcherRunning => _watcherCts is not null && !_watcherCts.IsCancellationRequested;
         public string WatchedDbStoragePath => _watchedDbDir;
+        public long SyncRevision => Volatile.Read(ref _syncRevision);
         public int MonitoredCustomersCount { get; private set; }
         public int MonitoredGroupsCount { get; private set; }
         public DateTimeOffset? LastSyncAt { get; private set; }
@@ -808,6 +810,13 @@ namespace Client.Services.WeChat4Db
             report.FinishedAt = DateTimeOffset.Now;
             LastSyncAt = report.FinishedAt;
             LastReport = report;
+            if (report.CustomersCreated > 0 || report.CustomersUpdated > 0 ||
+                report.GroupsCreated > 0 || report.GroupsUpdated > 0 ||
+                report.CustomerMessagesInserted > 0 || report.GroupMessagesInserted > 0 ||
+                report.AvatarsUploaded > 0)
+            {
+                Interlocked.Increment(ref _syncRevision);
+            }
 
             onProgress?.Invoke(new WeChat4SyncProgress
             {

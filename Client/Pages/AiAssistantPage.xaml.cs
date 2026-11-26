@@ -5,7 +5,6 @@ using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 using Windows.UI.Core;
@@ -19,37 +18,27 @@ namespace Client.Pages
         private readonly ObservableCollection<AiImageAttachment> _pendingImages = [];
 
         private AgentSessionData? _activeSession;
+        private bool _hasLoadedOnce;
         private bool _isBusy;
         private bool _suppressSelectionChanged;
 
         public AiAssistantPage()
         {
             InitializeComponent();
+            NavigationCacheMode = Microsoft.UI.Xaml.Navigation.NavigationCacheMode.Required;
             SessionsListView.ItemsSource = _sessions;
             AgentChatListView.ItemsSource = _messages;
             PendingImagesItemsControl.ItemsSource = _pendingImages;
 
             Loaded += AiAssistantPage_Loaded;
-            Unloaded += AiAssistantPage_Unloaded;
         }
 
         private async void AiAssistantPage_Loaded(object sender, RoutedEventArgs e)
         {
-            Loaded -= AiAssistantPage_Loaded;
-            AppServices.Settings.ThemeChanged += OnThemeChanged;
-
+            if (_hasLoadedOnce) return;
+            _hasLoadedOnce = true;
             LoadLocalSessions();
-            await RefreshServerAiStatusAsync();
-        }
-
-        private void AiAssistantPage_Unloaded(object sender, RoutedEventArgs e)
-        {
-            AppServices.Settings.ThemeChanged -= OnThemeChanged;
-        }
-
-        private void OnThemeChanged(bool isDark)
-        {
-            _ = DispatcherQueue.TryEnqueue(async () => await RefreshServerAiStatusAsync());
+            await CheckServerAiConfiguredAsync();
         }
 
         private void LoadLocalSessions()
@@ -72,13 +61,26 @@ namespace Client.Pages
                 PersistSessions();
             }
 
-            SelectSession(_sessions[0]);
+            string lastSessionId = AppServices.Settings.Current.LastAgentSessionId;
+            var initialTarget = !string.IsNullOrWhiteSpace(lastSessionId)
+                ? _sessions.FirstOrDefault(s => string.Equals(s.Id, lastSessionId, StringComparison.Ordinal))
+                : null;
+            SelectSession(initialTarget ?? _sessions[0]);
+            if (initialTarget is not null)
+            {
+                SessionsListView.ScrollIntoView(initialTarget);
+            }
             UpdateSessionCount();
         }
 
         private void SelectSession(AgentSessionData session)
         {
             _activeSession = session;
+            if (!string.Equals(AppServices.Settings.Current.LastAgentSessionId, session.Id, StringComparison.Ordinal))
+            {
+                AppServices.Settings.Current.LastAgentSessionId = session.Id;
+                AppServices.Settings.Save();
+            }
             _suppressSelectionChanged = true;
             SessionsListView.SelectedItem = session;
             _suppressSelectionChanged = false;
@@ -128,37 +130,16 @@ namespace Client.Pages
             }
         }
 
-        private async Task RefreshServerAiStatusAsync()
+        private async Task CheckServerAiConfiguredAsync()
         {
             try
             {
                 var res = await AppServices.Backend.GetAiStatusAsync();
-                if (res.IsSuccess && res.Data is not null)
-                {
-                    if (res.Data.Configured)
-                    {
-                        AiStatusDot.Fill = (Brush)Application.Current.Resources["SuccessTextBrush"];
-                        AiStatusTitleText.Text = "AI 助手就绪";
-                        UnconfiguredHintBanner.Visibility = Visibility.Collapsed;
-                    }
-                    else
-                    {
-                        AiStatusDot.Fill = (Brush)Application.Current.Resources["WarningTextBrush"];
-                        AiStatusTitleText.Text = "AI 暂未启用";
-                        UnconfiguredHintBanner.Visibility = Visibility.Visible;
-                    }
-                }
-                else
-                {
-                    AiStatusDot.Fill = (Brush)Application.Current.Resources["DangerTextBrush"];
-                    AiStatusTitleText.Text = "服务未连接";
-                    UnconfiguredHintBanner.Visibility = Visibility.Visible;
-                }
+                bool configured = res.IsSuccess && res.Data is not null && res.Data.Configured;
+                UnconfiguredHintBanner.Visibility = configured ? Visibility.Collapsed : Visibility.Visible;
             }
             catch
             {
-                AiStatusDot.Fill = (Brush)Application.Current.Resources["DangerTextBrush"];
-                AiStatusTitleText.Text = "状态检测异常";
             }
         }
 
@@ -295,11 +276,6 @@ namespace Client.Pages
             RefreshSessionRowInList(_activeSession);
             PersistSessions();
             UpdateChatVisibility();
-        }
-
-        private async void RefreshStatusButton_Click(object sender, RoutedEventArgs e)
-        {
-            await RefreshServerAiStatusAsync();
         }
 
         // ---- Image Attachment (Local Picker & Clipboard Ctrl+V) ----
@@ -485,9 +461,7 @@ namespace Client.Pages
                     if (res.Data.ToolTrace is { Count: > 0 })
                     {
                         traceList = res.Data.ToolTrace;
-                        var labels = res.Data.ToolTrace
-                            .Select(t => string.IsNullOrWhiteSpace(t.Summary) ? t.SkillName : $"{t.SkillName}（{t.Summary}）");
-                        traceText = "已调用工具：" + string.Join(" · ", labels);
+                        traceText = ChatPageSharedHelper.FormatToolTraceSummary(res.Data.ToolTrace);
                     }
                 }
                 else

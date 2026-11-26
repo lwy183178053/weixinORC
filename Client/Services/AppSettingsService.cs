@@ -20,6 +20,12 @@ namespace Client.Services
         public int WeChatSyncMaxMessagesPerSession { get; set; } = 500;
         public bool WeChatSyncIncludeImages { get; set; } = true;
         public bool WeChatSyncIncludeAvatars { get; set; } = true;
+        public string LastWorkbenchSection { get; set; } = "customers";
+        public long LastSelectedCustomerId { get; set; }
+        public string LastCustomerRightTab { get; set; } = "profile";
+        public long LastSelectedGroupId { get; set; }
+        public string LastGroupRightTab { get; set; } = "profile";
+        public string LastAgentSessionId { get; set; } = string.Empty;
     }
 
     public sealed class AppSettingsService
@@ -35,6 +41,17 @@ namespace Client.Services
             "violet", "peach", "blue", "amber", "sage"
         };
 
+        private static readonly HashSet<string> ValidWorkbenchSections = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "customers", "groups", "ai", "ocr"
+        };
+
+        private static readonly HashSet<string> ValidRightTabs = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "profile", "summary", "aichat"
+        };
+
+        private readonly object _saveLock = new();
         private readonly string _settingsPath;
 
         public AppSettingsData Current { get; private set; } = new();
@@ -85,23 +102,42 @@ namespace Client.Services
             Current.CollapsedCustomerTags ??= [];
             Current.WeChatSyncSelectedTags ??= [];
             if (Current.WeChatAutoSyncIntervalMinutes < 1) Current.WeChatAutoSyncIntervalMinutes = 5;
+            Current.LastWorkbenchSection = NormalizeWorkbenchSection(Current.LastWorkbenchSection);
+            Current.LastCustomerRightTab = NormalizeRightTab(Current.LastCustomerRightTab);
+            Current.LastGroupRightTab = NormalizeRightTab(Current.LastGroupRightTab);
+            Current.LastAgentSessionId ??= string.Empty;
         }
+
+        public static string NormalizeWorkbenchSection(string? tag) =>
+            !string.IsNullOrWhiteSpace(tag) && ValidWorkbenchSections.Contains(tag)
+                ? tag.ToLowerInvariant()
+                : "customers";
+
+        public static string NormalizeRightTab(string? tab) =>
+            !string.IsNullOrWhiteSpace(tab) && ValidRightTabs.Contains(tab)
+                ? tab.ToLowerInvariant()
+                : "profile";
 
         public void Save()
         {
-            try
+            lock (_saveLock)
             {
-                string? dir = Path.GetDirectoryName(_settingsPath);
-                if (!string.IsNullOrEmpty(dir))
+                try
                 {
-                    Directory.CreateDirectory(dir);
+                    string? dir = Path.GetDirectoryName(_settingsPath);
+                    if (!string.IsNullOrEmpty(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
+                    string json = JsonSerializer.Serialize(Current, JsonOpts);
+                    string tmpPath = _settingsPath + ".tmp";
+                    File.WriteAllText(tmpPath, json);
+                    File.Move(tmpPath, _settingsPath, overwrite: true);
                 }
-                string json = JsonSerializer.Serialize(Current, JsonOpts);
-                File.WriteAllText(_settingsPath, json);
-            }
-            catch
-            {
-                // Best-effort persistence
+                catch
+                {
+                    // Best-effort persistence
+                }
             }
         }
 

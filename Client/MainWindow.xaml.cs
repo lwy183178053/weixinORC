@@ -20,6 +20,9 @@ namespace Client
 
         private uint _lastAppliedDpi;
         private bool _isLoginMode = true;
+        private bool _isClosed;
+        private int _transitionVersion;
+        private Storyboard? _revealStoryboard;
 
         public static MainWindow? Instance { get; private set; }
 
@@ -30,6 +33,9 @@ namespace Client
 
             AppServices.MainWindowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
             try { AppServices.Backend.SetBaseUrl(AppServices.Settings.Current.BackendUrl); } catch { }
+
+            Closed += (_, _) => _isClosed = true;
+            RootFrame.ContentTransitions = [];
 
             ConfigureTitleBar();
             AppServices.Settings.ApplyTheme(AppServices.Settings.IsDarkMode, save: false);
@@ -151,42 +157,149 @@ namespace Client
 
         public void ShowLoginView()
         {
+            int version = ++_transitionVersion;
             _isLoginMode = true;
+
+            bool cloaked = BeginCloakedTransition();
             ApplyWindowConstraints();
             ResizeClientAndCenter(LoginLogicalWidth, LoginLogicalHeight);
-            RootFrame.Navigate(typeof(LoginPage), null, new EntranceNavigationTransitionInfo());
+            RootFrame.Navigate(typeof(LoginPage), null, new SuppressNavigationTransitionInfo());
+            _ = FinishCloakedTransitionAsync(version, LoginLogicalWidth, LoginLogicalHeight, cloaked, logEnterWorkbench: false);
         }
 
         public void EnterWorkbench()
         {
+            int version = ++_transitionVersion;
             _isLoginMode = false;
+
+            bool cloaked = BeginCloakedTransition();
             ApplyWindowConstraints();
             ResizeClientAndCenter(DefaultLogicalWidth, DefaultLogicalHeight);
-            RootFrame.Navigate(typeof(WorkbenchPage), null, new DrillInNavigationTransitionInfo());
+            RootFrame.Navigate(typeof(WorkbenchPage), null, new SuppressNavigationTransitionInfo());
+            _ = FinishCloakedTransitionAsync(version, DefaultLogicalWidth, DefaultLogicalHeight, cloaked, logEnterWorkbench: true);
+        }
 
-            // Verify the final client size after navigation & title-bar layout settle;
-            // do NOT re-assign PreferredMinimumWidth after resizing so OverlappedPresenter never snaps back.
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        private bool BeginCloakedTransition()
+        {
+            _revealStoryboard?.Stop();
+            // Cloak the DWM surface BEFORE resizing so the outgoing page (e.g. LoginPage)
+            // is never stretched to the new dimensions and cold startup never flashes an oversized frame.
+            bool cloaked = Win32WindowHelper.SetWindowCloaked(AppServices.MainWindowHandle, true);
+            if (!cloaked)
             {
-                if (_isLoginMode)
+                // Fallback when DWM cloaking is unavailable: hide content during resize.
+                RootFrame.Opacity = 0;
+            }
+            return cloaked;
+        }
+
+        private async Task FinishCloakedTransitionAsync(int version, int targetLogicalWidth, int targetLogicalHeight, bool cloaked, bool logEnterWorkbench)
+        {
+            try
+            {
+                if (RootFrame.Content is FrameworkElement page && !page.IsLoaded)
+                {
+                    var loadedTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    void OnPageLoaded(object sender, RoutedEventArgs e)
+                    {
+                        page.Loaded -= OnPageLoaded;
+                        loadedTcs.TrySetResult(true);
+                    }
+
+                    page.Loaded += OnPageLoaded;
+                    await Task.WhenAny(loadedTcs.Task, Task.Delay(350));
+                    page.Loaded -= OnPageLoaded;
+                }
+
+                if (_isClosed || version != _transitionVersion)
                 {
                     return;
                 }
 
-                var (targetW, targetH) = ComputeTargetClientPixels(DefaultLogicalWidth, DefaultLogicalHeight);
-                var currentClient = AppWindow.ClientSize;
-                if (Math.Abs(currentClient.Width - targetW) > 4 || Math.Abs(currentClient.Height - targetH) > 4)
+                // Let Page.Loaded handlers (SetDragRegion, initial tab navigation, layout pass) complete first.
+                await WaitForLowPriorityUiTurnAsync();
+                if (_isClosed || version != _transitionVersion)
                 {
-                    ResizeClientAndCenter(DefaultLogicalWidth, DefaultLogicalHeight);
+                    return;
                 }
 
-                uint dpi = Win32WindowHelper.GetDpiForWindow(AppServices.MainWindowHandle);
-                var clientSize = AppWindow.ClientSize;
-                var outerSize = AppWindow.Size;
-                AppServices.Logs.Info(
-                    "SYS",
-                    $"进入工作台：目标 {DefaultLogicalWidth}x{DefaultLogicalHeight} (DPI {dpi})，实际客户区 {clientSize.Width}x{clientSize.Height}，窗口外框 {outerSize.Width}x{outerSize.Height}。");
-            });
+                // Verify final client size while STILL cloaked so the window never visibly jumps twice.
+                var (targetW, targetH) = ComputeTargetClientPixels(targetLogicalWidth, targetLogicalHeight);
+                var currentClient = AppWindow.ClientSize;
+                if (Math.Abs(currentClient.Width - targetW) > 3 || Math.Abs(currentClient.Height - targetH) > 3)
+                {
+                    ResizeClientAndCenter(targetLogicalWidth, targetLogicalHeight);
+                    await WaitForLowPriorityUiTurnAsync();
+                }
+
+                if (_isClosed || version != _transitionVersion)
+                {
+                    return;
+                }
+
+                // Give DWM ~2 frames to commit the fully painted page surface before uncloaking.
+                await Task.Delay(32);
+                if (_isClosed || version != _transitionVersion)
+                {
+                    return;
+                }
+
+                if (logEnterWorkbench && !_isLoginMode)
+                {
+                    uint dpi = Win32WindowHelper.GetDpiForWindow(AppServices.MainWindowHandle);
+                    var clientSize = AppWindow.ClientSize;
+                    var outerSize = AppWindow.Size;
+                    AppServices.Logs.Info(
+                        "SYS",
+                        $"进入工作台：目标 {DefaultLogicalWidth}x{DefaultLogicalHeight} (DPI {dpi})，实际客户区 {clientSize.Width}x{clientSize.Height}，窗口外框 {outerSize.Width}x{outerSize.Height}。");
+                }
+
+                if (cloaked)
+                {
+                    Win32WindowHelper.SetWindowCloaked(AppServices.MainWindowHandle, false);
+                }
+
+                PlayRevealFadeIn(cloaked ? 0.90 : 0.0);
+            }
+            catch
+            {
+                if (!_isClosed && version == _transitionVersion)
+                {
+                    Win32WindowHelper.SetWindowCloaked(AppServices.MainWindowHandle, false);
+                    RootFrame.Opacity = 1;
+                }
+            }
+        }
+
+        private Task WaitForLowPriorityUiTurnAsync()
+        {
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => tcs.TrySetResult(true)))
+            {
+                tcs.TrySetResult(true);
+            }
+            return tcs.Task;
+        }
+
+        private void PlayRevealFadeIn(double fromOpacity)
+        {
+            _revealStoryboard?.Stop();
+            RootFrame.Opacity = fromOpacity;
+            var anim = new DoubleAnimation
+            {
+                From = fromOpacity,
+                To = 1,
+                Duration = new Duration(TimeSpan.FromMilliseconds(95)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(anim, RootFrame);
+            Storyboard.SetTargetProperty(anim, "Opacity");
+
+            var sb = new Storyboard();
+            sb.Children.Add(anim);
+            sb.Completed += (_, _) => RootFrame.Opacity = 1;
+            _revealStoryboard = sb;
+            sb.Begin();
         }
 
         private (int width, int height) ComputeTargetClientPixels(int logicalWidth, int logicalHeight)

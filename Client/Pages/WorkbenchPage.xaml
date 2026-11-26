@@ -180,18 +180,6 @@
                                 <TextBlock x:Name="RailOcrLabel" HorizontalAlignment="Center" FontSize="9.5" Text="微信监听" />
                             </StackPanel>
                         </Button>
-
-                        <Button
-                            x:Name="RailGuideButton"
-                            Click="RailNav_Click"
-                            Style="{StaticResource RailButtonStyle}"
-                            Tag="guide"
-                            ToolTipService.ToolTip="使用介绍">
-                            <StackPanel HorizontalAlignment="Center" Spacing="2">
-                                <FontIcon x:Name="RailGuideIcon" FontSize="15" Glyph="&#xE897;" />
-                                <TextBlock x:Name="RailGuideLabel" HorizontalAlignment="Center" FontSize="9.5" Text="使用介绍" />
-                            </StackPanel>
-                        </Button>
                     </StackPanel>
 
                     <!-- Bottom Utility Cluster: Logout -> Theme Toggle -> Settings -->

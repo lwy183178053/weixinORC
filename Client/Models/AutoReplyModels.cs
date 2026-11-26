@@ -120,13 +120,14 @@ namespace Client.Models
     {
         public bool GlobalEnabled { get; set; } = true;
         public bool AutoSendAfterPaste { get; set; } = true;
+        public bool PreOpenGroupWhileGenerating { get; set; } = true;
         public bool ShowClickOverlay { get; set; } = true;
         public bool VerifyGroupTitleBeforePaste { get; set; } = true;
         public bool IgnoreAtAll { get; set; } = true;
         public bool PrefixMentionSender { get; set; } = true;
         public bool RestoreClipboardAfterSend { get; set; } = true;
         public bool SlowStableMode { get; set; } = false;
-        public int CooldownSecondsPerGroup { get; set; } = 15;
+        public int CooldownSecondsPerGroup { get; set; } = 10;
         public int MaxMessageAgeSeconds { get; set; } = 180;
         public int MaxReplyChars { get; set; } = 260;
         public string ExtraTriggerNames { get; set; } = string.Empty;

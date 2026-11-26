@@ -27,10 +27,13 @@ namespace Client.Services.WeChat4Db
         private FileSystemWatcher? _dbWatcher;
         private CancellationTokenSource? _watcherCts;
         private CancellationTokenSource? _debounceCts;
+        private DateTimeOffset _debounceBurstStartedUtc = DateTimeOffset.MinValue;
         private Task? _patrolTask;
         private string _watchedDbDir = string.Empty;
         private string _lastDbFingerprint = string.Empty;
         private DateTimeOffset _activeAccountLastModified = DateTimeOffset.MinValue;
+        private DateTimeOffset _lastSelfProfileSyncUtc = DateTimeOffset.MinValue;
+        private string _lastSelfProfileSyncWxid = string.Empty;
         private long _syncRevision;
         private readonly HashSet<string> _uploadedSelfAvatarWxids = new(StringComparer.OrdinalIgnoreCase);
         private List<WeChatAccountDto> _knownAccounts = [];
@@ -93,6 +96,9 @@ namespace Client.Services.WeChat4Db
             _knownAccounts = [];
             _uploadedSelfAvatarWxids.Clear();
             _lastSyncedSessionTime.Clear();
+            _lastSelfProfileSyncUtc = DateTimeOffset.MinValue;
+            _lastSelfProfileSyncWxid = string.Empty;
+            _debounceBurstStartedUtc = DateTimeOffset.MinValue;
             AccountsUpdated?.Invoke();
         }
 
@@ -710,45 +716,8 @@ namespace Client.Services.WeChat4Db
                 }
             }
 
-            // 3. Sync customer chat messages (skip unchanged sessions during background auto-sync via SessionTable timestamp)
-            if (options.ImportCustomerMessages && customerIdByWxid.Count > 0)
-            {
-                var friendsWithMsgs = selectedFriends
-                    .Where(f => (f.HasMessages || selectedFriends.Count <= 25) && customerIdByWxid.ContainsKey(f.Username))
-                    .Where(f => !isBackgroundAuto ||
-                                f.LastMessageTime <= 0 ||
-                                !_lastSyncedSessionTime.TryGetValue($"{ownerWxid}|{f.Username}", out long prevTs) ||
-                                f.LastMessageTime > prevTs)
-                    .ToList();
-                for (int i = 0; i < friendsWithMsgs.Count; i++)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    var f = friendsWithMsgs[i];
-                    var (custId, _) = customerIdByWxid[f.Username];
-
-                    onProgress?.Invoke(new WeChat4SyncProgress
-                    {
-                        Stage = "customer_messages",
-                        Message = $"同步私聊记录：{f.DisplayName} ({i + 1}/{friendsWithMsgs.Count})...",
-                        Percent = 46 + (int)(20.0 * (i + 1) / Math.Max(1, friendsWithMsgs.Count))
-                    });
-
-                    var msgs = await Task.Run(
-                        () => reader.ReadMessages(f.Username, options.MaxMessagesPerSession, options.SkipSystemMessages, ct),
-                        ct);
-
-                    await UploadAndSyncMessagesBatchAsync(
-                        reader, f.Username, msgs, isGroup: false, targetId: custId,
-                        syncImages: options.SyncChatImages, report: report, ct: ct);
-
-                    if (f.LastMessageTime > 0)
-                    {
-                        _lastSyncedSessionTime[$"{ownerWxid}|{f.Username}"] = f.LastMessageTime;
-                    }
-                }
-            }
-
-            // 4. Sync group chat messages (skip unchanged sessions during background auto-sync via SessionTable timestamp)
+            // 3. Sync group chat messages FIRST during background auto-sync so group @mention auto-reply
+            //    fires immediately without waiting behind unrelated private chat uploads.
             if (options.ImportGroupMessages && groupIdByKey.Count > 0)
             {
                 var groupsWithMsgs = selectedGroups
@@ -768,7 +737,7 @@ namespace Client.Services.WeChat4Db
                     {
                         Stage = "group_messages",
                         Message = $"同步群聊记录：{g.GroupName} ({i + 1}/{groupsWithMsgs.Count})...",
-                        Percent = 66 + (int)(18.0 * (i + 1) / Math.Max(1, groupsWithMsgs.Count))
+                        Percent = 46 + (int)(20.0 * (i + 1) / Math.Max(1, groupsWithMsgs.Count))
                     });
 
                     var msgs = await Task.Run(
@@ -805,6 +774,44 @@ namespace Client.Services.WeChat4Db
                     if (g.LastMessageTime > 0)
                     {
                         _lastSyncedSessionTime[$"{ownerWxid}|{g.Username}"] = g.LastMessageTime;
+                    }
+                }
+            }
+
+            // 4. Sync customer chat messages (skip unchanged sessions during background auto-sync via SessionTable timestamp)
+            if (options.ImportCustomerMessages && customerIdByWxid.Count > 0)
+            {
+                var friendsWithMsgs = selectedFriends
+                    .Where(f => (f.HasMessages || selectedFriends.Count <= 25) && customerIdByWxid.ContainsKey(f.Username))
+                    .Where(f => !isBackgroundAuto ||
+                                f.LastMessageTime <= 0 ||
+                                !_lastSyncedSessionTime.TryGetValue($"{ownerWxid}|{f.Username}", out long prevTs) ||
+                                f.LastMessageTime > prevTs)
+                    .ToList();
+                for (int i = 0; i < friendsWithMsgs.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var f = friendsWithMsgs[i];
+                    var (custId, _) = customerIdByWxid[f.Username];
+
+                    onProgress?.Invoke(new WeChat4SyncProgress
+                    {
+                        Stage = "customer_messages",
+                        Message = $"同步私聊记录：{f.DisplayName} ({i + 1}/{friendsWithMsgs.Count})...",
+                        Percent = 66 + (int)(18.0 * (i + 1) / Math.Max(1, friendsWithMsgs.Count))
+                    });
+
+                    var msgs = await Task.Run(
+                        () => reader.ReadMessages(f.Username, options.MaxMessagesPerSession, options.SkipSystemMessages, ct),
+                        ct);
+
+                    await UploadAndSyncMessagesBatchAsync(
+                        reader, f.Username, msgs, isGroup: false, targetId: custId,
+                        syncImages: options.SyncChatImages, report: report, ct: ct);
+
+                    if (f.LastMessageTime > 0)
+                    {
+                        _lastSyncedSessionTime[$"{ownerWxid}|{f.Username}"] = f.LastMessageTime;
                     }
                 }
             }
@@ -950,7 +957,7 @@ namespace Client.Services.WeChat4Db
                     return (false, loaded.ErrorMessage, CurrentOnlineAccount);
                 }
 
-                var synced = await SyncSelfWeChatAccountUnlockedAsync(_activeReader, ct);
+                var synced = await SyncSelfWeChatAccountUnlockedAsync(_activeReader, ct, force: true);
                 await RefreshKnownAccountsInternalAsync(ct);
 
                 if (switched && AppServices.Settings.Current.WeChatAutoSyncEnabled)
@@ -978,11 +985,19 @@ namespace Client.Services.WeChat4Db
             }
         }
 
-        private async Task<WeChatAccountDto?> SyncSelfWeChatAccountUnlockedAsync(WeChat4Reader reader, CancellationToken ct)
+        private async Task<WeChatAccountDto?> SyncSelfWeChatAccountUnlockedAsync(WeChat4Reader reader, CancellationToken ct, bool force = false)
         {
             if (string.IsNullOrWhiteSpace(reader.SelfWxid) || !AppServices.Backend.IsAuthenticated)
             {
                 return null;
+            }
+
+            if (!force &&
+                string.Equals(_lastSelfProfileSyncWxid, reader.SelfWxid, StringComparison.OrdinalIgnoreCase) &&
+                (DateTimeOffset.UtcNow - _lastSelfProfileSyncUtc).TotalSeconds < 60 &&
+                _uploadedSelfAvatarWxids.Contains(reader.SelfWxid))
+            {
+                return CurrentOnlineAccount;
             }
 
             try
@@ -1006,6 +1021,8 @@ namespace Client.Services.WeChat4Db
 
                 if (!upRes.IsSuccess || upRes.Data is null) return null;
                 var acc = upRes.Data;
+                _lastSelfProfileSyncWxid = reader.SelfWxid;
+                _lastSelfProfileSyncUtc = DateTimeOffset.UtcNow;
 
                 // Upload self avatar when missing or on first detection in this app session
                 if (string.IsNullOrWhiteSpace(acc.AvatarUrl) || !_uploadedSelfAvatarWxids.Contains(reader.SelfWxid))
@@ -1487,10 +1504,22 @@ namespace Client.Services.WeChat4Db
         {
             CancellationToken rootToken;
             CancellationTokenSource debounceCts;
+            TimeSpan delay;
             lock (_watcherLock)
             {
                 if (_watcherCts is null || _watcherCts.IsCancellationRequested) return;
                 rootToken = _watcherCts.Token;
+
+                var now = DateTimeOffset.UtcNow;
+                if (_debounceBurstStartedUtc == DateTimeOffset.MinValue)
+                {
+                    _debounceBurstStartedUtc = now;
+                }
+
+                // Short 1.2s quiet debounce + 2.8s max-wait cap so busy chats never starve auto-reply detection
+                double elapsedMs = (now - _debounceBurstStartedUtc).TotalMilliseconds;
+                double remainingCapMs = Math.Max(150, 2800 - elapsedMs);
+                delay = TimeSpan.FromMilliseconds(Math.Min(1200, remainingCapMs));
 
                 if (_debounceCts is not null)
                 {
@@ -1505,8 +1534,11 @@ namespace Client.Services.WeChat4Db
             {
                 try
                 {
-                    // Wait 4 seconds for WeChat to finish writing burst messages / WAL frames
-                    await Task.Delay(TimeSpan.FromSeconds(4), debounceCts.Token);
+                    await Task.Delay(delay, debounceCts.Token);
+                    lock (_watcherLock)
+                    {
+                        _debounceBurstStartedUtc = DateTimeOffset.MinValue;
+                    }
                     if (!AppServices.Backend.IsAuthenticated) return;
 
                     _lastDbFingerprint = ComputeDbStorageFingerprint(_watchedDbDir);

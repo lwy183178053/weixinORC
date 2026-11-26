@@ -138,6 +138,7 @@ namespace Client.Pages
                 CustomPromptBox.Text = cfg.CustomSystemPrompt;
                 FallbackReplyBox.Text = cfg.FallbackReply;
                 AutoSendAfterPasteCheck.IsChecked = cfg.AutoSendAfterPaste;
+                PreOpenGroupWhileGeneratingCheck.IsChecked = cfg.PreOpenGroupWhileGenerating;
                 ShowClickOverlayCheck.IsChecked = cfg.ShowClickOverlay;
                 VerifyGroupTitleCheck.IsChecked = cfg.VerifyGroupTitleBeforePaste;
                 RestoreClipboardCheck.IsChecked = cfg.RestoreClipboardAfterSend;
@@ -173,7 +174,7 @@ namespace Client.Pages
             cfg.ExtraTriggerNames = ExtraTriggerNamesBox.Text.Trim();
             cfg.BlockedKeywords = BlockedKeywordsBox.Text.Trim();
             cfg.CooldownSecondsPerGroup = int.TryParse(CooldownSecondsBox.Text.Trim(), out int cd)
-                ? Math.Clamp(cd, 3, 600) : 15;
+                ? Math.Clamp(cd, 0, 600) : 10;
             cfg.MaxMessageAgeSeconds = int.TryParse(MaxMessageAgeBox.Text.Trim(), out int age)
                 ? Math.Clamp(age, 30, 1800) : 180;
             cfg.MaxReplyChars = int.TryParse(MaxReplyCharsBox.Text.Trim(), out int maxC)
@@ -195,6 +196,7 @@ namespace Client.Pages
         private void ApplyAutomationOptionsToConfig(AutoReplyConfigData cfg)
         {
             cfg.AutoSendAfterPaste = AutoSendAfterPasteCheck.IsChecked == true;
+            cfg.PreOpenGroupWhileGenerating = PreOpenGroupWhileGeneratingCheck.IsChecked == true;
             cfg.ShowClickOverlay = ShowClickOverlayCheck.IsChecked == true;
             cfg.VerifyGroupTitleBeforePaste = VerifyGroupTitleCheck.IsChecked == true;
             cfg.RestoreClipboardAfterSend = RestoreClipboardCheck.IsChecked == true;
@@ -228,7 +230,7 @@ namespace Client.Pages
             ApplyAutomationOptionsToConfig(cfg);
             AppServices.GroupAutoReply.SaveConfig();
             AppServices.Logs.Info("REPLY",
-                $"已更新微信操控选项：自动发送={(cfg.AutoSendAfterPaste ? "开" : "仅粘贴")}，点击遮罩={(cfg.ShowClickOverlay ? "开" : "关")}，标题校验={(cfg.VerifyGroupTitleBeforePaste ? "开" : "关")}，慢速模式={(cfg.SlowStableMode ? "开" : "关")}");
+                $"已更新微信操控选项：自动发送={(cfg.AutoSendAfterPaste ? "开" : "仅粘贴")}，并行预开={(cfg.PreOpenGroupWhileGenerating ? "开" : "关")}，点击遮罩={(cfg.ShowClickOverlay ? "开" : "关")}，标题校验={(cfg.VerifyGroupTitleBeforePaste ? "开" : "关")}，慢速模式={(cfg.SlowStableMode ? "开" : "关")}");
         }
 
         private void FlashSavedHint(TextBlock hint)
@@ -294,7 +296,7 @@ namespace Client.Pages
             int enabledCount = svc.GetEnabledGroupCount();
             bool globalOn = svc.Config.GlobalEnabled;
 
-            if (svc.IsExecuting)
+            if (svc.IsExecuting || svc.PendingQueueCount > 0)
             {
                 StatusDot.Fill = (Brush)Application.Current.Resources["BrandPrimaryBrush"];
                 StatusBadge.Background = (Brush)Application.Current.Resources["BrandSoftBgBrush"];

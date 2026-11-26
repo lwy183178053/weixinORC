@@ -23,6 +23,21 @@ import (
 var (
 	ErrAINotConfigured = errors.New("AI 服务暂未启用，请联系管理员")
 	thinkTagRe         = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
+	// Shared pooled HTTP client for OpenAI-compatible gateways: enables HTTP/2 & TLS keep-alive
+	// connection reuse across concurrent group auto-reply requests (timeouts controlled per-request via ctx).
+	sharedOpenAIClient = &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			MaxIdleConns:          64,
+			MaxIdleConnsPerHost:   32,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   12 * time.Second,
+			ResponseHeaderTimeout: 0,
+			ExpectContinueTimeout: 1 * time.Second,
+			ForceAttemptHTTP2:     true,
+		},
+	}
 )
 
 type SkillInfo struct {
@@ -262,8 +277,7 @@ func callOpenAIAudioTranscription(ctx context.Context, endpoint, apiKey string, 
 		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(apiKey))
 	}
 
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
+	resp, err := sharedOpenAIClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -567,13 +581,13 @@ func (svc *Service) GroupAutoReply(ctx context.Context, ownerID string, input Gr
 	if err != nil {
 		return ChatResult{}, err
 	}
-	members, _, _ := svc.store.ListGroupMembers(ctx, ownerID, input.GroupID, 0, 80)
-	msgs, _, err := svc.store.ListGroupMessages(ctx, ownerID, input.GroupID, 0, 24)
+	// Keep auto-reply context lean for faster LLM TTFT: recent 12 messages + top 3 knowledge entries (skip full 80-member roster dump)
+	msgs, _, err := svc.store.ListGroupMessages(ctx, ownerID, input.GroupID, 0, 12)
 	if err != nil {
 		return ChatResult{}, err
 	}
-	knowledge, _ := svc.loadRelevantKnowledge(ctx, trigger+" "+group.GroupName+" "+group.Note, 4)
-	contextDoc := buildGroupContextMarkdown(group, members, msgs, knowledge)
+	knowledge, _ := svc.loadRelevantKnowledge(ctx, trigger+" "+group.GroupName+" "+group.Note, 3)
+	contextDoc := buildCompactAutoReplyGroupContext(group, msgs, knowledge)
 
 	maxChars := input.MaxReplyChars
 	if maxChars <= 0 {
@@ -674,6 +688,44 @@ func (svc *Service) GroupAutoReply(ctx context.Context, ownerID string, input Gr
 		Model:     cfg.Model,
 		LatencyMs: time.Since(started).Milliseconds(),
 	}, nil
+}
+
+func buildCompactAutoReplyGroupContext(g store.Group, msgsNewestFirst []store.GroupMessage, knowledge []store.KnowledgeItem) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("群名称：%s", g.GroupName))
+	if g.MemberCount > 0 {
+		sb.WriteString(fmt.Sprintf("（%d人）", g.MemberCount))
+	}
+	if g.MyNickname != "" {
+		sb.WriteString(fmt.Sprintf("；我在本群昵称：%s", g.MyNickname))
+	}
+	sb.WriteString("\n")
+	if g.Note != "" {
+		sb.WriteString("群备注：" + truncateRunes(g.Note, 400) + "\n")
+	}
+
+	if len(msgsNewestFirst) > 0 {
+		sb.WriteString("\n近期群聊：\n")
+		for i := len(msgsNewestFirst) - 1; i >= 0; i-- {
+			m := msgsNewestFirst[i]
+			speaker := m.SenderName
+			if m.Direction == "outgoing" {
+				speaker = "我方"
+			} else if speaker == "" {
+				speaker = "群友"
+			}
+			txt := formatChatTextWithImage(m.Content, m.ImageURL)
+			sb.WriteString(fmt.Sprintf("[%s] %s：%s\n", shortTime(m.SentAt), speaker, truncateRunes(txt, 240)))
+		}
+	}
+
+	if len(knowledge) > 0 {
+		sb.WriteString("\n企业知识库参考：\n")
+		for _, k := range knowledge {
+			sb.WriteString(fmt.Sprintf("- 【%s · %s】%s\n", k.Category, k.Title, truncateRunes(k.Content, 420)))
+		}
+	}
+	return sb.String()
 }
 
 func sanitizeWeChatPlainReply(raw string, maxChars int) string {
@@ -1669,8 +1721,7 @@ func callOpenAI(ctx context.Context, endpoint, apiKey string, reqBody openAIRequ
 		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(apiKey))
 	}
 
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
+	resp, err := sharedOpenAIClient.Do(req)
 	if err != nil {
 		return openAICallResult{}, fmt.Errorf("请求大模型接口失败：%w", err)
 	}

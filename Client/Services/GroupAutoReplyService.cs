@@ -6,13 +6,14 @@ using Client.Services.WeChat4Db;
 namespace Client.Services
 {
     /// <summary>
-    /// End-to-end group @mention AI auto-reply coordinator:
-    /// - Persists Q&amp;A examples, reply persona, safety limits, and automation preferences in auto_reply_config.json
-    /// - Listens to live new group messages from WeChat4SyncService (strictly real-time, never historical imports)
-    /// - Matches @me via both WeChat protocol XML (&lt;atuserlist&gt;) and text (@群昵称 / @微信昵称 / 自定义别名)
-    /// - Applies safety guards: enabled-group check, @all filter, sensitive keyword blacklist, message freshness, dedup, per-group cooldown
-    /// - Generates replies via DirectMatch Q&amp;A rules or Server AI endpoint (/api/v1/ai/group-auto-reply)
-    /// - Serializes WeChat OCR + ClickVisualOverlay execution through WeChatAutoReplyExecutor
+    /// High-throughput, rock-solid group @mention AI auto-reply engine:
+    /// - Captures ALL eligible @me messages in chronological order (never drops concurrent @mentions from multiple people!)
+    /// - Per-(group, sender) anti-spam cooldown: different people in the same group NEVER block each other
+    /// - Parallel AI prefetch pipeline (up to 4 concurrent LLM generations) decoupled from single-threaded WeChat UI control
+    /// - Speculative pre-opening: while LLM is generating, immediately brings WeChat forward and enters the target group
+    ///   (or verifies already-in-group fast path), so once AI responds, paste &amp; send takes ~0.5s!
+    /// - Ready-first with group-affinity scheduling: a slow/timing-out LLM request never stalls other ready replies,
+    ///   and consecutive replies for the same group reuse the open chat window without re-searching.
     /// </summary>
     public sealed class GroupAutoReplyService
     {
@@ -25,16 +26,45 @@ namespace Client.Services
         private static readonly char[] NameSeparators = [',', '，', ';', '；', '/', '|', '\n', '\r'];
         private static readonly char[] MentionBoundaries = [' ', '\t', '\u2005', '\u00A0', '\r', '\n', ',', '，', '.', '。', ':', '：', '?', '？', '!', '！', '、'];
 
+        private sealed class QueuedAutoReplyItem
+        {
+            public long SeqId { get; init; }
+            public long GroupId { get; init; }
+            public string GroupName { get; init; } = string.Empty;
+            public string SenderName { get; init; } = string.Empty;
+            public string CooldownKey { get; init; } = string.Empty;
+            public string TriggerMessage { get; init; } = string.Empty;
+            public string CleanedQuestion { get; init; } = string.Empty;
+            public string MatchedBy { get; init; } = string.Empty;
+            public bool IsManualTest { get; init; }
+            public bool? OverrideAutoSend { get; init; }
+            public bool PrefixMention { get; init; }
+            public Stopwatch TotalStopwatch { get; } = Stopwatch.StartNew();
+            public CancellationToken CancellationToken { get; init; }
+            public Task<(bool Ok, string Reply, string SourceMode, string Error)> GenerationTask { get; set; } = null!;
+            public TaskCompletionSource<AutoReplyExecutionRecord>? ManualTcs { get; init; }
+            public bool PreOpenAttempted { get; set; }
+        }
+
         private readonly object _configLock = new();
         private readonly object _stateLock = new();
-        private readonly SemaphoreSlim _execGate = new(1, 1);
+        private readonly object _queueLock = new();
+        private readonly SemaphoreSlim _aiConcurrencyGate = new(4, 4);
         private readonly string _configPath;
 
         private readonly Dictionary<long, GroupDto> _groupsById = [];
         private readonly HashSet<string> _processedExternalIds = new(StringComparer.Ordinal);
         private readonly Queue<string> _processedOrder = new();
-        private readonly Dictionary<long, DateTimeOffset> _lastReplyAtByGroup = [];
+        private readonly Dictionary<string, DateTimeOffset> _lastReplyAtByGroupSender = new(StringComparer.OrdinalIgnoreCase);
         private readonly LinkedList<AutoReplyExecutionRecord> _recentRecords = new();
+
+        private readonly List<QueuedAutoReplyItem> _queue = [];
+        private TaskCompletionSource<bool> _queueSignal = CreateSignal();
+        private CancellationTokenSource _sessionCts = new();
+        private PreparedGroupSession? _preparedSession;
+        private long _nextSeqId;
+        private bool _workerRunning;
+        private int _pendingQueueCount;
 
         private DateTimeOffset _listeningStartedUtc = DateTimeOffset.UtcNow;
         private bool _initialized;
@@ -43,6 +73,7 @@ namespace Client.Services
 
         public AutoReplyConfigData Config { get; private set; } = new();
         public bool IsExecuting => _isExecuting;
+        public int PendingQueueCount => Volatile.Read(ref _pendingQueueCount);
         public string LiveStatusText => _liveStatusText;
 
         public event Action? StateChanged;
@@ -58,6 +89,9 @@ namespace Client.Services
             LoadConfig();
         }
 
+        private static TaskCompletionSource<bool> CreateSignal() =>
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public void EnsureInitialized()
         {
             if (_initialized) return;
@@ -70,7 +104,7 @@ namespace Client.Services
             AppServices.WeChat4Sync.GroupNewMessagesSynced -= OnGroupNewMessagesSynced;
             AppServices.WeChat4Sync.GroupNewMessagesSynced += OnGroupNewMessagesSynced;
             AppServices.Logs.Info("REPLY",
-                $"群自动回复监听引擎已就绪：全局开关={(Config.GlobalEnabled ? "开启" : "暂停")}，问答示例 {Config.Examples.Count(e => e.Enabled)}/{Config.Examples.Count} 条，自动发送={(Config.AutoSendAfterPaste ? "开" : "仅粘贴")}。");
+                $"群自动回复并发队列引擎已就绪：全局开关={(Config.GlobalEnabled ? "开启" : "暂停")}，问答示例 {Config.Examples.Count(e => e.Enabled)}/{Config.Examples.Count} 条，自动发送={(Config.AutoSendAfterPaste ? "开" : "仅粘贴")}，并行预开={(Config.PreOpenGroupWhileGenerating ? "开" : "关")}。");
         }
 
         public void ResetRuntimeStateForLogout()
@@ -80,9 +114,30 @@ namespace Client.Services
                 _groupsById.Clear();
                 _processedExternalIds.Clear();
                 _processedOrder.Clear();
-                _lastReplyAtByGroup.Clear();
+                _lastReplyAtByGroupSender.Clear();
                 _listeningStartedUtc = DateTimeOffset.UtcNow;
             }
+
+            List<QueuedAutoReplyItem> dropped;
+            lock (_queueLock)
+            {
+                try { _sessionCts.Cancel(); } catch { }
+                _sessionCts.Dispose();
+                _sessionCts = new CancellationTokenSource();
+
+                dropped = [.. _queue];
+                _queue.Clear();
+                _preparedSession = null;
+                Volatile.Write(ref _pendingQueueCount, 0);
+                SignalQueueLocked();
+            }
+
+            foreach (var d in dropped)
+            {
+                d.ManualTcs?.TrySetCanceled();
+            }
+
+            _isExecuting = false;
             UpdateLiveStatus("已重置（等待重新登录）");
         }
 
@@ -113,7 +168,7 @@ namespace Client.Services
                 Config.CustomSystemPrompt ??= string.Empty;
                 Config.FallbackReply ??= string.Empty;
                 Config.BlockedKeywords ??= string.Empty;
-                Config.CooldownSecondsPerGroup = Math.Clamp(Config.CooldownSecondsPerGroup, 3, 600);
+                Config.CooldownSecondsPerGroup = Math.Clamp(Config.CooldownSecondsPerGroup, 0, 600);
                 Config.MaxMessageAgeSeconds = Math.Clamp(Config.MaxMessageAgeSeconds, 30, 1800);
                 Config.MaxReplyChars = Math.Clamp(Config.MaxReplyChars, 40, 800);
                 foreach (var ex in Config.Examples)
@@ -228,21 +283,14 @@ namespace Client.Services
         {
             if (!evt.IsBackgroundAuto || evt.NewMessages.Count == 0) return;
             if (!AppServices.Backend.IsAuthenticated) return;
-
-            if (!Config.GlobalEnabled)
-            {
-                return;
-            }
+            if (!Config.GlobalEnabled) return;
 
             GroupDto? trackedGroup;
             lock (_stateLock)
             {
                 _groupsById.TryGetValue(evt.GroupId, out trackedGroup);
             }
-            if (trackedGroup is null || !trackedGroup.AutoReplyEnabled)
-            {
-                return;
-            }
+            if (trackedGroup is null || !trackedGroup.AutoReplyEnabled) return;
             if (!string.IsNullOrWhiteSpace(evt.OwnerWxid) &&
                 !string.IsNullOrWhiteSpace(trackedGroup.OwnerWxid) &&
                 !string.Equals(trackedGroup.OwnerWxid, evt.OwnerWxid, StringComparison.OrdinalIgnoreCase))
@@ -250,16 +298,16 @@ namespace Client.Services
                 return;
             }
 
-            // Pick the latest eligible @me message in this sync batch (avoid replying multiple times to one burst)
+            string groupName = !string.IsNullOrWhiteSpace(trackedGroup.GroupName) ? trackedGroup.GroupName : evt.GroupName;
             var nowUtc = DateTimeOffset.UtcNow;
-            WeChat4Message? targetMsg = null;
-            string matchedBy = string.Empty;
 
-            for (int i = evt.NewMessages.Count - 1; i >= 0; i--)
+            // Scan ALL new messages in chronological order so multiple people @mentioning us in a burst
+            // ALL enter the FIFO reply queue and generate AI replies in parallel!
+            int enqueuedInBatch = 0;
+            for (int i = 0; i < evt.NewMessages.Count; i++)
             {
                 var m = evt.NewMessages[i];
                 if (m.IsOutgoing || m.Kind != "text" || string.IsNullOrWhiteSpace(m.Content)) continue;
-
                 if (IsAlreadyProcessed(m.ExternalId)) continue;
 
                 // Freshness guard: never reply to messages from before app startup or older than MaxMessageAgeSeconds
@@ -272,256 +320,509 @@ namespace Client.Services
                 if (ageSec > Config.MaxMessageAgeSeconds)
                 {
                     MarkProcessed(m.ExternalId);
-                    AppServices.Logs.Info("REPLY", $"跳过超时消息（已过去 {ageSec:F0}s > {Config.MaxMessageAgeSeconds}s）：群「{evt.GroupName}」");
+                    AppServices.Logs.Info("REPLY", $"跳过超时消息（已过去 {ageSec:F0}s > {Config.MaxMessageAgeSeconds}s）：群「{groupName}」");
                     continue;
                 }
 
-                if (TryMatchMentionSelf(m, evt, trackedGroup, out string reason))
+                if (!TryMatchMentionSelf(m, evt, trackedGroup, out string matchedBy)) continue;
+
+                // Mark processed immediately so duplicate syncs never re-enqueue
+                MarkProcessed(m.ExternalId);
+
+                string senderName = string.IsNullOrWhiteSpace(m.SenderName) ? "群成员" : m.SenderName.Trim();
+                string cleanedQuestion = StripLeadingMention(m.Content);
+
+                // 1. Blocked sensitive keywords guard
+                string? hitBlocked = FindBlockedKeyword(m.Content, Config.BlockedKeywords);
+                if (!string.IsNullOrEmpty(hitBlocked))
                 {
-                    targetMsg = m;
-                    matchedBy = reason;
-                    break;
+                    AppServices.Logs.Warn("REPLY", $"群「{groupName}」成员「{senderName}」消息命中敏感词黑名单「{hitBlocked}」，已跳过。");
+                    RecordExecution(new AutoReplyExecutionRecord
+                    {
+                        GroupId = evt.GroupId,
+                        GroupName = groupName,
+                        SenderName = senderName,
+                        TriggerMessage = m.Content,
+                        SourceMode = matchedBy,
+                        StatusLabel = "已跳过",
+                        IsSkipped = true,
+                        Detail = $"命中敏感词黑名单「{hitBlocked}」，交由人工处理。"
+                    });
+                    continue;
                 }
-            }
 
-            if (targetMsg is null) return;
-
-            // Mark all messages in this batch up to targetMsg as processed to prevent duplicate triggers
-            MarkProcessed(targetMsg.ExternalId);
-
-            AppServices.Logs.Info("REPLY",
-                $"检测到群「{evt.GroupName}」被 @（命中方式：{matchedBy}），发言人={targetMsg.SenderName}，内容=「{Truncate(targetMsg.Content, 80)}」");
-
-            _ = Task.Run(() => ProcessTriggeredMessageAsync(evt, trackedGroup, targetMsg, matchedBy));
-        }
-
-        private async Task ProcessTriggeredMessageAsync(
-            WeChat4GroupNewMessagesEvent evt,
-            GroupDto trackedGroup,
-            WeChat4Message msg,
-            string matchedBy)
-        {
-            var sw = Stopwatch.StartNew();
-            string groupName = !string.IsNullOrWhiteSpace(trackedGroup.GroupName) ? trackedGroup.GroupName : evt.GroupName;
-            string senderName = string.IsNullOrWhiteSpace(msg.SenderName) ? "群成员" : msg.SenderName;
-            string cleanedQuestion = StripLeadingMention(msg.Content);
-
-            // 1. Blocked sensitive keywords guard
-            string? hitBlocked = FindBlockedKeyword(msg.Content, Config.BlockedKeywords);
-            if (!string.IsNullOrEmpty(hitBlocked))
-            {
-                AppServices.Logs.Warn("REPLY", $"群「{groupName}」消息命中敏感词黑名单「{hitBlocked}」，已跳过自动回复。");
-                RecordExecution(new AutoReplyExecutionRecord
+                // 2. Per-(group, sender) anti-spam cooldown: different people in the same group NEVER block each other!
+                string cooldownKey = BuildCooldownKey(evt.GroupId, senderName);
+                int cdSec = Config.CooldownSecondsPerGroup;
+                if (cdSec > 0)
                 {
-                    GroupId = evt.GroupId,
-                    GroupName = groupName,
-                    SenderName = senderName,
-                    TriggerMessage = msg.Content,
-                    SourceMode = matchedBy,
-                    StatusLabel = "已跳过",
-                    IsSkipped = true,
-                    Detail = $"命中敏感词黑名单「{hitBlocked}」，交由人工处理。"
-                });
-                return;
-            }
+                    bool coolingDown = false;
+                    double remainingSec = 0;
+                    lock (_stateLock)
+                    {
+                        if (_lastReplyAtByGroupSender.TryGetValue(cooldownKey, out var lastAt))
+                        {
+                            double elapsed = (DateTimeOffset.UtcNow - lastAt).TotalSeconds;
+                            if (elapsed < cdSec)
+                            {
+                                coolingDown = true;
+                                remainingSec = cdSec - elapsed;
+                            }
+                        }
+                        if (!coolingDown)
+                        {
+                            _lastReplyAtByGroupSender[cooldownKey] = DateTimeOffset.UtcNow;
+                        }
+                    }
 
-            // 2. Per-group cooldown guard
-            lock (_stateLock)
-            {
-                if (_lastReplyAtByGroup.TryGetValue(evt.GroupId, out var lastAt))
-                {
-                    double elapsedSec = (DateTimeOffset.UtcNow - lastAt).TotalSeconds;
-                    if (elapsedSec < Config.CooldownSecondsPerGroup)
+                    if (coolingDown)
                     {
                         AppServices.Logs.Info("REPLY",
-                            $"群「{groupName}」处于自动回复冷却中（剩余 {Config.CooldownSecondsPerGroup - elapsedSec:F0}s），跳过本次触发。");
+                            $"群「{groupName}」成员「{senderName}」处于同人防刷屏冷却中（剩余 {remainingSec:F0}s），跳过重复触发。");
                         RecordExecution(new AutoReplyExecutionRecord
                         {
                             GroupId = evt.GroupId,
                             GroupName = groupName,
                             SenderName = senderName,
-                            TriggerMessage = msg.Content,
+                            TriggerMessage = m.Content,
                             SourceMode = matchedBy,
                             StatusLabel = "冷却跳过",
                             IsSkipped = true,
-                            Detail = $"同群冷却时间 {Config.CooldownSecondsPerGroup} 秒内不重复回复。"
+                            Detail = $"同一群友 {cdSec} 秒内防重复刷屏冷却中（不影响其他群友排队回复）。"
                         });
-                        return;
+                        continue;
                     }
                 }
-            }
 
-            await _execGate.WaitAsync();
-            _isExecuting = true;
-            UpdateLiveStatus($"正在回复群「{groupName}」...");
-            try
-            {
-                // 3. Generate reply (DirectMatch Q&A example first -> AI with examples + group context -> fallback)
-                var (okGen, replyBody, sourceMode, genError) = await GenerateReplyTextAsync(
-                    evt.GroupId, senderName, cleanedQuestion, CancellationToken.None);
+                AppServices.Logs.Info("REPLY",
+                    $"检测到群「{groupName}」被 @（命中方式：{matchedBy}），发言人={senderName}，内容=「{Truncate(m.Content, 80)}」-> 已加入回复队列并启动并行生成");
 
-                if (!okGen || string.IsNullOrWhiteSpace(replyBody))
+                EnqueueItem(new QueuedAutoReplyItem
                 {
-                    sw.Stop();
-                    AppServices.Logs.Error("REPLY", $"群「{groupName}」生成回复失败：{genError}");
-                    RecordExecution(new AutoReplyExecutionRecord
-                    {
-                        GroupId = evt.GroupId,
-                        GroupName = groupName,
-                        SenderName = senderName,
-                        TriggerMessage = msg.Content,
-                        SourceMode = sourceMode,
-                        StatusLabel = "生成失败",
-                        Detail = genError,
-                        ElapsedMs = sw.ElapsedMilliseconds
-                    });
-                    return;
-                }
-
-                string finalReply = FormatFinalReply(replyBody, senderName, Config.PrefixMentionSender);
-                AppServices.Logs.Info("REPLY", $"群「{groupName}」回复已就绪（{sourceMode}）：「{Truncate(finalReply, 90)}」");
-
-                // 4. Execute WeChat OCR + ClickVisualOverlay automation
-                var executor = new WeChatAutoReplyExecutor();
-                var autoRes = await executor.SendReplyToGroupAsync(groupName, finalReply, Config);
-
-                sw.Stop();
-                if (autoRes.Success)
-                {
-                    lock (_stateLock)
-                    {
-                        _lastReplyAtByGroup[evt.GroupId] = DateTimeOffset.UtcNow;
-                    }
-                    RecordExecution(new AutoReplyExecutionRecord
-                    {
-                        GroupId = evt.GroupId,
-                        GroupName = groupName,
-                        SenderName = senderName,
-                        TriggerMessage = msg.Content,
-                        GeneratedReply = finalReply,
-                        SourceMode = sourceMode,
-                        StatusLabel = autoRes.WasSent ? "已发送" : "已粘贴待确认",
-                        IsSuccess = true,
-                        Detail = autoRes.Message,
-                        ElapsedMs = sw.ElapsedMilliseconds
-                    });
-                }
-                else
-                {
-                    RecordExecution(new AutoReplyExecutionRecord
-                    {
-                        GroupId = evt.GroupId,
-                        GroupName = groupName,
-                        SenderName = senderName,
-                        TriggerMessage = msg.Content,
-                        GeneratedReply = finalReply,
-                        SourceMode = sourceMode,
-                        StatusLabel = autoRes.WasCancelledByEsc ? "已中止" : "操控失败",
-                        IsSkipped = autoRes.WasCancelledByEsc,
-                        Detail = autoRes.Message,
-                        ElapsedMs = sw.ElapsedMilliseconds
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                sw.Stop();
-                AppServices.Logs.Error("REPLY", $"处理群「{groupName}」自动回复异常：{ex.Message}");
-                RecordExecution(new AutoReplyExecutionRecord
-                {
+                    SeqId = Interlocked.Increment(ref _nextSeqId),
                     GroupId = evt.GroupId,
                     GroupName = groupName,
                     SenderName = senderName,
-                    TriggerMessage = msg.Content,
-                    SourceMode = "自动回复",
-                    StatusLabel = "异常",
-                    Detail = ex.Message,
-                    ElapsedMs = sw.ElapsedMilliseconds
+                    CooldownKey = cooldownKey,
+                    TriggerMessage = m.Content,
+                    CleanedQuestion = cleanedQuestion,
+                    MatchedBy = matchedBy,
+                    IsManualTest = false,
+                    OverrideAutoSend = null,
+                    PrefixMention = Config.PrefixMentionSender,
+                    CancellationToken = _sessionCts.Token
                 });
+                enqueuedInBatch++;
             }
-            finally
+
+            if (enqueuedInBatch > 1)
             {
-                _isExecuting = false;
-                _execGate.Release();
-                UpdateLiveStatus(Config.GlobalEnabled ? $"监听中（已启用 {GetEnabledGroupCount()} 个群）" : "全局已暂停");
+                AppServices.Logs.Info("REPLY",
+                    $"本批同步共捕获 {enqueuedInBatch} 条 @消息（群「{groupName}」），已全部入队并行生成回复并将依次发送。");
             }
         }
 
         /// <summary>
-        /// Runs a full live end-to-end test on a selected group (AI generation + OCR search + ClickVisualOverlay + input paste),
-        /// defaulting to paste-only unless sendImmediately is explicitly requested.
+        /// Runs a live end-to-end test through the exact same parallel-prefetch + pre-open queue pipeline
+        /// so manual tests also demonstrate pre-opening speed and never collide with background auto-replies.
         /// </summary>
-        public async Task<AutoReplyExecutionRecord> RunManualTestAsync(
+        public Task<AutoReplyExecutionRecord> RunManualTestAsync(
             GroupDto targetGroup,
             string simulatedQuestion,
             bool sendImmediately,
             CancellationToken ct = default)
         {
-            var sw = Stopwatch.StartNew();
             string question = string.IsNullOrWhiteSpace(simulatedQuestion) ? "您好，请问工作时间是几点？" : simulatedQuestion.Trim();
+            AppServices.Logs.Info("REPLY",
+                $"开始手动测试自动回复流程：群「{targetGroup.DisplayName}」，问题=「{Truncate(question, 80)}」，自动发送={(sendImmediately ? "是" : "否(仅粘贴)")}，并行预开={(Config.PreOpenGroupWhileGenerating ? "开" : "关")}");
 
-            await _execGate.WaitAsync(ct);
-            _isExecuting = true;
-            UpdateLiveStatus($"正在测试群「{targetGroup.DisplayName}」...");
+            var tcs = new TaskCompletionSource<AutoReplyExecutionRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var linkedCt = ct.CanBeCanceled
+                ? CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token, ct).Token
+                : _sessionCts.Token;
+
+            EnqueueItem(new QueuedAutoReplyItem
+            {
+                SeqId = Interlocked.Increment(ref _nextSeqId),
+                GroupId = targetGroup.Id,
+                GroupName = targetGroup.DisplayName,
+                SenderName = "手动测试",
+                CooldownKey = string.Empty,
+                TriggerMessage = question,
+                CleanedQuestion = question,
+                MatchedBy = "手动测试",
+                IsManualTest = true,
+                OverrideAutoSend = sendImmediately,
+                PrefixMention = false,
+                CancellationToken = linkedCt,
+                ManualTcs = tcs
+            });
+
+            return tcs.Task;
+        }
+
+        private void EnqueueItem(QueuedAutoReplyItem item)
+        {
+            // Immediately kick off parallel AI reply generation (bounded by _aiConcurrencyGate = 4)
+            // BEFORE waiting on the single-threaded WeChat UI automation dispatcher!
+            item.GenerationTask = GenerateReplyParallelAsync(item);
+
+            bool shouldStartWorker;
+            int queueLen;
+            lock (_queueLock)
+            {
+                _queue.Add(item);
+                queueLen = _queue.Count;
+                Volatile.Write(ref _pendingQueueCount, queueLen);
+                SignalQueueLocked();
+
+                shouldStartWorker = !_workerRunning;
+                if (shouldStartWorker)
+                {
+                    _workerRunning = true;
+                }
+            }
+
+            if (queueLen > 1)
+            {
+                AppServices.Logs.Info("REPLY", $"回复队列当前待处理 {queueLen} 条（最新入队：群「{item.GroupName}」/ {item.SenderName}）。");
+            }
+            StateChanged?.Invoke();
+
+            if (shouldStartWorker)
+            {
+                _ = Task.Run(RunUiDispatcherLoopAsync);
+            }
+        }
+
+        private async Task<(bool Ok, string Reply, string SourceMode, string Error)> GenerateReplyParallelAsync(QueuedAutoReplyItem item)
+        {
+            await _aiConcurrencyGate.WaitAsync(item.CancellationToken);
             try
             {
-                AppServices.Logs.Info("REPLY",
-                    $"开始手动测试自动回复流程：群「{targetGroup.DisplayName}」，问题=「{Truncate(question, 80)}」，自动发送={(sendImmediately ? "是" : "否(仅粘贴)")}");
-
-                var (okGen, replyBody, sourceMode, genErr) = await GenerateReplyTextAsync(
-                    targetGroup.Id, "测试群友", question, ct);
-
-                if (!okGen || string.IsNullOrWhiteSpace(replyBody))
-                {
-                    sw.Stop();
-                    var failRec = new AutoReplyExecutionRecord
-                    {
-                        GroupId = targetGroup.Id,
-                        GroupName = targetGroup.DisplayName,
-                        SenderName = "手动测试",
-                        TriggerMessage = question,
-                        SourceMode = $"测试·{sourceMode}",
-                        StatusLabel = "生成失败",
-                        Detail = genErr,
-                        ElapsedMs = sw.ElapsedMilliseconds
-                    };
-                    RecordExecution(failRec);
-                    return failRec;
-                }
-
-                var executor = new WeChatAutoReplyExecutor();
-                var autoRes = await executor.SendReplyToGroupAsync(
-                    targetGroup.DisplayName,
-                    replyBody,
-                    Config,
-                    overrideAutoSend: sendImmediately,
-                    ct: ct);
-
-                sw.Stop();
-                var rec = new AutoReplyExecutionRecord
-                {
-                    GroupId = targetGroup.Id,
-                    GroupName = targetGroup.DisplayName,
-                    SenderName = "手动测试",
-                    TriggerMessage = question,
-                    GeneratedReply = replyBody,
-                    SourceMode = $"测试·{sourceMode}",
-                    StatusLabel = autoRes.Success ? (autoRes.WasSent ? "测试已发送" : "已粘贴待确认") : (autoRes.WasCancelledByEsc ? "已中止" : "测试失败"),
-                    IsSuccess = autoRes.Success,
-                    IsSkipped = autoRes.WasCancelledByEsc,
-                    Detail = autoRes.Message,
-                    ElapsedMs = sw.ElapsedMilliseconds
-                };
-                RecordExecution(rec);
-                return rec;
+                string senderForAi = item.IsManualTest ? "测试群友" : item.SenderName;
+                return await GenerateReplyTextAsync(item.GroupId, senderForAi, item.CleanedQuestion, item.CancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return (false, string.Empty, "已取消", "请求已取消");
+            }
+            catch (Exception ex)
+            {
+                return (false, string.Empty, "AI 生成", ex.Message);
             }
             finally
             {
-                _isExecuting = false;
-                _execGate.Release();
-                UpdateLiveStatus(Config.GlobalEnabled ? $"监听中（已启用 {GetEnabledGroupCount()} 个群）" : "全局已暂停");
+                _aiConcurrencyGate.Release();
             }
         }
+
+        /// <summary>
+        /// Single-threaded WeChat UI automation dispatcher:
+        /// 1. Picks any ALREADY-READY AI reply immediately (preferring manual test, then same-group affinity for zero-search delivery, then FIFO)
+        /// 2. If all queued items are still waiting for LLM responses, speculatively PRE-OPENS the head item's target group
+        ///    in WeChat IN PARALLEL while AI is thinking, then sleeps on Task.WhenAny(all generation tasks + new-arrival signal)
+        /// 3. As soon as ANY queued reply finishes AI generation, delivers it immediately without being head-of-line blocked
+        ///    by another slow/timing-out LLM call!
+        /// </summary>
+        private async Task RunUiDispatcherLoopAsync()
+        {
+            var executor = new WeChatAutoReplyExecutor();
+
+            while (true)
+            {
+                List<QueuedAutoReplyItem> snapshot;
+                Task signalTask;
+                PreparedGroupSession? currentPrepared;
+
+                lock (_queueLock)
+                {
+                    if (_queue.Count == 0)
+                    {
+                        _workerRunning = false;
+                        _isExecuting = false;
+                        _preparedSession = null;
+                        Volatile.Write(ref _pendingQueueCount, 0);
+                        UpdateLiveStatus(Config.GlobalEnabled ? $"监听中（已启用 {GetEnabledGroupCount()} 个群）" : "全局已暂停");
+                        return;
+                    }
+
+                    snapshot = [.. _queue];
+                    signalTask = _queueSignal.Task;
+                    currentPrepared = _preparedSession;
+                    Volatile.Write(ref _pendingQueueCount, _queue.Count);
+                    _isExecuting = true;
+                }
+
+                // 1. Check if any queued task has ALREADY completed AI generation
+                var readyItems = snapshot.Where(x => x.GenerationTask.IsCompleted).ToList();
+                if (readyItems.Count > 0)
+                {
+                    QueuedAutoReplyItem chosen = SelectNextReadyItem(readyItems, currentPrepared?.GroupName);
+                    int remainingAfter;
+                    lock (_queueLock)
+                    {
+                        _queue.Remove(chosen);
+                        remainingAfter = _queue.Count;
+                        Volatile.Write(ref _pendingQueueCount, remainingAfter);
+                    }
+
+                    await ExecuteDeliveryForItemAsync(executor, chosen, remainingAfter);
+                    continue;
+                }
+
+                // 2. No AI reply is ready yet -> Speculatively PRE-OPEN the head task's target group while LLM is still thinking!
+                QueuedAutoReplyItem head = snapshot.FirstOrDefault(x => x.IsManualTest) ?? snapshot[0];
+                bool alreadyPreparedForHead = currentPrepared is { Success: true } &&
+                                              string.Equals(currentPrepared.GroupName, head.GroupName, StringComparison.OrdinalIgnoreCase);
+
+                if (Config.PreOpenGroupWhileGenerating && !alreadyPreparedForHead && !head.PreOpenAttempted)
+                {
+                    head.PreOpenAttempted = true;
+                    string qSuffix = snapshot.Count > 1 ? $" · 排队 {snapshot.Count} 条" : string.Empty;
+                    UpdateLiveStatus($"AI 生成中 · 预开「{head.GroupName}」{qSuffix}");
+                    AppServices.Logs.Info("AUTO", $"AI 请求进行中，同步提前打开并定位目标群「{head.GroupName}」...");
+
+                    var prep = await executor.PrepareGroupChatAsync(head.GroupName, Config, head.CancellationToken);
+                    if (prep.WasCancelledByEsc)
+                    {
+                        bool removed;
+                        lock (_queueLock)
+                        {
+                            removed = _queue.Remove(head);
+                            _preparedSession = null;
+                            Volatile.Write(ref _pendingQueueCount, _queue.Count);
+                        }
+                        if (removed)
+                        {
+                            ClearCooldownOnFailure(head);
+                            CompleteCancelledRecord(head, prep.Message);
+                        }
+                        continue;
+                    }
+
+                    if (prep.Success)
+                    {
+                        lock (_queueLock)
+                        {
+                            _preparedSession = prep;
+                        }
+                        AppServices.Logs.Info("AUTO",
+                            $"目标群「{head.GroupName}」已预开就绪（{(prep.UsedFastPathAlreadyInGroup ? "免搜索直达" : "已切群")}，耗时 {prep.ElapsedMs} ms），静候 AI 回复后即刻粘贴发送。");
+                    }
+
+                    // Re-check immediately in case an AI reply finished while we were pre-opening!
+                    continue;
+                }
+
+                // 3. Wait until ANY queued AI generation completes OR a new item arrives in the queue
+                string waitSuffix = snapshot.Count > 1 ? $"（{snapshot.Count} 条并行生成中）" : "（AI 生成中）";
+                string preTag = alreadyPreparedForHead ? $"已预开「{head.GroupName}」" : $"等待「{head.GroupName}」";
+                UpdateLiveStatus($"{preTag} {waitSuffix}");
+
+                var waitTasks = new List<Task>(snapshot.Count + 1) { signalTask };
+                foreach (var item in snapshot)
+                {
+                    waitTasks.Add(item.GenerationTask);
+                }
+
+                try
+                {
+                    await Task.WhenAny(waitTasks);
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private static QueuedAutoReplyItem SelectNextReadyItem(List<QueuedAutoReplyItem> readyItems, string? openGroupName)
+        {
+            // Manual tests always get first priority once ready
+            var manual = readyItems.FirstOrDefault(x => x.IsManualTest);
+            if (manual is not null) return manual;
+
+            // Group-affinity optimization: if WeChat is already open on group X and a reply for group X is ready,
+            // send it immediately (~0.5s, zero group switching!) before switching to another group
+            if (!string.IsNullOrWhiteSpace(openGroupName))
+            {
+                var sameGroup = readyItems
+                    .Where(x => string.Equals(x.GroupName, openGroupName, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(x => x.SeqId)
+                    .FirstOrDefault();
+                if (sameGroup is not null) return sameGroup;
+            }
+
+            // Strict FIFO arrival order otherwise
+            return readyItems.OrderBy(x => x.SeqId).First();
+        }
+
+        private async Task ExecuteDeliveryForItemAsync(
+            WeChatAutoReplyExecutor executor,
+            QueuedAutoReplyItem item,
+            int remainingInQueue)
+        {
+            string sourcePrefix = item.IsManualTest ? "测试·" : string.Empty;
+            try
+            {
+                var (okGen, replyBody, sourceMode, genError) = await item.GenerationTask;
+                if (!okGen || string.IsNullOrWhiteSpace(replyBody))
+                {
+                    item.TotalStopwatch.Stop();
+                    ClearCooldownOnFailure(item);
+                    AppServices.Logs.Error("REPLY", $"群「{item.GroupName}」（{item.SenderName}）生成回复失败：{genError}");
+                    var failRec = new AutoReplyExecutionRecord
+                    {
+                        GroupId = item.GroupId,
+                        GroupName = item.GroupName,
+                        SenderName = item.SenderName,
+                        TriggerMessage = item.TriggerMessage,
+                        SourceMode = sourcePrefix + sourceMode,
+                        StatusLabel = "生成失败",
+                        Detail = genError,
+                        ElapsedMs = item.TotalStopwatch.ElapsedMilliseconds
+                    };
+                    RecordExecution(failRec);
+                    item.ManualTcs?.TrySetResult(failRec);
+                    return;
+                }
+
+                string finalReply = FormatFinalReply(replyBody, item.SenderName, item.PrefixMention);
+                AppServices.Logs.Info("REPLY", $"群「{item.GroupName}」（{item.SenderName}）回复已就绪（{sourceMode}）：「{Truncate(finalReply, 90)}」");
+
+                string queueNote = remainingInQueue > 0 ? $" · 排队剩余 {remainingInQueue} 条" : string.Empty;
+                UpdateLiveStatus($"正在回复「{item.GroupName}」{queueNote}");
+
+                PreparedGroupSession? matchingPrepared;
+                lock (_queueLock)
+                {
+                    matchingPrepared = _preparedSession is { Success: true } &&
+                                       string.Equals(_preparedSession.GroupName, item.GroupName, StringComparison.OrdinalIgnoreCase)
+                        ? _preparedSession
+                        : null;
+                }
+
+                var autoRes = await executor.DeliverPreparedReplyAsync(
+                    matchingPrepared,
+                    item.GroupName,
+                    finalReply,
+                    Config,
+                    overrideAutoSend: item.OverrideAutoSend,
+                    ct: item.CancellationToken);
+
+                item.TotalStopwatch.Stop();
+
+                lock (_queueLock)
+                {
+                    _preparedSession = autoRes.Success ? autoRes.Session : null;
+                }
+
+                if (autoRes.Success)
+                {
+                    if (!item.IsManualTest && !string.IsNullOrEmpty(item.CooldownKey))
+                    {
+                        lock (_stateLock)
+                        {
+                            _lastReplyAtByGroupSender[item.CooldownKey] = DateTimeOffset.UtcNow;
+                        }
+                    }
+
+                    var okRec = new AutoReplyExecutionRecord
+                    {
+                        GroupId = item.GroupId,
+                        GroupName = item.GroupName,
+                        SenderName = item.SenderName,
+                        TriggerMessage = item.TriggerMessage,
+                        GeneratedReply = finalReply,
+                        SourceMode = sourcePrefix + sourceMode,
+                        StatusLabel = item.IsManualTest
+                            ? (autoRes.WasSent ? "测试已发送" : "已粘贴待确认")
+                            : (autoRes.WasSent ? "已发送" : "已粘贴待确认"),
+                        IsSuccess = true,
+                        Detail = autoRes.Message,
+                        ElapsedMs = item.TotalStopwatch.ElapsedMilliseconds
+                    };
+                    RecordExecution(okRec);
+                    item.ManualTcs?.TrySetResult(okRec);
+                }
+                else
+                {
+                    ClearCooldownOnFailure(item);
+                    var errRec = new AutoReplyExecutionRecord
+                    {
+                        GroupId = item.GroupId,
+                        GroupName = item.GroupName,
+                        SenderName = item.SenderName,
+                        TriggerMessage = item.TriggerMessage,
+                        GeneratedReply = finalReply,
+                        SourceMode = sourcePrefix + sourceMode,
+                        StatusLabel = autoRes.WasCancelledByEsc ? "已中止" : (item.IsManualTest ? "测试失败" : "操控失败"),
+                        IsSkipped = autoRes.WasCancelledByEsc,
+                        Detail = autoRes.Message,
+                        ElapsedMs = item.TotalStopwatch.ElapsedMilliseconds
+                    };
+                    RecordExecution(errRec);
+                    item.ManualTcs?.TrySetResult(errRec);
+                }
+            }
+            catch (Exception ex)
+            {
+                item.TotalStopwatch.Stop();
+                ClearCooldownOnFailure(item);
+                AppServices.Logs.Error("REPLY", $"处理群「{item.GroupName}」（{item.SenderName}）自动回复异常：{ex.Message}");
+                var exRec = new AutoReplyExecutionRecord
+                {
+                    GroupId = item.GroupId,
+                    GroupName = item.GroupName,
+                    SenderName = item.SenderName,
+                    TriggerMessage = item.TriggerMessage,
+                    SourceMode = item.IsManualTest ? "测试·异常" : "自动回复",
+                    StatusLabel = "异常",
+                    Detail = ex.Message,
+                    ElapsedMs = item.TotalStopwatch.ElapsedMilliseconds
+                };
+                RecordExecution(exRec);
+                item.ManualTcs?.TrySetResult(exRec);
+            }
+        }
+
+        private void ClearCooldownOnFailure(QueuedAutoReplyItem item)
+        {
+            if (item.IsManualTest || string.IsNullOrEmpty(item.CooldownKey)) return;
+            lock (_stateLock)
+            {
+                _lastReplyAtByGroupSender.Remove(item.CooldownKey);
+            }
+        }
+
+        private void CompleteCancelledRecord(QueuedAutoReplyItem item, string detail)
+        {
+            item.TotalStopwatch.Stop();
+            var rec = new AutoReplyExecutionRecord
+            {
+                GroupId = item.GroupId,
+                GroupName = item.GroupName,
+                SenderName = item.SenderName,
+                TriggerMessage = item.TriggerMessage,
+                SourceMode = item.IsManualTest ? "测试·中止" : item.MatchedBy,
+                StatusLabel = "已中止",
+                IsSkipped = true,
+                Detail = detail,
+                ElapsedMs = item.TotalStopwatch.ElapsedMilliseconds
+            };
+            RecordExecution(rec);
+            item.ManualTcs?.TrySetResult(rec);
+        }
+
+        private void SignalQueueLocked()
+        {
+            var prev = _queueSignal;
+            _queueSignal = CreateSignal();
+            prev.TrySetResult(true);
+        }
+
+        private static string BuildCooldownKey(long groupId, string senderName) =>
+            $"{groupId}|{(senderName ?? string.Empty).Trim().ToLowerInvariant()}";
 
         private async Task<(bool Ok, string Reply, string SourceMode, string Error)> GenerateReplyTextAsync(
             long groupId,
@@ -537,7 +838,7 @@ namespace Client.Services
                     .ToList();
             }
 
-            // 1. Check DirectMatch examples first
+            // 1. Check DirectMatch examples first (instant 0ms!)
             foreach (var ex in enabledExamples.Where(e => e.DirectMatch))
             {
                 var keywords = ex.QuestionPattern
@@ -551,7 +852,7 @@ namespace Client.Services
                 }
             }
 
-            // 2. Call Server AI endpoint with Q&A few-shot examples + group context + knowledge base
+            // 2. Call Server AI endpoint with Q&A few-shot examples + compact group context + knowledge base
             var payloads = enabledExamples.Select(e => new AutoReplyExamplePayload
             {
                 Category = e.Category,
@@ -598,14 +899,12 @@ namespace Client.Services
                                   content.Contains("@所有人", StringComparison.OrdinalIgnoreCase) ||
                                   content.Contains("@All", StringComparison.OrdinalIgnoreCase);
 
-            // Protocol-level <atuserlist> exact SelfWxid match (highest accuracy!)
             if (msg.MentionedSelf)
             {
                 reason = "微信原生 @提及";
                 return true;
             }
 
-            // Collect candidate self display names: group nickname -> WeChat nickname -> alias -> custom trigger names
             var candidates = new List<string>(8);
             void AddCandidate(string? s)
             {
@@ -679,6 +978,7 @@ namespace Client.Services
             if (prefixMention &&
                 !string.IsNullOrWhiteSpace(senderName) &&
                 !senderName.Equals("群成员", StringComparison.Ordinal) &&
+                !senderName.Equals("手动测试", StringComparison.Ordinal) &&
                 !clean.StartsWith('@'))
             {
                 return $"@{senderName} {clean}";

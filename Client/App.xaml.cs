@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using Client.Services;
 using Microsoft.UI.Xaml;
 
 namespace Client
@@ -25,12 +26,12 @@ namespace Client
         {
             try
             {
-                string logPath = Path.Combine(Path.GetTempPath(), "weixinorc-client.log");
-                File.AppendAllText(logPath, $"[{DateTime.Now:O}] {e.Message}\n{e.Exception}\n\n");
+                AppServices.Logs.Error("CRASH", $"未处理异常：{e.Message} | {e.Exception}");
+                AppServices.Logs.Flush();
             }
             catch
             {
-                // Ignore logging errors.
+                // Ignore logging errors during crash handling.
             }
         }
 

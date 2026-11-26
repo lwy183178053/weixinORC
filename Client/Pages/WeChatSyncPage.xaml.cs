@@ -70,8 +70,7 @@ namespace Client.Pages
             DispatcherQueue.TryEnqueue(() =>
             {
                 foreach (var acc in _linkedAccounts) acc.NotifyVisualsChanged();
-                UpdateCurrentAccountCard();
-                UpdateKpiCards();
+                RefreshAccountAndKpiUi();
             });
         }
 
@@ -80,8 +79,7 @@ namespace Client.Pages
             DispatcherQueue.TryEnqueue(() =>
             {
                 SyncLinkedAccountsCollection();
-                UpdateCurrentAccountCard();
-                UpdateKpiCards();
+                RefreshAccountAndKpiUi();
             });
         }
 
@@ -125,8 +123,7 @@ namespace Client.Pages
             DispatcherQueue.TryEnqueue(() =>
             {
                 SyncLinkedAccountsCollection();
-                UpdateCurrentAccountCard();
-                UpdateKpiCards();
+                RefreshAccountAndKpiUi();
             });
         }
 
@@ -134,8 +131,19 @@ namespace Client.Pages
         {
             await AppServices.WeChat4Sync.RefreshMonitoredCountsAsync();
             SyncLinkedAccountsCollection();
-            UpdateCurrentAccountCard();
-            UpdateKpiCards();
+            RefreshAccountAndKpiUi();
+        }
+
+        private void RefreshAccountAndKpiUi()
+        {
+            bool wechatRunning = WeChat4Paths.FindWeixinProcesses().Count > 0;
+            string? fallbackLocalWxid = AppServices.WeChat4Sync.ActiveAccount?.Wxid;
+            if (string.IsNullOrWhiteSpace(fallbackLocalWxid))
+            {
+                fallbackLocalWxid = WeChat4Paths.ListAccountDirs(AppServices.Settings.Current.WeChatSyncAccountDir).FirstOrDefault()?.Wxid;
+            }
+            UpdateCurrentAccountCard(wechatRunning, fallbackLocalWxid ?? string.Empty);
+            UpdateKpiCards(wechatRunning, fallbackLocalWxid ?? string.Empty);
         }
 
         private void SyncLinkedAccountsCollection()
@@ -227,10 +235,10 @@ namespace Client.Pages
             }
         }
 
-        private void UpdateCurrentAccountCard()
+        private void UpdateCurrentAccountCard(bool? wechatRunningOverride = null, string? fallbackLocalWxidOverride = null)
         {
             var sync = AppServices.WeChat4Sync;
-            bool wechatRunning = WeChat4Paths.FindWeixinProcesses().Count > 0;
+            bool wechatRunning = wechatRunningOverride ?? WeChat4Paths.FindWeixinProcesses().Count > 0;
             var current = ResolveDisplayedCurrentAccount();
             var selfLocal = sync.ActiveReader?.SelfContact;
 
@@ -294,9 +302,11 @@ namespace Client.Pages
                 return;
             }
 
-            string localWxid = sync.ActiveAccount?.Wxid
-                ?? WeChat4Paths.ListAccountDirs(AppServices.Settings.Current.WeChatSyncAccountDir).FirstOrDefault()?.Wxid
-                ?? string.Empty;
+            string localWxid = !string.IsNullOrWhiteSpace(fallbackLocalWxidOverride)
+                ? fallbackLocalWxidOverride
+                : sync.ActiveAccount?.Wxid
+                    ?? WeChat4Paths.ListAccountDirs(AppServices.Settings.Current.WeChatSyncAccountDir).FirstOrDefault()?.Wxid
+                    ?? string.Empty;
 
             if (!string.IsNullOrWhiteSpace(localWxid))
             {
@@ -321,19 +331,20 @@ namespace Client.Pages
             CurrentAccountStatusText.Text = wechatRunning ? "待识别" : "未运行";
         }
 
-        private void UpdateKpiCards()
+        private void UpdateKpiCards(bool? wechatRunningOverride = null, string? fallbackLocalWxidOverride = null)
         {
             var sync = AppServices.WeChat4Sync;
-            var procs = WeChat4Paths.FindWeixinProcesses();
+            bool wechatRunning = wechatRunningOverride ?? WeChat4Paths.FindWeixinProcesses().Count > 0;
             var currentAcc = ResolveDisplayedCurrentAccount();
-            var accounts = WeChat4Paths.ListAccountDirs(AppServices.Settings.Current.WeChatSyncAccountDir);
             string accountLabel = currentAcc is not null
                 ? $"{currentAcc.DisplayName} ({currentAcc.DisplayAccountId})"
-                : sync.ActiveAccount?.Wxid
-                    ?? accounts.FirstOrDefault()?.Wxid
-                    ?? string.Empty;
+                : !string.IsNullOrWhiteSpace(fallbackLocalWxidOverride)
+                    ? fallbackLocalWxidOverride
+                    : sync.ActiveAccount?.Wxid
+                        ?? WeChat4Paths.ListAccountDirs(AppServices.Settings.Current.WeChatSyncAccountDir).FirstOrDefault()?.Wxid
+                        ?? string.Empty;
 
-            if (procs.Count > 0)
+            if (wechatRunning)
             {
                 KpiWeChatText.Text = "微信已运行";
                 KpiWeChatSubText.Text = !string.IsNullOrWhiteSpace(accountLabel)

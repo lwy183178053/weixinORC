@@ -298,6 +298,7 @@ namespace Client.Dialogs
                 {
                     var row = new CompactLogRow(entry);
                     _visibleLogs.Add(row);
+                    while (_visibleLogs.Count > 1000) _visibleLogs.RemoveAt(0);
                     UpdateLogSummary();
                     LogsListView.ScrollIntoView(row);
                 }

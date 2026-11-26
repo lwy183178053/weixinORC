@@ -35,6 +35,7 @@ namespace Client.Services.WeChat4Db
         private DateTimeOffset _lastSelfProfileSyncUtc = DateTimeOffset.MinValue;
         private string _lastSelfProfileSyncWxid = string.Empty;
         private long _syncRevision;
+        private int _resyncPendingAfterCurrent;
         private readonly HashSet<string> _uploadedSelfAvatarWxids = new(StringComparer.OrdinalIgnoreCase);
         private List<WeChatAccountDto> _knownAccounts = [];
 
@@ -177,6 +178,10 @@ namespace Client.Services.WeChat4Db
             finally
             {
                 _syncGate.Release();
+                if (Interlocked.Exchange(ref _resyncPendingAfterCurrent, 0) == 1 && IsFileWatcherRunning)
+                {
+                    ScheduleDebouncedTargetedSync("补同步期间到达的新消息");
+                }
             }
         }
 
@@ -194,6 +199,10 @@ namespace Client.Services.WeChat4Db
             finally
             {
                 _syncGate.Release();
+                if (Interlocked.Exchange(ref _resyncPendingAfterCurrent, 0) == 1 && IsFileWatcherRunning)
+                {
+                    ScheduleDebouncedTargetedSync("补同步期间到达的新消息");
+                }
             }
         }
 
@@ -408,6 +417,10 @@ namespace Client.Services.WeChat4Db
             finally
             {
                 _syncGate.Release();
+                if (Interlocked.Exchange(ref _resyncPendingAfterCurrent, 0) == 1 && IsFileWatcherRunning)
+                {
+                    ScheduleDebouncedTargetedSync("补同步期间到达的新消息");
+                }
             }
         }
 
@@ -429,6 +442,10 @@ namespace Client.Services.WeChat4Db
 
             if (!await _syncGate.WaitAsync(TimeSpan.FromSeconds(1), ct))
             {
+                if (isBackgroundAuto)
+                {
+                    Interlocked.Exchange(ref _resyncPendingAfterCurrent, 1);
+                }
                 return (false, "已有同步任务正在执行中。", null);
             }
 
@@ -584,6 +601,10 @@ namespace Client.Services.WeChat4Db
             finally
             {
                 _syncGate.Release();
+                if (Interlocked.Exchange(ref _resyncPendingAfterCurrent, 0) == 1 && IsFileWatcherRunning)
+                {
+                    ScheduleDebouncedTargetedSync("补同步期间到达的新消息");
+                }
             }
         }
 
@@ -982,6 +1003,10 @@ namespace Client.Services.WeChat4Db
             finally
             {
                 _syncGate.Release();
+                if (Interlocked.Exchange(ref _resyncPendingAfterCurrent, 0) == 1 && IsFileWatcherRunning)
+                {
+                    ScheduleDebouncedTargetedSync("补同步期间到达的新消息");
+                }
             }
         }
 
@@ -1057,86 +1082,6 @@ namespace Client.Services.WeChat4Db
                 AccountsUpdated?.Invoke();
             }
             catch { }
-        }
-
-        public async Task<(bool Ok, string Message)> SyncSingleCustomerMessagesAsync(CustomerDto target, int maxCount = 500, CancellationToken ct = default)
-        {
-            var ensured = await EnsureSnapshotReadyAsync(forceReload: true, ct: ct);
-            if (!ensured.Success || _activeReader is null)
-            {
-                return (false, ensured.ErrorMessage);
-            }
-
-            var reader = _activeReader;
-            var matched = reader.Friends.FirstOrDefault(f =>
-                (!string.IsNullOrWhiteSpace(target.NativeId) && f.Username.Equals(target.NativeId, StringComparison.OrdinalIgnoreCase)) ||
-                (!string.IsNullOrWhiteSpace(target.WechatAccount) && f.Alias.Equals(target.WechatAccount, StringComparison.OrdinalIgnoreCase)) ||
-                (!string.IsNullOrWhiteSpace(target.WechatRemark) && f.Remark.Equals(target.WechatRemark, StringComparison.OrdinalIgnoreCase)) ||
-                (!string.IsNullOrWhiteSpace(target.WechatName) && f.NickName.Equals(target.WechatName, StringComparison.OrdinalIgnoreCase)));
-
-            if (matched is null)
-            {
-                return (false, $"在当前微信账号中未找到好友「{target.DisplayName}」。");
-            }
-
-            var msgs = await Task.Run(() => reader.ReadMessages(matched.Username, maxCount, skipSystem: true, ct), ct);
-            if (msgs.Count == 0)
-            {
-                return (true, $"微信本地暂无「{target.DisplayName}」的新消息。");
-            }
-
-            var report = new WeChat4SyncReport();
-            await UploadAndSyncMessagesBatchAsync(
-                reader, matched.Username, msgs, isGroup: false, targetId: target.Id,
-                syncImages: AppServices.Settings.Current.WeChatSyncIncludeImages, report: report, ct: ct);
-
-            return (true, $"✓ 已同步「{target.DisplayName}」：新增 {report.CustomerMessagesInserted} 条消息，上传图片 {report.ChatImagesUploaded} 张。");
-        }
-
-        public async Task<(bool Ok, string Message)> SyncSingleGroupMessagesAsync(GroupDto target, int maxCount = 500, CancellationToken ct = default)
-        {
-            var ensured = await EnsureSnapshotReadyAsync(forceReload: true, ct: ct);
-            if (!ensured.Success || _activeReader is null)
-            {
-                return (false, ensured.ErrorMessage);
-            }
-
-            var reader = _activeReader;
-            var matched = reader.Groups.FirstOrDefault(g =>
-                (!string.IsNullOrWhiteSpace(target.GroupKey) && g.Username.Equals(target.GroupKey, StringComparison.OrdinalIgnoreCase)) ||
-                g.GroupName.Equals(target.GroupName, StringComparison.OrdinalIgnoreCase));
-
-            if (matched is null)
-            {
-                return (false, $"在当前微信账号中未找到群聊「{target.DisplayName}」。");
-            }
-
-            var msgs = await Task.Run(() => reader.ReadMessages(matched.Username, maxCount, skipSystem: true, ct), ct);
-            if (msgs.Count == 0)
-            {
-                return (true, $"微信本地暂无群聊「{target.DisplayName}」的新消息。");
-            }
-
-            var report = new WeChat4SyncReport();
-            await UploadAndSyncMessagesBatchAsync(
-                reader, matched.Username, msgs, isGroup: true, targetId: target.Id,
-                syncImages: AppServices.Settings.Current.WeChatSyncIncludeImages, report: report, ct: ct);
-
-            // Also upload group avatar if missing
-            if (string.IsNullOrWhiteSpace(target.AvatarUrl))
-            {
-                byte[]? bytes = await reader.TryGetGroupAvatarOrCollageBytesAsync(matched.Username, ct);
-                if (bytes is { Length: > 0 })
-                {
-                    var up = await AppServices.Backend.UploadGroupAvatarAsync(target.Id, bytes, ct);
-                    if (!up.IsSuccess)
-                    {
-                        AppServices.Logs.Warn("WX4", $"上传群头像失败 (groupId={target.Id})：{up.ErrorMessage}");
-                    }
-                }
-            }
-
-            return (true, $"✓ 已同步群聊「{target.DisplayName}」：新增 {report.GroupMessagesInserted} 条消息，上传图片 {report.ChatImagesUploaded} 张。");
         }
 
         private static async Task<List<WeChat4Message>> UploadAndSyncMessagesBatchAsync(
@@ -1285,22 +1230,6 @@ namespace Client.Services.WeChat4Db
         }
 
         // ---- File-Change-Driven Targeted Auto Watcher ----
-
-        public void SetCustomAccountDir(string dirPath)
-        {
-            var found = WeChat4Paths.ResolveSelectedDirs(dirPath);
-            if (found.Count > 0)
-            {
-                _activeAccount = found[0];
-                AppServices.Settings.Current.WeChatSyncAccountDir = found[0].AccountPath;
-                AppServices.Settings.Save();
-                RecordActivity($"已切换微信数据目录：{found[0].Wxid}");
-                if (AppServices.Settings.Current.WeChatAutoSyncEnabled)
-                {
-                    RestartFileWatcher();
-                }
-            }
-        }
 
         public void ConfigureAutoWatch(bool enabled)
         {

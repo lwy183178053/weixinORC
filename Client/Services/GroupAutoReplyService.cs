@@ -40,10 +40,16 @@ namespace Client.Services
             public bool? OverrideAutoSend { get; init; }
             public bool PrefixMention { get; init; }
             public Stopwatch TotalStopwatch { get; } = Stopwatch.StartNew();
+            public CancellationTokenSource? LinkedCts { get; init; }
             public CancellationToken CancellationToken { get; init; }
             public Task<(bool Ok, string Reply, string SourceMode, string Error)> GenerationTask { get; set; } = null!;
             public TaskCompletionSource<AutoReplyExecutionRecord>? ManualTcs { get; init; }
             public bool PreOpenAttempted { get; set; }
+
+            public void DisposeResources()
+            {
+                try { LinkedCts?.Dispose(); } catch { }
+            }
         }
 
         private readonly object _configLock = new();
@@ -135,6 +141,7 @@ namespace Client.Services
             foreach (var d in dropped)
             {
                 d.ManualTcs?.TrySetCanceled();
+                d.DisposeResources();
             }
 
             _isExecuting = false;
@@ -360,9 +367,18 @@ namespace Client.Services
                     double remainingSec = 0;
                     lock (_stateLock)
                     {
+                        var now = DateTimeOffset.UtcNow;
+                        if (_lastReplyAtByGroupSender.Count > 256)
+                        {
+                            var expired = _lastReplyAtByGroupSender
+                                .Where(kv => (now - kv.Value).TotalMinutes >= 60)
+                                .Select(kv => kv.Key)
+                                .ToList();
+                            foreach (string k in expired) _lastReplyAtByGroupSender.Remove(k);
+                        }
                         if (_lastReplyAtByGroupSender.TryGetValue(cooldownKey, out var lastAt))
                         {
-                            double elapsed = (DateTimeOffset.UtcNow - lastAt).TotalSeconds;
+                            double elapsed = (now - lastAt).TotalSeconds;
                             if (elapsed < cdSec)
                             {
                                 coolingDown = true;
@@ -371,7 +387,7 @@ namespace Client.Services
                         }
                         if (!coolingDown)
                         {
-                            _lastReplyAtByGroupSender[cooldownKey] = DateTimeOffset.UtcNow;
+                            _lastReplyAtByGroupSender[cooldownKey] = now;
                         }
                     }
 
@@ -437,9 +453,9 @@ namespace Client.Services
                 $"开始手动测试自动回复流程：群「{targetGroup.DisplayName}」，问题=「{Truncate(question, 80)}」，自动发送={(sendImmediately ? "是" : "否(仅粘贴)")}，并行预开={(Config.PreOpenGroupWhileGenerating ? "开" : "关")}");
 
             var tcs = new TaskCompletionSource<AutoReplyExecutionRecord>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var linkedCt = ct.CanBeCanceled
-                ? CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token, ct).Token
-                : _sessionCts.Token;
+            var linkedCts = ct.CanBeCanceled
+                ? CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token, ct)
+                : null;
 
             EnqueueItem(new QueuedAutoReplyItem
             {
@@ -454,7 +470,8 @@ namespace Client.Services
                 IsManualTest = true,
                 OverrideAutoSend = sendImmediately,
                 PrefixMention = false,
-                CancellationToken = linkedCt,
+                LinkedCts = linkedCts,
+                CancellationToken = linkedCts?.Token ?? _sessionCts.Token,
                 ManualTcs = tcs
             });
 
@@ -576,7 +593,10 @@ namespace Client.Services
                 bool alreadyPreparedForHead = currentPrepared is { Success: true } &&
                                               string.Equals(currentPrepared.GroupName, head.GroupName, StringComparison.OrdinalIgnoreCase);
 
-                if (Config.PreOpenGroupWhileGenerating && !alreadyPreparedForHead && !head.PreOpenAttempted)
+                if (Config.PreOpenGroupWhileGenerating &&
+                    (head.IsManualTest || Config.GlobalEnabled) &&
+                    !alreadyPreparedForHead &&
+                    !head.PreOpenAttempted)
                 {
                     head.PreOpenAttempted = true;
                     string qSuffix = snapshot.Count > 1 ? $" · 排队 {snapshot.Count} 条" : string.Empty;
@@ -665,6 +685,26 @@ namespace Client.Services
             string sourcePrefix = item.IsManualTest ? "测试·" : string.Empty;
             try
             {
+                if (!item.IsManualTest && !Config.GlobalEnabled)
+                {
+                    item.TotalStopwatch.Stop();
+                    ClearCooldownOnFailure(item);
+                    AppServices.Logs.Info("REPLY", $"全局自动回复已暂停，跳过发送排队中的群「{item.GroupName}」（{item.SenderName}）回复。");
+                    RecordExecution(new AutoReplyExecutionRecord
+                    {
+                        GroupId = item.GroupId,
+                        GroupName = item.GroupName,
+                        SenderName = item.SenderName,
+                        TriggerMessage = item.TriggerMessage,
+                        SourceMode = item.MatchedBy,
+                        StatusLabel = "已暂停跳过",
+                        IsSkipped = true,
+                        Detail = "AI 生成期间用户关闭了全局自动回复开关，已安全取消发送。",
+                        ElapsedMs = item.TotalStopwatch.ElapsedMilliseconds
+                    });
+                    return;
+                }
+
                 var (okGen, replyBody, sourceMode, genError) = await item.GenerationTask;
                 if (!okGen || string.IsNullOrWhiteSpace(replyBody))
                 {
@@ -784,6 +824,10 @@ namespace Client.Services
                 RecordExecution(exRec);
                 item.ManualTcs?.TrySetResult(exRec);
             }
+            finally
+            {
+                item.DisposeResources();
+            }
         }
 
         private void ClearCooldownOnFailure(QueuedAutoReplyItem item)
@@ -812,6 +856,7 @@ namespace Client.Services
             };
             RecordExecution(rec);
             item.ManualTcs?.TrySetResult(rec);
+            item.DisposeResources();
         }
 
         private void SignalQueueLocked()

@@ -13,10 +13,7 @@ namespace Client.Services
         public string WeChatExecutablePath { get; set; } = string.Empty;
         public List<string> CollapsedCustomerTags { get; set; } = [];
         public string WeChatSyncAccountDir { get; set; } = string.Empty;
-        public List<string> WeChatSyncSelectedTags { get; set; } = [];
-        public bool WeChatSyncIncludeUntagged { get; set; } = false;
         public bool WeChatAutoSyncEnabled { get; set; } = true;
-        public int WeChatAutoSyncIntervalMinutes { get; set; } = 5;
         public int WeChatSyncMaxMessagesPerSession { get; set; } = 500;
         public bool WeChatSyncIncludeImages { get; set; } = true;
         public bool WeChatSyncIncludeAvatars { get; set; } = true;
@@ -100,8 +97,6 @@ namespace Client.Services
                 Current.AccentPalette = "violet";
             }
             Current.CollapsedCustomerTags ??= [];
-            Current.WeChatSyncSelectedTags ??= [];
-            if (Current.WeChatAutoSyncIntervalMinutes < 1) Current.WeChatAutoSyncIntervalMinutes = 5;
             Current.LastWorkbenchSection = NormalizeWorkbenchSection(Current.LastWorkbenchSection);
             Current.LastCustomerRightTab = NormalizeRightTab(Current.LastCustomerRightTab);
             Current.LastGroupRightTab = NormalizeRightTab(Current.LastGroupRightTab);
@@ -321,110 +316,63 @@ namespace Client.Services
             }
         }
 
+        private readonly record struct Rgb(byte R, byte G, byte B);
+
+        private sealed record LightAccentSpec(
+            Rgb Primary, Rgb Hover, Rgb Pressed, Rgb Disabled,
+            Rgb SoftBg, Rgb SoftBorder, Rgb CardTint, Rgb HighlightText,
+            Rgb ChromeBg, Rgb RailBg, Rgb CanvasBg, Rgb FooterBg,
+            Rgb RailHoverBg, Rgb RailPressedBg);
+
+        private static readonly Dictionary<string, LightAccentSpec> LightAccentSpecs = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["peach"] = new(
+                new(0xD9, 0x7A, 0x54), new(0xC6, 0x68, 0x42), new(0xB2, 0x57, 0x34), new(0xEF, 0xBE, 0xAA),
+                new(0xFD, 0xF1, 0xEB), new(0xF6, 0xD9, 0xCA), new(0xFF, 0xF9, 0xF6), new(0xB5, 0x58, 0x35),
+                new(0xFA, 0xF6, 0xF3), new(0xF7, 0xF2, 0xEE), new(0xFC, 0xF9, 0xF7), new(0xFA, 0xF6, 0xF3),
+                new(0xF3, 0xE6, 0xDF), new(0xEA, 0xD6, 0xCC)),
+            ["blue"] = new(
+                new(0x3B, 0x82, 0xF6), new(0x25, 0x63, 0xEB), new(0x1D, 0x4E, 0xD8), new(0xA8, 0xC8, 0xFB),
+                new(0xEF, 0xF6, 0xFF), new(0xBF, 0xDB, 0xFE), new(0xF7, 0xFA, 0xFF), new(0x1D, 0x4E, 0xD8),
+                new(0xF3, 0xF6, 0xFB), new(0xF0, 0xF4, 0xFA), new(0xF8, 0xFA, 0xFD), new(0xF4, 0xF7, 0xFC),
+                new(0xE2, 0xEC, 0xFA), new(0xD3, 0xE3, 0xF8)),
+            ["amber"] = new(
+                new(0xD9, 0x91, 0x16), new(0xC0, 0x7D, 0x0E), new(0xA4, 0x69, 0x09), new(0xEC, 0xCC, 0x8E),
+                new(0xFE, 0xF7, 0xE6), new(0xF5, 0xDF, 0xAA), new(0xFF, 0xFB, 0xF2), new(0x9E, 0x63, 0x08),
+                new(0xFA, 0xF8, 0xF2), new(0xF7, 0xF4, 0xEC), new(0xFC, 0xFB, 0xF7), new(0xFA, 0xF8, 0xF2),
+                new(0xF3, 0xEC, 0xD8), new(0xEA, 0xE0, 0xC3)),
+            ["sage"] = new(
+                new(0x2E, 0x9E, 0x6B), new(0x23, 0x87, 0x59), new(0x1B, 0x70, 0x49), new(0x9F, 0xD4, 0xBB),
+                new(0xEA, 0xF8, 0xF1), new(0xBF, 0xE8, 0xD4), new(0xF5, 0xFC, 0xF8), new(0x1F, 0x7A, 0x51),
+                new(0xF3, 0xF8, 0xF5), new(0xF0, 0xF6, 0xF3), new(0xF7, 0xFB, 0xF9), new(0xF3, 0xF8, 0xF5),
+                new(0xE0, 0xF0, 0xE8), new(0xCF, 0xE7, 0xDC)),
+            ["violet"] = new(
+                new(0x7C, 0x5C, 0xFC), new(0x69, 0x46, 0xF5), new(0x58, 0x35, 0xE0), new(0xC4, 0xB5, 0xFD),
+                new(0xF1, 0xEE, 0xFF), new(0xDD, 0xD5, 0xFF), new(0xF8, 0xF7, 0xFF), new(0x5B, 0x3C, 0xE6),
+                new(0xF4, 0xF5, 0xF9), new(0xF2, 0xF3, 0xF8), new(0xF8, 0xF9, 0xFC), new(0xF7, 0xF8, 0xFC),
+                new(0xE7, 0xE5, 0xF8), new(0xDD, 0xD8, 0xFA))
+        };
+
         private static void ApplyLightAccentPalette(ResourceDictionary res, string paletteKey)
         {
-            switch (paletteKey.ToLowerInvariant())
-            {
-                case "peach": // 柔杏 / 暖肉色
-                    SetBrush(res, "BrandPrimaryBrush", 0xD9, 0x7A, 0x54);
-                    SetBrush(res, "BrandPrimaryHoverBrush", 0xC6, 0x68, 0x42);
-                    SetBrush(res, "BrandPrimaryPressedBrush", 0xB2, 0x57, 0x34);
-                    SetBrush(res, "BrandPrimaryDisabledBrush", 0xEF, 0xBE, 0xAA);
-                    SetBrush(res, "BrandSoftBgBrush", 0xFD, 0xF1, 0xEB);
-                    SetBrush(res, "BrandSoftBorderBrush", 0xF6, 0xD9, 0xCA);
-                    SetBrush(res, "BrandCardTintBrush", 0xFF, 0xF9, 0xF6);
-                    SetBrush(res, "BrandHighlightTextBrush", 0xB5, 0x58, 0x35);
-                    SetBrush(res, "AppChromeBgBrush", 0xFA, 0xF6, 0xF3);
-                    SetBrush(res, "AppRailBgBrush", 0xF7, 0xF2, 0xEE);
-                    SetBrush(res, "AppCanvasBgBrush", 0xFC, 0xF9, 0xF7);
-                    SetBrush(res, "AppFooterBgBrush", 0xFA, 0xF6, 0xF3);
-                    SetBrush(res, "RailHoverBgBrush", 0xF3, 0xE6, 0xDF);
-                    SetBrush(res, "RailPressedBgBrush", 0xEA, 0xD6, 0xCC);
-                    SetBrush(res, "AccentFillColorDefaultBrush", 0xD9, 0x7A, 0x54);
-                    SetBrush(res, "AccentFillColorSecondaryBrush", 0xC6, 0x68, 0x42);
-                    SetBrush(res, "AccentFillColorTertiaryBrush", 0xB2, 0x57, 0x34);
-                    break;
-
-                case "blue": // 晴空蓝
-                    SetBrush(res, "BrandPrimaryBrush", 0x3B, 0x82, 0xF6);
-                    SetBrush(res, "BrandPrimaryHoverBrush", 0x25, 0x63, 0xEB);
-                    SetBrush(res, "BrandPrimaryPressedBrush", 0x1D, 0x4E, 0xD8);
-                    SetBrush(res, "BrandPrimaryDisabledBrush", 0xA8, 0xC8, 0xFB);
-                    SetBrush(res, "BrandSoftBgBrush", 0xEF, 0xF6, 0xFF);
-                    SetBrush(res, "BrandSoftBorderBrush", 0xBF, 0xDB, 0xFE);
-                    SetBrush(res, "BrandCardTintBrush", 0xF7, 0xFA, 0xFF);
-                    SetBrush(res, "BrandHighlightTextBrush", 0x1D, 0x4E, 0xD8);
-                    SetBrush(res, "AppChromeBgBrush", 0xF3, 0xF6, 0xFB);
-                    SetBrush(res, "AppRailBgBrush", 0xF0, 0xF4, 0xFA);
-                    SetBrush(res, "AppCanvasBgBrush", 0xF8, 0xFA, 0xFD);
-                    SetBrush(res, "AppFooterBgBrush", 0xF4, 0xF7, 0xFC);
-                    SetBrush(res, "RailHoverBgBrush", 0xE2, 0xEC, 0xFA);
-                    SetBrush(res, "RailPressedBgBrush", 0xD3, 0xE3, 0xF8);
-                    SetBrush(res, "AccentFillColorDefaultBrush", 0x3B, 0x82, 0xF6);
-                    SetBrush(res, "AccentFillColorSecondaryBrush", 0x25, 0x63, 0xEB);
-                    SetBrush(res, "AccentFillColorTertiaryBrush", 0x1D, 0x4E, 0xD8);
-                    break;
-
-                case "amber": // 暖琥珀黄
-                    SetBrush(res, "BrandPrimaryBrush", 0xD9, 0x91, 0x16);
-                    SetBrush(res, "BrandPrimaryHoverBrush", 0xC0, 0x7D, 0x0E);
-                    SetBrush(res, "BrandPrimaryPressedBrush", 0xA4, 0x69, 0x09);
-                    SetBrush(res, "BrandPrimaryDisabledBrush", 0xEC, 0xCC, 0x8E);
-                    SetBrush(res, "BrandSoftBgBrush", 0xFE, 0xF7, 0xE6);
-                    SetBrush(res, "BrandSoftBorderBrush", 0xF5, 0xDF, 0xAA);
-                    SetBrush(res, "BrandCardTintBrush", 0xFF, 0xFB, 0xF2);
-                    SetBrush(res, "BrandHighlightTextBrush", 0x9E, 0x63, 0x08);
-                    SetBrush(res, "AppChromeBgBrush", 0xFA, 0xF8, 0xF2);
-                    SetBrush(res, "AppRailBgBrush", 0xF7, 0xF4, 0xEC);
-                    SetBrush(res, "AppCanvasBgBrush", 0xFC, 0xFB, 0xF7);
-                    SetBrush(res, "AppFooterBgBrush", 0xFA, 0xF8, 0xF2);
-                    SetBrush(res, "RailHoverBgBrush", 0xF3, 0xEC, 0xD8);
-                    SetBrush(res, "RailPressedBgBrush", 0xEA, 0xE0, 0xC3);
-                    SetBrush(res, "AccentFillColorDefaultBrush", 0xD9, 0x91, 0x16);
-                    SetBrush(res, "AccentFillColorSecondaryBrush", 0xC0, 0x7D, 0x0E);
-                    SetBrush(res, "AccentFillColorTertiaryBrush", 0xA4, 0x69, 0x09);
-                    break;
-
-                case "sage": // 清竹绿
-                    SetBrush(res, "BrandPrimaryBrush", 0x2E, 0x9E, 0x6B);
-                    SetBrush(res, "BrandPrimaryHoverBrush", 0x23, 0x87, 0x59);
-                    SetBrush(res, "BrandPrimaryPressedBrush", 0x1B, 0x70, 0x49);
-                    SetBrush(res, "BrandPrimaryDisabledBrush", 0x9F, 0xD4, 0xBB);
-                    SetBrush(res, "BrandSoftBgBrush", 0xEA, 0xF8, 0xF1);
-                    SetBrush(res, "BrandSoftBorderBrush", 0xBF, 0xE8, 0xD4);
-                    SetBrush(res, "BrandCardTintBrush", 0xF5, 0xFC, 0xF8);
-                    SetBrush(res, "BrandHighlightTextBrush", 0x1F, 0x7A, 0x51);
-                    SetBrush(res, "AppChromeBgBrush", 0xF3, 0xF8, 0xF5);
-                    SetBrush(res, "AppRailBgBrush", 0xF0, 0xF6, 0xF3);
-                    SetBrush(res, "AppCanvasBgBrush", 0xF7, 0xFB, 0xF9);
-                    SetBrush(res, "AppFooterBgBrush", 0xF3, 0xF8, 0xF5);
-                    SetBrush(res, "RailHoverBgBrush", 0xE0, 0xF0, 0xE8);
-                    SetBrush(res, "RailPressedBgBrush", 0xCF, 0xE7, 0xDC);
-                    SetBrush(res, "AccentFillColorDefaultBrush", 0x2E, 0x9E, 0x6B);
-                    SetBrush(res, "AccentFillColorSecondaryBrush", 0x23, 0x87, 0x59);
-                    SetBrush(res, "AccentFillColorTertiaryBrush", 0x1B, 0x70, 0x49);
-                    break;
-
-                default: // 暮紫（默认）
-                    SetBrush(res, "BrandPrimaryBrush", 0x7C, 0x5C, 0xFC);
-                    SetBrush(res, "BrandPrimaryHoverBrush", 0x69, 0x46, 0xF5);
-                    SetBrush(res, "BrandPrimaryPressedBrush", 0x58, 0x35, 0xE0);
-                    SetBrush(res, "BrandPrimaryDisabledBrush", 0xC4, 0xB5, 0xFD);
-                    SetBrush(res, "BrandSoftBgBrush", 0xF1, 0xEE, 0xFF);
-                    SetBrush(res, "BrandSoftBorderBrush", 0xDD, 0xD5, 0xFF);
-                    SetBrush(res, "BrandCardTintBrush", 0xF8, 0xF7, 0xFF);
-                    SetBrush(res, "BrandHighlightTextBrush", 0x5B, 0x3C, 0xE6);
-                    SetBrush(res, "AppChromeBgBrush", 0xF4, 0xF5, 0xF9);
-                    SetBrush(res, "AppRailBgBrush", 0xF2, 0xF3, 0xF8);
-                    SetBrush(res, "AppCanvasBgBrush", 0xF8, 0xF9, 0xFC);
-                    SetBrush(res, "AppFooterBgBrush", 0xF7, 0xF8, 0xFC);
-                    SetBrush(res, "RailHoverBgBrush", 0xE7, 0xE5, 0xF8);
-                    SetBrush(res, "RailPressedBgBrush", 0xDD, 0xD8, 0xFA);
-                    SetBrush(res, "AccentFillColorDefaultBrush", 0x7C, 0x5C, 0xFC);
-                    SetBrush(res, "AccentFillColorSecondaryBrush", 0x69, 0x46, 0xF5);
-                    SetBrush(res, "AccentFillColorTertiaryBrush", 0x58, 0x35, 0xE0);
-                    break;
-            }
+            var p = LightAccentSpecs.TryGetValue(paletteKey, out var found) ? found : LightAccentSpecs["violet"];
+            SetBrush(res, "BrandPrimaryBrush", p.Primary.R, p.Primary.G, p.Primary.B);
+            SetBrush(res, "BrandPrimaryHoverBrush", p.Hover.R, p.Hover.G, p.Hover.B);
+            SetBrush(res, "BrandPrimaryPressedBrush", p.Pressed.R, p.Pressed.G, p.Pressed.B);
+            SetBrush(res, "BrandPrimaryDisabledBrush", p.Disabled.R, p.Disabled.G, p.Disabled.B);
+            SetBrush(res, "BrandSoftBgBrush", p.SoftBg.R, p.SoftBg.G, p.SoftBg.B);
+            SetBrush(res, "BrandSoftBorderBrush", p.SoftBorder.R, p.SoftBorder.G, p.SoftBorder.B);
+            SetBrush(res, "BrandCardTintBrush", p.CardTint.R, p.CardTint.G, p.CardTint.B);
+            SetBrush(res, "BrandHighlightTextBrush", p.HighlightText.R, p.HighlightText.G, p.HighlightText.B);
+            SetBrush(res, "AppChromeBgBrush", p.ChromeBg.R, p.ChromeBg.G, p.ChromeBg.B);
+            SetBrush(res, "AppRailBgBrush", p.RailBg.R, p.RailBg.G, p.RailBg.B);
+            SetBrush(res, "AppCanvasBgBrush", p.CanvasBg.R, p.CanvasBg.G, p.CanvasBg.B);
+            SetBrush(res, "AppFooterBgBrush", p.FooterBg.R, p.FooterBg.G, p.FooterBg.B);
+            SetBrush(res, "RailHoverBgBrush", p.RailHoverBg.R, p.RailHoverBg.G, p.RailHoverBg.B);
+            SetBrush(res, "RailPressedBgBrush", p.RailPressedBg.R, p.RailPressedBg.G, p.RailPressedBg.B);
+            SetBrush(res, "AccentFillColorDefaultBrush", p.Primary.R, p.Primary.G, p.Primary.B);
+            SetBrush(res, "AccentFillColorSecondaryBrush", p.Hover.R, p.Hover.G, p.Hover.B);
+            SetBrush(res, "AccentFillColorTertiaryBrush", p.Pressed.R, p.Pressed.G, p.Pressed.B);
         }
 
         private static void SetBrush(ResourceDictionary res, string key, byte r, byte g, byte b, byte a = 255)

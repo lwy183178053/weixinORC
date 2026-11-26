@@ -1766,7 +1766,8 @@ namespace Client.Pages
                     MessageInputBox.Text = string.Empty;
                     ClearPendingChatImage();
                     ComposerHintText.Text = string.Empty;
-                    await LoadGroupsAsync(target.Id);
+                    await RefreshGroupMessagesIncrementallyAsync(target);
+                    await LoadGroupsAsync(target.Id, preserveCurrentDetail: true);
                 }
                 else
                 {

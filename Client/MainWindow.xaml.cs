@@ -34,7 +34,14 @@ namespace Client
             AppServices.MainWindowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
             try { AppServices.Backend.SetBaseUrl(AppServices.Settings.Current.BackendUrl); } catch { }
 
-            Closed += (_, _) => _isClosed = true;
+            Closed += (_, _) =>
+            {
+                _isClosed = true;
+                try { VoicePlaybackService.Shared.Dispose(); } catch { }
+                try { AppServices.WeChat4Sync.Dispose(); } catch { }
+                AppServices.Logs.Info("SYS", "客户端窗口关闭，已释放后台监听与媒体资源。");
+                AppServices.Logs.Flush();
+            };
             RootFrame.ContentTransitions = [];
 
             ConfigureTitleBar();

@@ -18,6 +18,7 @@ namespace Client.Services
         private InMemoryRandomAccessStream? _currentStream;
         private string? _currentUrl;
         private bool _isPlaying;
+        private int _playGeneration;
 
         public string? CurrentUrl => _currentUrl;
         public bool IsPlaying => _isPlaying;
@@ -39,27 +40,50 @@ namespace Client.Services
                 return (true, string.Empty);
             }
 
-            Stop();
+            int myGen = Interlocked.Increment(ref _playGeneration);
+            StopInternal(incrementGeneration: false);
 
             byte[]? bytes = await AppServices.Backend.DownloadChatAudioBytesAsync(audioUrl);
+            if (Volatile.Read(ref _playGeneration) != myGen)
+            {
+                return (true, string.Empty);
+            }
             if (bytes is null || bytes.Length < 44)
             {
                 return (false, "语音文件加载失败或暂未同步。");
             }
             bytes = WeChat4Db.WeChat4MediaDecoder.RepairMalformedKonataWav(bytes);
 
+            InMemoryRandomAccessStream? stream = null;
             try
             {
-                var stream = new InMemoryRandomAccessStream();
+                stream = new InMemoryRandomAccessStream();
                 await stream.WriteAsync(bytes.AsBuffer());
                 stream.Seek(0);
+
+                if (Volatile.Read(ref _playGeneration) != myGen)
+                {
+                    stream.Dispose();
+                    return (true, string.Empty);
+                }
 
                 string contentType = (bytes[0] == 'R' && bytes[1] == 'I') ? "audio/wav" : "audio/mpeg";
                 var source = MediaSource.CreateFromStream(stream, contentType);
 
                 lock (_lock)
                 {
+                    if (Volatile.Read(ref _playGeneration) != myGen)
+                    {
+                        stream.Dispose();
+                        return (true, string.Empty);
+                    }
+
+                    if (_currentStream is not null)
+                    {
+                        try { _currentStream.Dispose(); } catch { }
+                    }
                     _currentStream = stream;
+                    stream = null;
                     _currentUrl = audioUrl;
                     _isPlaying = true;
 
@@ -68,12 +92,16 @@ namespace Client.Services
                     _player.Play();
                 }
 
-                PlaybackStateChanged?.Invoke(_currentUrl, true);
+                PlaybackStateChanged?.Invoke(audioUrl, true);
                 return (true, string.Empty);
             }
             catch (Exception ex)
             {
-                Stop();
+                stream?.Dispose();
+                if (Volatile.Read(ref _playGeneration) == myGen)
+                {
+                    Stop();
+                }
                 return (false, $"语音播放失败：{ex.Message}");
             }
         }
@@ -93,8 +121,15 @@ namespace Client.Services
             return player;
         }
 
-        public void Stop()
+        public void Stop() => StopInternal(incrementGeneration: true);
+
+        private void StopInternal(bool incrementGeneration)
         {
+            if (incrementGeneration)
+            {
+                Interlocked.Increment(ref _playGeneration);
+            }
+
             string? prevUrl;
             lock (_lock)
             {

@@ -1875,7 +1875,8 @@ namespace Client.Pages
                     MessageInputBox.Text = string.Empty;
                     ClearPendingChatImage();
                     ComposerHintText.Text = string.Empty;
-                    await LoadCustomersAsync(target.Id);
+                    await RefreshCustomerMessagesIncrementallyAsync(target);
+                    await LoadCustomersAsync(target.Id, preserveCurrentDetail: true);
                 }
                 else
                 {

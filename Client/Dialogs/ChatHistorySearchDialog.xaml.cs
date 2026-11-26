@@ -133,70 +133,27 @@ namespace Client.Dialogs
                 while (fetched < maxToFetch)
                 {
                     ct.ThrowIfCancellationRequested();
-                    if (_isGroup)
+                    var (ok, err, nextCursor, pageItems) = await FetchSearchPageAsync(ct);
+                    if (!ok)
                     {
-                        var res = await AppServices.Backend.ListGroupMessagesAsync(_targetId, limit: 100, cursor: _nextCursor, ct: ct);
-                        if (!res.IsSuccess || res.Data is null)
+                        if (_allItems.Count == 0)
                         {
-                            if (_allItems.Count == 0)
-                            {
-                                DialogSubtitleText.Text = $"加载群聊记录失败：{res.ErrorMessage}";
-                            }
-                            break;
+                            DialogSubtitleText.Text = $"加载{(_isGroup ? "群聊" : "聊天")}记录失败：{err}";
                         }
-                        foreach (var m in res.Data.Items)
-                        {
-                            if (_loadedIds.Add(m.Id))
-                            {
-                                _allItems.Add(new ChatHistorySearchItem
-                                {
-                                    Id = m.Id,
-                                    SenderName = m.IsOutgoing ? "我" : (string.IsNullOrWhiteSpace(m.SenderName) ? "群成员" : m.SenderName),
-                                    IsOutgoing = m.IsOutgoing,
-                                    Content = m.Content ?? string.Empty,
-                                    ImageUrl = m.ImageUrl ?? string.Empty,
-                                    AudioUrl = m.AudioUrl ?? string.Empty,
-                                    VideoUrl = m.VideoUrl ?? string.Empty,
-                                    LocalTime = ParseLocalDateTime(m.SentAt)
-                                });
-                            }
-                        }
-                        fetched += res.Data.Items.Count;
-                        _nextCursor = res.Data.NextCursor;
-                        if (res.Data.Items.Count == 0 || _nextCursor <= 0) break;
+                        break;
                     }
-                    else
+
+                    foreach (var item in pageItems)
                     {
-                        var res = await AppServices.Backend.ListCustomerMessagesAsync(_targetId, limit: 100, cursor: _nextCursor, ct: ct);
-                        if (!res.IsSuccess || res.Data is null)
+                        if (_loadedIds.Add(item.Id))
                         {
-                            if (_allItems.Count == 0)
-                            {
-                                DialogSubtitleText.Text = $"加载聊天记录失败：{res.ErrorMessage}";
-                            }
-                            break;
+                            _allItems.Add(item);
                         }
-                        foreach (var m in res.Data.Items)
-                        {
-                            if (_loadedIds.Add(m.Id))
-                            {
-                                _allItems.Add(new ChatHistorySearchItem
-                                {
-                                    Id = m.Id,
-                                    SenderName = m.IsOutgoing ? "我" : _peerFallbackName,
-                                    IsOutgoing = m.IsOutgoing,
-                                    Content = m.Content ?? string.Empty,
-                                    ImageUrl = m.ImageUrl ?? string.Empty,
-                                    AudioUrl = m.AudioUrl ?? string.Empty,
-                                    VideoUrl = m.VideoUrl ?? string.Empty,
-                                    LocalTime = ParseLocalDateTime(m.SentAt)
-                                });
-                            }
-                        }
-                        fetched += res.Data.Items.Count;
-                        _nextCursor = res.Data.NextCursor;
-                        if (res.Data.Items.Count == 0 || _nextCursor <= 0) break;
                     }
+
+                    fetched += pageItems.Count;
+                    _nextCursor = nextCursor;
+                    if (pageItems.Count == 0 || _nextCursor <= 0) break;
 
                     LoadingText.Text = $"已加载 {_allItems.Count} 条聊天记录...";
                 }
@@ -221,6 +178,47 @@ namespace Client.Dialogs
             }
         }
 
+        private async Task<(bool Ok, string Error, long NextCursor, List<ChatHistorySearchItem> Items)> FetchSearchPageAsync(CancellationToken ct)
+        {
+            if (_isGroup)
+            {
+                var res = await AppServices.Backend.ListGroupMessagesAsync(_targetId, limit: 100, cursor: _nextCursor, ct: ct);
+                if (!res.IsSuccess || res.Data is null) return (false, res.ErrorMessage, 0, []);
+                var list = res.Data.Items.Select(m => new ChatHistorySearchItem
+                {
+                    Id = m.Id,
+                    SenderName = m.IsOutgoing ? "我" : (string.IsNullOrWhiteSpace(m.SenderName) ? "群成员" : m.SenderName),
+                    IsOutgoing = m.IsOutgoing,
+                    Content = m.Content ?? string.Empty,
+                    ImageUrl = m.ImageUrl ?? string.Empty,
+                    AudioUrl = m.AudioUrl ?? string.Empty,
+                    VideoUrl = m.VideoUrl ?? string.Empty,
+                    LocalTime = ParseLocalDateTime(m.SentAt)
+                }).ToList();
+                return (true, string.Empty, res.Data.NextCursor, list);
+            }
+            else
+            {
+                var res = await AppServices.Backend.ListCustomerMessagesAsync(_targetId, limit: 100, cursor: _nextCursor, ct: ct);
+                if (!res.IsSuccess || res.Data is null) return (false, res.ErrorMessage, 0, []);
+                var list = res.Data.Items.Select(m => new ChatHistorySearchItem
+                {
+                    Id = m.Id,
+                    SenderName = m.IsOutgoing ? "我" : _peerFallbackName,
+                    IsOutgoing = m.IsOutgoing,
+                    Content = m.Content ?? string.Empty,
+                    ImageUrl = m.ImageUrl ?? string.Empty,
+                    AudioUrl = m.AudioUrl ?? string.Empty,
+                    VideoUrl = m.VideoUrl ?? string.Empty,
+                    LocalTime = ParseLocalDateTime(m.SentAt)
+                }).ToList();
+                return (true, string.Empty, res.Data.NextCursor, list);
+            }
+        }
+
+        private static DateTimeOffset ToLocalDateOffset(DateOnly d) =>
+            new(new DateTime(d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Local));
+
         private void RebuildDateBoundsAndChips()
         {
             var dateGroups = _allItems
@@ -234,10 +232,8 @@ namespace Client.Dialogs
 
             if (dateGroups.Count > 0)
             {
-                var minDate = dateGroups[^1].Key;
-                var maxDate = dateGroups[0].Key;
-                ChatDatePicker.MinDate = new DateTimeOffset(minDate.Year, minDate.Month, minDate.Day, 0, 0, 0, TimeSpan.Zero);
-                ChatDatePicker.MaxDate = new DateTimeOffset(maxDate.Year, maxDate.Month, maxDate.Day, 0, 0, 0, TimeSpan.Zero);
+                ChatDatePicker.MinDate = ToLocalDateOffset(dateGroups[^1].Key);
+                ChatDatePicker.MaxDate = ToLocalDateOffset(dateGroups[0].Key);
             }
 
             DateChipsPanel.Children.Clear();
@@ -367,7 +363,7 @@ namespace Client.Dialogs
         {
             if (_isUpdatingDatePicker) return;
             _selectedDate = args.NewDate.HasValue
-                ? DateOnly.FromDateTime(args.NewDate.Value.DateTime)
+                ? DateOnly.FromDateTime(args.NewDate.Value.LocalDateTime)
                 : null;
             ApplySearchAndFilter();
         }
@@ -389,9 +385,7 @@ namespace Client.Dialogs
             _isUpdatingDatePicker = true;
             try
             {
-                ChatDatePicker.Date = date.HasValue
-                    ? new DateTimeOffset(date.Value.Year, date.Value.Month, date.Value.Day, 0, 0, 0, TimeSpan.Zero)
-                    : null;
+                ChatDatePicker.Date = date.HasValue ? ToLocalDateOffset(date.Value) : null;
             }
             finally
             {

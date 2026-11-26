@@ -133,6 +133,28 @@ namespace Client.Services
             LogsCleared?.Invoke(this, EventArgs.Empty);
         }
 
+        /// <summary>
+        /// Synchronously drains pending queued log lines to disk (called on app shutdown / crash).
+        /// </summary>
+        public void Flush()
+        {
+            var batch = new StringBuilder(2048);
+            while (_fileQueue.TryDequeue(out string? line))
+            {
+                batch.AppendLine(line);
+            }
+            if (batch.Length == 0) return;
+
+            try
+            {
+                Directory.CreateDirectory(LogDirectory);
+                File.AppendAllText(CurrentLogFilePath, batch.ToString(), Encoding.UTF8);
+            }
+            catch
+            {
+            }
+        }
+
         public bool OpenLogDirectory()
         {
             try

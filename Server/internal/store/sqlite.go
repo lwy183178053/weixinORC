@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	customer_id INTEGER NOT NULL,
 	direction   TEXT NOT NULL CHECK (direction IN ('incoming', 'outgoing')),
 	content     TEXT NOT NULL,
+	image_url   TEXT NOT NULL DEFAULT '',
 	sent_at     TEXT NOT NULL,
 	created_at  TEXT NOT NULL,
 	FOREIGN KEY (customer_id, owner_id) REFERENCES customers(id, owner_id) ON DELETE CASCADE
@@ -72,6 +73,8 @@ CREATE TABLE IF NOT EXISTS groups (
 	owner_id     TEXT NOT NULL,
 	group_name   TEXT NOT NULL DEFAULT '',
 	group_key    TEXT NOT NULL DEFAULT '',
+	my_nickname  TEXT NOT NULL DEFAULT '',
+	avatar_url   TEXT NOT NULL DEFAULT '',
 	member_count INTEGER NOT NULL DEFAULT 0,
 	members_text TEXT NOT NULL DEFAULT '',
 	note         TEXT NOT NULL DEFAULT '',
@@ -91,7 +94,14 @@ CREATE TABLE IF NOT EXISTS group_members (
 	native_id      TEXT NOT NULL DEFAULT '',
 	group_nickname TEXT NOT NULL DEFAULT '',
 	wechat_name    TEXT NOT NULL DEFAULT '',
+	wechat_remark  TEXT NOT NULL DEFAULT '',
 	wechat_account TEXT NOT NULL DEFAULT '',
+	gender         TEXT NOT NULL DEFAULT '',
+	avatar_url     TEXT NOT NULL DEFAULT '',
+	region         TEXT NOT NULL DEFAULT '',
+	phone          TEXT NOT NULL DEFAULT '',
+	signature      TEXT NOT NULL DEFAULT '',
+	source         TEXT NOT NULL DEFAULT '',
 	role           TEXT NOT NULL DEFAULT '',
 	note           TEXT NOT NULL DEFAULT '',
 	created_at     TEXT NOT NULL,
@@ -109,6 +119,7 @@ CREATE TABLE IF NOT EXISTS group_messages (
 	sender_name TEXT NOT NULL DEFAULT '',
 	direction   TEXT NOT NULL CHECK (direction IN ('incoming', 'outgoing')),
 	content     TEXT NOT NULL,
+	image_url   TEXT NOT NULL DEFAULT '',
 	sent_at     TEXT NOT NULL,
 	created_at  TEXT NOT NULL,
 	FOREIGN KEY (group_id, owner_id) REFERENCES groups(id, owner_id) ON DELETE CASCADE
@@ -177,6 +188,7 @@ CREATE INDEX IF NOT EXISTS knowledge_items_id_idx
 type Store struct {
 	db      *sql.DB
 	dataDir string
+	hasFTS5 bool
 }
 
 func Open(path string) (*Store, error) {
@@ -194,6 +206,15 @@ func Open(path string) (*Store, error) {
 	}
 	if err := os.MkdirAll(filepath.Join(dataDir, "avatars"), 0o750); err != nil {
 		return nil, fmt.Errorf("create avatars directory: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dataDir, "chat_images"), 0o750); err != nil {
+		return nil, fmt.Errorf("create chat_images directory: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dataDir, "chat_audio"), 0o750); err != nil {
+		return nil, fmt.Errorf("create chat_audio directory: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dataDir, "chat_video"), 0o750); err != nil {
+		return nil, fmt.Errorf("create chat_video directory: %w", err)
 	}
 
 	dsn := buildSQLiteDSN(absPath)
@@ -214,7 +235,70 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("migrate customers table: %w", err)
 	}
 
-	return &Store{db: db, dataDir: dataDir}, nil
+	hasFTS5 := initChatFTS5(db)
+
+	return &Store{db: db, dataDir: dataDir, hasFTS5: hasFTS5}, nil
+}
+
+// initChatFTS5 creates trigram FTS5 virtual tables and sync triggers for messages and group_messages
+// so AI cross-session keyword search stays millisecond-fast even with 100k+ messages.
+// Gracefully returns false if FTS5 trigram is unavailable in the underlying SQLite build.
+func initChatFTS5(db *sql.DB) bool {
+	stmts := []string{
+		`CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+			content,
+			content='messages',
+			content_rowid='id',
+			tokenize='trigram'
+		)`,
+		`CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+			INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+			INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF content ON messages BEGIN
+			INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
+			INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+		END`,
+		`CREATE VIRTUAL TABLE IF NOT EXISTS group_messages_fts USING fts5(
+			sender_name,
+			content,
+			content='group_messages',
+			content_rowid='id',
+			tokenize='trigram'
+		)`,
+		`CREATE TRIGGER IF NOT EXISTS group_messages_fts_ai AFTER INSERT ON group_messages BEGIN
+			INSERT INTO group_messages_fts(rowid, sender_name, content) VALUES (new.id, new.sender_name, new.content);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS group_messages_fts_ad AFTER DELETE ON group_messages BEGIN
+			INSERT INTO group_messages_fts(group_messages_fts, rowid, sender_name, content) VALUES('delete', old.id, old.sender_name, old.content);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS group_messages_fts_au AFTER UPDATE OF sender_name, content ON group_messages BEGIN
+			INSERT INTO group_messages_fts(group_messages_fts, rowid, sender_name, content) VALUES('delete', old.id, old.sender_name, old.content);
+			INSERT INTO group_messages_fts(rowid, sender_name, content) VALUES (new.id, new.sender_name, new.content);
+		END`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return false
+		}
+	}
+
+	// One-time backfill for pre-existing rows if the FTS5 index is empty while source table has rows
+	var srcCount, ftsCount int64
+	if err := db.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&srcCount); err == nil && srcCount > 0 {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM messages_fts_docsize`).Scan(&ftsCount); err == nil && ftsCount == 0 {
+			_, _ = db.Exec(`INSERT INTO messages_fts(messages_fts) VALUES('rebuild')`)
+		}
+	}
+	srcCount, ftsCount = 0, 0
+	if err := db.QueryRow(`SELECT COUNT(*) FROM group_messages`).Scan(&srcCount); err == nil && srcCount > 0 {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM group_messages_fts_docsize`).Scan(&ftsCount); err == nil && ftsCount == 0 {
+			_, _ = db.Exec(`INSERT INTO group_messages_fts(group_messages_fts) VALUES('rebuild')`)
+		}
+	}
+	return true
 }
 
 func buildSQLiteDSN(absPath string) string {
@@ -235,7 +319,22 @@ func (s *Store) AvatarDir() string {
 	return filepath.Join(s.dataDir, "avatars")
 }
 
-// migrateCustomerColumns safely adds new profile columns to pre-existing SQLite databases.
+// ChatImageDir returns the local directory where uploaded chat message image files are stored.
+func (s *Store) ChatImageDir() string {
+	return filepath.Join(s.dataDir, "chat_images")
+}
+
+// ChatAudioDir returns the local directory where uploaded voice message WAV files are stored.
+func (s *Store) ChatAudioDir() string {
+	return filepath.Join(s.dataDir, "chat_audio")
+}
+
+// ChatVideoDir returns the local directory where uploaded chat video MP4/MOV files are stored.
+func (s *Store) ChatVideoDir() string {
+	return filepath.Join(s.dataDir, "chat_video")
+}
+
+// migrateCustomerColumns safely adds new columns to pre-existing SQLite databases.
 func migrateCustomerColumns(db *sql.DB) error {
 	extraCols := []string{
 		"wechat_remark", "region", "phone", "signature", "source", "added_date",
@@ -243,6 +342,51 @@ func migrateCustomerColumns(db *sql.DB) error {
 	}
 	for _, col := range extraCols {
 		_, err := db.Exec(fmt.Sprintf(`ALTER TABLE customers ADD COLUMN %s TEXT NOT NULL DEFAULT ''`, col))
+		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
+	}
+	for _, tbl := range []string{"messages", "group_messages"} {
+		_, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN image_url TEXT NOT NULL DEFAULT ''`, tbl))
+		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
+		_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN audio_url TEXT NOT NULL DEFAULT ''`, tbl))
+		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
+		_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN video_url TEXT NOT NULL DEFAULT ''`, tbl))
+		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
+		_, err = db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN external_id TEXT NOT NULL DEFAULT ''`, tbl))
+		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
+	}
+	syncIndexes := []string{
+		`CREATE INDEX IF NOT EXISTS customers_owner_native_id_idx ON customers(owner_id, native_id) WHERE native_id <> ''`,
+		`CREATE INDEX IF NOT EXISTS groups_owner_group_key_idx ON groups(owner_id, group_key) WHERE group_key <> ''`,
+		`CREATE INDEX IF NOT EXISTS group_members_owner_group_native_idx ON group_members(owner_id, group_id, native_id) WHERE native_id <> ''`,
+		`CREATE INDEX IF NOT EXISTS messages_owner_customer_sent_idx ON messages(owner_id, customer_id, sent_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS group_messages_owner_group_sent_idx ON group_messages(owner_id, group_id, sent_at DESC, id DESC)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS messages_owner_customer_ext_uidx ON messages(owner_id, customer_id, external_id) WHERE external_id <> ''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS group_messages_owner_group_ext_uidx ON group_messages(owner_id, group_id, external_id) WHERE external_id <> ''`,
+	}
+	for _, stmt := range syncIndexes {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(`ALTER TABLE groups ADD COLUMN my_nickname TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+		return err
+	}
+	if _, err := db.Exec(`ALTER TABLE groups ADD COLUMN avatar_url TEXT NOT NULL DEFAULT ''`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+		return err
+	}
+	memberExtraCols := []string{"wechat_remark", "gender", "avatar_url", "region", "phone", "signature", "source"}
+	for _, col := range memberExtraCols {
+		_, err := db.Exec(fmt.Sprintf(`ALTER TABLE group_members ADD COLUMN %s TEXT NOT NULL DEFAULT ''`, col))
 		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return err
 		}

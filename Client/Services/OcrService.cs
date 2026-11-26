@@ -7,7 +7,7 @@ namespace Client.Services
 {
     public sealed class OcrService
     {
-        private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".bmp"];
+        private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".bmp", ".webp"];
 
         private readonly RapidOcrEngine _rapidEngine;
 
@@ -49,7 +49,7 @@ namespace Client.Services
             }
         }
 
-        public async Task<SoftwareBitmap> LoadImageFileFromPathAsync(string filePath)
+        public static async Task<SoftwareBitmap> LoadImageFileFromPathAsync(string filePath)
         {
             byte[] bytes = await File.ReadAllBytesAsync(filePath).ConfigureAwait(false);
             using var mem = new MemoryStream(bytes, writable: false);
@@ -64,7 +64,7 @@ namespace Client.Services
         /// Reads a screenshot bitmap or copied image file directly from the Windows clipboard.
         /// Must be called on the UI thread (WinRT Clipboard requirement).
         /// </summary>
-        public async Task<(SoftwareBitmap? Bitmap, string SourceLabel)> TryLoadImageFromClipboardAsync()
+        public static async Task<(SoftwareBitmap? Bitmap, string SourceLabel)> TryLoadImageFromClipboardAsync()
         {
             var data = Clipboard.GetContent();
             if (data is null)

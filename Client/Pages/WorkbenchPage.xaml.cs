@@ -10,6 +10,8 @@ namespace Client.Pages
 {
     public sealed partial class WorkbenchPage : Page
     {
+        public static WorkbenchPage? Current { get; private set; }
+
         private string _activeTag = "customers";
         private bool _isLoggingOut;
         private Storyboard? _tabFadeStoryboard;
@@ -17,6 +19,7 @@ namespace Client.Pages
         public WorkbenchPage()
         {
             InitializeComponent();
+            Current = this;
             WorkspaceFrame.ContentTransitions = [];
             Loaded += WorkbenchPage_Loaded;
             Unloaded += WorkbenchPage_Unloaded;
@@ -26,15 +29,23 @@ namespace Client.Pages
         {
             Loaded -= WorkbenchPage_Loaded;
             AppServices.Settings.ThemeChanged += OnThemeChanged;
+            AppServices.WeChat4Sync.AutoSyncStatusChanged += OnAutoSyncStatusChanged;
             MainWindow.Instance?.SetDragRegion(WorkbenchDragRegion);
             RefreshHeaderAndFooter();
             UpdateThemeToggleVisual(AppServices.Settings.IsDarkMode);
+            AppServices.WeChat4Sync.StartAutoSyncIfConfigured();
             SwitchSection("customers");
         }
 
         private void WorkbenchPage_Unloaded(object sender, RoutedEventArgs e)
         {
             AppServices.Settings.ThemeChanged -= OnThemeChanged;
+            AppServices.WeChat4Sync.AutoSyncStatusChanged -= OnAutoSyncStatusChanged;
+        }
+
+        private void OnAutoSyncStatusChanged(string status)
+        {
+            DispatcherQueue.TryEnqueue(() => FooterOcrText.Text = status);
         }
 
         private void OnThemeChanged(bool isDark)
@@ -66,7 +77,7 @@ namespace Client.Pages
                 FooterEmployeeText.Text = $"员工 ID: {employee.EmployeeId}";
             }
 
-            FooterOcrText.Text = AppServices.Ocr.RapidEngine.IsAvailable ? "识别服务: 就绪" : "识别服务: 未就绪";
+            FooterOcrText.Text = AppServices.WeChat4Sync.WatchStatusText;
         }
 
         private void RailNav_Click(object sender, RoutedEventArgs e)
@@ -88,7 +99,7 @@ namespace Client.Pages
                 "groups" => (typeof(GroupsPage), "群组档案"),
                 "ai" => (typeof(AiAssistantPage), "AI 助手"),
                 "guide" => (typeof(GuidePage), "使用介绍"),
-                _ => (typeof(WeChatOcrPage), "微信监控")
+                _ => (typeof(WeChatSyncPage), "微信监听")
             };
 
             ActiveTabTitleText.Text = title;
@@ -186,6 +197,7 @@ namespace Client.Pages
             _isLoggingOut = true;
             try
             {
+                AppServices.WeChat4Sync.StopAutoSyncTimer();
                 await AppServices.Backend.LogoutAsync();
                 MainWindow.Instance?.ShowLoginView();
             }

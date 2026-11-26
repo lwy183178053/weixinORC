@@ -8,12 +8,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:models="using:Client.Models"
     xmlns:services="using:Client.Services"
-    KeyboardAcceleratorPlacementMode="Hidden"
     mc:Ignorable="d">
-
-    <Page.KeyboardAccelerators>
-        <KeyboardAccelerator Key="V" Modifiers="Control" Invoked="PasteAccelerator_Invoked" />
-    </Page.KeyboardAccelerators>
 
     <Grid x:Name="RootThreePaneGrid" Background="{StaticResource AppSurfaceBrush}">
         <Grid.ColumnDefinitions>
@@ -76,7 +71,7 @@
                             Click="AddCustomerButton_Click"
                             CornerRadius="6"
                             Style="{StaticResource PrimaryVioletButtonStyle}"
-                            ToolTipService.ToolTip="添加客户（截图识别 / 微信标签批量导入）">
+                            ToolTipService.ToolTip="从微信添加/导入客户">
                             <FontIcon FontSize="13" Foreground="#FFFFFF" Glyph="&#xE710;" />
                         </Button>
                     </Grid>
@@ -311,12 +306,12 @@
                         Spacing="10"
                         Visibility="Collapsed">
                         <TextBlock HorizontalAlignment="Center" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="暂无客户档案" />
-                        <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="点击上方「+」弹窗截图识别导入，或截图复制后直接按 Ctrl+V。" TextAlignment="Center" TextWrapping="Wrap" />
+                        <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="点击下方或左上角「+」，按微信标签挑选好友导入，导入后自动监听消息更新。" TextAlignment="Center" TextWrapping="Wrap" />
                         <Button
                             HorizontalAlignment="Center"
                             Height="32"
                             Click="AddCustomerButton_Click"
-                            Content="+ 新建 / 截图导入"
+                            Content="从微信选择好友导入"
                             FontSize="12"
                             Style="{StaticResource PrimaryVioletButtonStyle}" />
                     </StackPanel>
@@ -346,12 +341,24 @@
                 <Grid>
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <TextBlock x:Name="ActiveCustomerTitle" FontSize="15.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="请选择左侧客户" />
-                        <TextBlock x:Name="ActiveCustomerMeta" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="点左上角「+」可弹出截图识别导入窗口" />
+                        <TextBlock x:Name="ActiveCustomerMeta" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="点击左上角「+」按微信标签挑选并导入客户，导入后自动监听新消息" />
                     </StackPanel>
 
                     <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                        <Button
+                            x:Name="SyncTagsNowButton"
+                            Height="30"
+                            Padding="11,0"
+                            Click="SyncTagsNowButton_Click"
+                            FontSize="12"
+                            Style="{StaticResource SecondaryOutlineButtonStyle}"
+                            ToolTipService.ToolTip="同步已导入客户的最新微信资料与聊天记录并刷新列表">
+                            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                <FontIcon FontSize="12" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE895;" />
+                                <TextBlock Text="刷新同步" />
+                            </StackPanel>
+                        </Button>
                         <Button x:Name="MultiSelectMessagesButton" Height="30" Padding="10,0" Click="MultiSelectMessagesButton_Click" Content="多选" FontSize="12" IsEnabled="False" Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                        <Button Height="30" Padding="10,0" Click="RefreshButton_Click" Content="刷新" FontSize="12" Style="{StaticResource SecondaryOutlineButtonStyle}" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -360,13 +367,37 @@
             <Grid Grid.Row="1">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
+
+                <!-- Load Older Messages Strip (Visible when history has more pages) -->
+                <Border
+                    x:Name="LoadOlderMessagesBar"
+                    Grid.Row="0"
+                    Padding="0,6,0,2"
+                    Background="Transparent"
+                    Visibility="Collapsed">
+                    <Button
+                        x:Name="LoadOlderMessagesButton"
+                        Height="26"
+                        Padding="12,0"
+                        HorizontalAlignment="Center"
+                        Click="LoadOlderMessagesButton_Click"
+                        CornerRadius="13"
+                        FontSize="11.5"
+                        Style="{StaticResource SecondaryOutlineButtonStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                            <FontIcon FontSize="11" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE81C;" />
+                            <TextBlock x:Name="LoadOlderMessagesText" Text="查看更早聊天记录" />
+                        </StackPanel>
+                    </Button>
+                </Border>
 
                 <!-- Multi-Select Action Bar -->
                 <Border
                     x:Name="MessageMultiSelectBar"
-                    Grid.Row="0"
+                    Grid.Row="1"
                     Padding="14,8"
                     Background="{StaticResource BrandSoftBgBrush}"
                     BorderBrush="{StaticResource BrandSoftBorderBrush}"
@@ -382,15 +413,15 @@
                     </Grid>
                 </Border>
 
-                <StackPanel x:Name="EmptyChatHint" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
+                <StackPanel x:Name="EmptyChatHint" Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
                     <Border Width="52" Height="52" HorizontalAlignment="Center" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="14">
                         <FontIcon FontSize="22" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8BD;" />
                     </Border>
                     <TextBlock x:Name="EmptyChatTitle" HorizontalAlignment="Center" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="暂无聊天记录" />
-                    <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="可在下方输入或点击“粘贴截图提取文字”记录对话" />
+                    <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="可点击顶部「刷新同步」拉取微信聊天记录，或在下方直接补充对话" />
                 </StackPanel>
 
-                <ListView x:Name="MessagesListView" Grid.Row="1" Padding="18,14" IsItemClickEnabled="True" ItemClick="MessagesListView_ItemClick" SelectionMode="None">
+                <ListView x:Name="MessagesListView" Grid.Row="2" Padding="18,14" IsItemClickEnabled="False" ItemClick="MessagesListView_ItemClick" SelectionMode="None">
                     <ListView.ItemContainerTransitions>
                         <TransitionCollection />
                     </ListView.ItemContainerTransitions>
@@ -434,7 +465,10 @@
                                         <StackPanel Grid.Column="1" HorizontalAlignment="Left" MaxWidth="460" Spacing="3">
                                             <Border Padding="12,9" Background="{StaticResource ChatIncomingBgBrush}" BorderBrush="{StaticResource ChatIncomingBorderBrush}" BorderThickness="1" CornerRadius="4,10,10,10">
                                                 <Border.ContextFlyout>
-                                                    <MenuFlyout>
+                                                    <MenuFlyout Opening="BubbleContextFlyout_Opening">
+                                                        <MenuFlyoutItem Click="TranscribeVoiceBubbleMenuItem_Click" Tag="VoiceTranscribe" Text="语音转文字" Visibility="Collapsed">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C1;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
                                                         <MenuFlyoutItem Click="EditBubbleMenuItem_Click" Text="编辑消息">
                                                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE70F;" /></MenuFlyoutItem.Icon>
                                                         </MenuFlyoutItem>
@@ -457,7 +491,50 @@
                                                         </MenuFlyoutItem>
                                                     </MenuFlyout>
                                                 </Border.ContextFlyout>
-                                                <TextBlock FontSize="13.5" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind Content, Mode=OneWay}" TextWrapping="Wrap" />
+                                                <StackPanel Spacing="6">
+                                                    <controls:WeChatMessageContentView
+                                                        AudioUrl="{x:Bind AudioUrl, Mode=OneWay}"
+                                                        IsOutgoing="False"
+                                                        Text="{x:Bind Content, Mode=OneWay}"
+                                                        VideoUrl="{x:Bind VideoUrl, Mode=OneWay}"
+                                                        Visibility="{x:Bind ContentOrAudioVisibility, Mode=OneWay}" />
+                                                    <Button
+                                                        Padding="0"
+                                                        HorizontalAlignment="Left"
+                                                        Background="Transparent"
+                                                        BorderThickness="0"
+                                                        Click="ChatBubbleImage_Click"
+                                                        CornerRadius="8"
+                                                        ToolTipService.ToolTip="点击查看大图"
+                                                        Visibility="{x:Bind BubbleImageVisibility, Mode=OneWay}">
+                                                        <Border
+                                                            BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="8">
+                                                            <Grid>
+                                                                <Image
+                                                                    MaxWidth="240"
+                                                                    MaxHeight="240"
+                                                                    Source="{x:Bind BubbleImage, Mode=OneWay}"
+                                                                    Stretch="Uniform" />
+                                                                <Grid Visibility="{x:Bind VideoPlayOverlayVisibility, Mode=OneWay}">
+                                                                    <Border
+                                                                        Margin="6"
+                                                                        Padding="7,3"
+                                                                        HorizontalAlignment="Left"
+                                                                        VerticalAlignment="Top"
+                                                                        Background="#A6000000"
+                                                                        CornerRadius="5">
+                                                                        <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                                                            <FontIcon FontSize="11" Foreground="#FFFFFF" Glyph="&#xE714;" />
+                                                                            <TextBlock FontSize="10.5" Foreground="#FFFFFF" Text="{x:Bind VideoDurationBadge, Mode=OneWay}" />
+                                                                        </StackPanel>
+                                                                    </Border>
+                                                                </Grid>
+                                                            </Grid>
+                                                        </Border>
+                                                    </Button>
+                                                </StackPanel>
                                             </Border>
                                             <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel, Mode=OneWay}" />
                                         </StackPanel>
@@ -472,7 +549,10 @@
                                         <StackPanel Grid.Column="0" HorizontalAlignment="Right" MaxWidth="460" Spacing="3">
                                             <Border Padding="12,9" Background="{StaticResource ChatOutgoingBgBrush}" CornerRadius="10,4,10,10">
                                                 <Border.ContextFlyout>
-                                                    <MenuFlyout>
+                                                    <MenuFlyout Opening="BubbleContextFlyout_Opening">
+                                                        <MenuFlyoutItem Click="TranscribeVoiceBubbleMenuItem_Click" Tag="VoiceTranscribe" Text="语音转文字" Visibility="Collapsed">
+                                                            <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8C1;" /></MenuFlyoutItem.Icon>
+                                                        </MenuFlyoutItem>
                                                         <MenuFlyoutItem Click="EditBubbleMenuItem_Click" Text="编辑消息">
                                                             <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE70F;" /></MenuFlyoutItem.Icon>
                                                         </MenuFlyoutItem>
@@ -495,7 +575,50 @@
                                                         </MenuFlyoutItem>
                                                     </MenuFlyout>
                                                 </Border.ContextFlyout>
-                                                <TextBlock FontSize="13.5" Foreground="{StaticResource ChatOutgoingTextBrush}" Text="{x:Bind Content, Mode=OneWay}" TextWrapping="Wrap" />
+                                                <StackPanel Spacing="6">
+                                                    <controls:WeChatMessageContentView
+                                                        AudioUrl="{x:Bind AudioUrl, Mode=OneWay}"
+                                                        IsOutgoing="True"
+                                                        Text="{x:Bind Content, Mode=OneWay}"
+                                                        VideoUrl="{x:Bind VideoUrl, Mode=OneWay}"
+                                                        Visibility="{x:Bind ContentOrAudioVisibility, Mode=OneWay}" />
+                                                    <Button
+                                                        Padding="0"
+                                                        HorizontalAlignment="Left"
+                                                        Background="Transparent"
+                                                        BorderThickness="0"
+                                                        Click="ChatBubbleImage_Click"
+                                                        CornerRadius="8"
+                                                        ToolTipService.ToolTip="点击查看大图"
+                                                        Visibility="{x:Bind BubbleImageVisibility, Mode=OneWay}">
+                                                        <Border
+                                                            BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="8">
+                                                            <Grid>
+                                                                <Image
+                                                                    MaxWidth="240"
+                                                                    MaxHeight="240"
+                                                                    Source="{x:Bind BubbleImage, Mode=OneWay}"
+                                                                    Stretch="Uniform" />
+                                                                <Grid Visibility="{x:Bind VideoPlayOverlayVisibility, Mode=OneWay}">
+                                                                    <Border
+                                                                        Margin="6"
+                                                                        Padding="7,3"
+                                                                        HorizontalAlignment="Left"
+                                                                        VerticalAlignment="Top"
+                                                                        Background="#A6000000"
+                                                                        CornerRadius="5">
+                                                                        <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                                                            <FontIcon FontSize="11" Foreground="#FFFFFF" Glyph="&#xE714;" />
+                                                                            <TextBlock FontSize="10.5" Foreground="#FFFFFF" Text="{x:Bind VideoDurationBadge, Mode=OneWay}" />
+                                                                        </StackPanel>
+                                                                    </Border>
+                                                                </Grid>
+                                                            </Grid>
+                                                        </Border>
+                                                    </Button>
+                                                </StackPanel>
                                             </Border>
                                             <TextBlock HorizontalAlignment="Right" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeLabel, Mode=OneWay}" />
                                         </StackPanel>
@@ -537,14 +660,72 @@
                     CornerRadius="16">
                     <Grid RowSpacing="6">
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
+                        <!-- Pending Chat Image Attachment Preview Strip -->
+                        <Border
+                            x:Name="PendingChatImageBar"
+                            Grid.Row="0"
+                            Padding="7,5"
+                            Background="{StaticResource AppCanvasBgBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Visibility="Collapsed">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Button
+                                    Grid.Column="0"
+                                    Padding="0"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Click="PreviewPendingChatImage_Click"
+                                    CornerRadius="6"
+                                    ToolTipService.ToolTip="点击放大查看待发送图片">
+                                    <Border
+                                        Width="40"
+                                        Height="40"
+                                        BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6">
+                                        <Image x:Name="PendingChatImageThumb" Stretch="UniformToFill" />
+                                    </Border>
+                                </Button>
+                                <TextBlock
+                                    x:Name="PendingChatImageNameText"
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Foreground="{StaticResource TextSecondaryBrush}"
+                                    Text="已附加图片"
+                                    TextTrimming="CharacterEllipsis" />
+                                <Button
+                                    Grid.Column="2"
+                                    Width="24"
+                                    Height="24"
+                                    Padding="0"
+                                    VerticalAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Click="ClearPendingChatImage_Click"
+                                    CornerRadius="12"
+                                    ToolTipService.ToolTip="移除图片">
+                                    <FontIcon FontSize="11" Foreground="{StaticResource TextMutedBrush}" Glyph="&#xE711;" />
+                                </Button>
+                            </Grid>
+                        </Border>
+
                         <!-- Borderless Seamless Multi-line Input -->
                         <TextBox
                             x:Name="MessageInputBox"
-                            Grid.Row="0"
+                            Grid.Row="1"
                             Padding="3,2"
                             AcceptsReturn="True"
                             Background="Transparent"
@@ -552,7 +733,8 @@
                             FontSize="13.5"
                             Foreground="{StaticResource TextPrimaryBrush}"
                             KeyDown="MessageInputBox_KeyDown"
-                            PlaceholderText="输入聊天内容...（Enter 发送，Shift+Enter 换行）"
+                            Paste="MessageInputBox_Paste"
+                            PlaceholderText="输入聊天内容...（Enter 发送，Shift+Enter 换行，可点下方上传图片）"
                             TextWrapping="Wrap">
                             <TextBox.Resources>
                                 <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
@@ -567,7 +749,7 @@
                         </TextBox>
 
                         <!-- Bottom Toolbar inside Rounded Card -->
-                        <Grid Grid.Row="1" ColumnSpacing="8">
+                        <Grid Grid.Row="2" ColumnSpacing="8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
@@ -606,34 +788,20 @@
                                     </StackPanel>
                                 </Border>
 
-                                <!-- Import Dialog Pill -->
+                                <!-- Upload Chat Image Icon Button -->
                                 <Button
-                                    x:Name="ImportChatScreenshotButton"
-                                    Height="30"
-                                    Padding="11,0"
-                                    Click="ImportChatScreenshotButton_Click"
-                                    CornerRadius="15"
-                                    IsEnabled="False"
-                                    Style="{StaticResource SecondaryOutlineButtonStyle}"
-                                    ToolTipService.ToolTip="截图识别导入，或自动从微信「查找聊天内容」批量导入">
-                                    <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
-                                        <FontIcon FontSize="12" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE896;" />
-                                        <TextBlock FontSize="12" Text="导入对话" />
-                                    </StackPanel>
-                                </Button>
-
-                                <!-- Clipboard Single OCR Icon Button -->
-                                <Button
+                                    x:Name="UploadChatImageButton"
                                     Width="30"
                                     Height="30"
                                     Padding="0"
                                     Background="Transparent"
                                     BorderBrush="{StaticResource AppBorderBrush}"
                                     BorderThickness="1"
-                                    Click="OcrChatClipboardButton_Click"
+                                    Click="UploadChatImageButton_Click"
                                     CornerRadius="15"
-                                    ToolTipService.ToolTip="粘贴剪贴板截图提取单条文字">
-                                    <FontIcon FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Glyph="&#xE77F;" />
+                                    IsEnabled="False"
+                                    ToolTipService.ToolTip="上传图片消息（或聚焦输入框后 Ctrl+V 粘贴图片）">
+                                    <FontIcon FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Glyph="&#xE91B;" />
                                 </Button>
                             </StackPanel>
 
@@ -936,15 +1104,6 @@
                                     <ColumnDefinition Width="64" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" FontSize="12.5" Foreground="{StaticResource TextMutedBrush}" Text="来源" />
-                                <TextBlock x:Name="ViewSourceText" Grid.Column="1" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Text="-" TextWrapping="Wrap" />
-                            </Grid>
-
-                            <Grid ColumnSpacing="10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="64" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="0" FontSize="12.5" Foreground="{StaticResource TextMutedBrush}" Text="添加时间" />
                                 <TextBlock x:Name="ViewAddedDateText" Grid.Column="1" FontSize="13" Foreground="{StaticResource TextPrimaryBrush}" Text="-" />
                             </Grid>
@@ -1205,6 +1364,13 @@
                                                 <FontIcon FontSize="11" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE734;" />
                                                 <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="AI 助手" />
                                             </StackPanel>
+
+                                            <!-- Codex-Style Tool Execution Trace -->
+                                            <controls:CodexToolTraceView
+                                                HorizontalAlignment="Stretch"
+                                                LegacySummary="{x:Bind ToolTraceSummary}"
+                                                TraceItems="{x:Bind ToolTrace}"
+                                                Visibility="{x:Bind ToolTraceVisibility}" />
 
                                             <!-- Live Thinking / Replying Bubble -->
                                             <Border

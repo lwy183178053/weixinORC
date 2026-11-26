@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using Client.Controls;
 using Client.Dialogs;
@@ -28,7 +29,7 @@ namespace Client.Pages
         private readonly ObservableCollection<CustomerListRow> _customerRows = [];
         private readonly HashSet<string> _collapsedTags = new(StringComparer.CurrentCultureIgnoreCase);
         private readonly HashSet<long> _selectedCustomerIds = [];
-        private sealed record LocalBubbleEdit(bool IsOutgoing, string Content);
+        private sealed record LocalBubbleEdit(bool IsOutgoing, string Content, string ImageUrl, ImageSource? ImagePreview, byte[]? ImageBytes);
         private sealed record LocalBubbleInsert(long AnchorMessageId, Guid AnchorLocalKey, bool InsertAfter, ChatBubbleItem Item);
 
         private static readonly HashSet<long> SessionDeletedMessageIds = [];
@@ -38,11 +39,15 @@ namespace Client.Pages
         private readonly ObservableCollection<ChatBubbleItem> _currentMessages = [];
         private readonly ObservableCollection<AiChatMessageItem> _aiChatMessages = [];
         private readonly ObservableCollection<AiImageAttachment> _aiChatPendingImages = [];
+        private PendingChatImage? _pendingChatImage;
         private CustomerAiWorkspaceData? _currentAiWorkspace;
         private CancellationTokenSource? _avatarHydrationCts;
+        private CancellationTokenSource? _chatImageHydrationCts;
         private string _activeRightTab = "profile";
         private bool _isCustomerMultiSelectMode;
         private bool _isMultiSelectMode;
+        private long _nextOlderMessageCursor;
+        private bool _isLoadingOlderMessages;
         private bool _isAiSummaryBusy;
         private bool _isAiChatBusy;
         private bool _isIncomingDirection;
@@ -74,6 +79,7 @@ namespace Client.Pages
         private void CustomersPage_Loaded(object sender, RoutedEventArgs e)
         {
             AppServices.Settings.ThemeChanged += OnSettingsThemeChanged;
+            AppServices.WeChat4Sync.SyncCompleted += OnWeChatSyncCompleted;
             UpdateRightTabVisuals();
             UpdateDirectionToggleVisuals();
         }
@@ -81,9 +87,62 @@ namespace Client.Pages
         private void CustomersPage_Unloaded(object sender, RoutedEventArgs e)
         {
             AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
+            AppServices.WeChat4Sync.SyncCompleted -= OnWeChatSyncCompleted;
             _avatarHydrationCts?.Cancel();
             _avatarHydrationCts?.Dispose();
             _avatarHydrationCts = null;
+            _chatImageHydrationCts?.Cancel();
+            _chatImageHydrationCts?.Dispose();
+            _chatImageHydrationCts = null;
+        }
+
+        private void OnWeChatSyncCompleted(Client.Services.WeChat4Db.WeChat4SyncReport report)
+        {
+            if (report.CustomersCreated == 0 && report.CustomersUpdated == 0 && report.CustomerMessagesInserted == 0 && report.AvatarsUploaded == 0)
+                return;
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    await LoadCustomersAsync(_selectedCustomer?.Id);
+                    if (_selectedCustomer is not null)
+                    {
+                        await LoadCustomerMessagesAsync(_selectedCustomer);
+                    }
+                }
+                catch { }
+            });
+        }
+
+        private async void SyncTagsNowButton_Click(object sender, RoutedEventArgs e)
+        {
+            SyncTagsNowButton.IsEnabled = false;
+            try
+            {
+                ShowProfileStatus("正在同步已导入客户的最新微信资料与聊天记录...");
+                var (ok, msg, _) = await AppServices.WeChat4Sync.SyncImportedTargetsAsync(
+                    syncCustomers: true,
+                    syncGroups: false);
+                await LoadCustomersAsync(_selectedCustomer?.Id);
+                if (_selectedCustomer is not null)
+                {
+                    await LoadCustomerMessagesAsync(_selectedCustomer);
+                }
+                if (!ok)
+                {
+                    ShowProfileStatus(msg, isError: true);
+                    return;
+                }
+                ShowProfileStatus($"✓ {msg}");
+            }
+            catch (Exception ex)
+            {
+                ShowProfileStatus($"同步失败：{ex.Message}", isError: true);
+            }
+            finally
+            {
+                SyncTagsNowButton.IsEnabled = true;
+            }
         }
 
         private void OnSettingsThemeChanged(bool _)
@@ -99,12 +158,6 @@ namespace Client.Pages
             catch (Exception ex) { AppServices.Logs.Error("UI", $"加载客户列表异常：{ex.Message}"); }
         }
 
-        private async void RefreshButton_Click(object sender, RoutedEventArgs e)
-        {
-            try { await LoadCustomersAsync(_selectedCustomer?.Id); }
-            catch (Exception ex) { ShowProfileStatus($"刷新失败：{ex.Message}", isError: true); }
-        }
-
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             if (CustomersListView is null) return;
@@ -113,18 +166,18 @@ namespace Client.Pages
 
         private async Task LoadCustomersAsync(long? selectId = null)
         {
-            var result = await AppServices.Backend.ListCustomersAsync();
-            if (result.IsSuccess && result.Data is not null)
+            try
             {
-                _allCustomers = result.Data.Items;
+                var items = await AppServices.Backend.ListAllCustomersAsync(2000);
+                _allCustomers = items;
                 var validIds = _allCustomers.Select(c => c.Id).ToHashSet();
                 _selectedCustomerIds.RemoveWhere(id => !validIds.Contains(id));
                 ApplyFilter(selectId, forceReloadDetail: true);
                 StartAvatarHydration(_allCustomers);
             }
-            else
+            catch (Exception ex)
             {
-                ShowProfileStatus($"拉取客户列表失败：{result.ErrorMessage}", isError: true);
+                ShowProfileStatus($"拉取客户列表失败：{ex.Message}", isError: true);
             }
         }
 
@@ -371,6 +424,7 @@ namespace Client.Pages
         private async Task ActivateSelectedCustomerAsync(CustomerDto? selected)
         {
             SetMultiSelectMode(false);
+            ClearPendingChatImage();
             ProfileStatusBanner.Visibility = Visibility.Collapsed;
             UpdateSelectedCustomerUi();
 
@@ -384,6 +438,8 @@ namespace Client.Pages
             else
             {
                 _currentMessages.Clear();
+                _nextOlderMessageCursor = 0;
+                LoadOlderMessagesBar.Visibility = Visibility.Collapsed;
                 _aiChatMessages.Clear();
                 _currentAiWorkspace = null;
                 MultiSelectMessagesButton.IsEnabled = false;
@@ -550,7 +606,7 @@ namespace Client.Pages
             bool hasCustomer = c is not null;
 
             SendMessageButton.IsEnabled = hasCustomer;
-            ImportChatScreenshotButton.IsEnabled = hasCustomer;
+            UploadChatImageButton.IsEnabled = hasCustomer;
             EditProfileButton.IsEnabled = hasCustomer;
             DeleteCustomerButton.IsEnabled = hasCustomer;
             EmptyProfileHint.Visibility = hasCustomer ? Visibility.Collapsed : Visibility.Visible;
@@ -559,7 +615,7 @@ namespace Client.Pages
             if (c is null)
             {
                 ActiveCustomerTitle.Text = "请选择左侧客户";
-                ActiveCustomerMeta.Text = "点左上角「+」可弹出截图识别导入窗口";
+                ActiveCustomerMeta.Text = "点击左上角「+」按微信标签挑选好友导入，导入后自动监听消息更新";
                 return;
             }
 
@@ -621,7 +677,6 @@ namespace Client.Pages
             ViewGenderText.Text = string.IsNullOrWhiteSpace(c.Gender) ? "未知" : c.Gender;
             ViewPhoneText.Text = string.IsNullOrWhiteSpace(c.Phone) ? "-" : c.Phone;
             ViewSignatureText.Text = string.IsNullOrWhiteSpace(c.Signature) ? "-" : c.Signature;
-            ViewSourceText.Text = string.IsNullOrWhiteSpace(c.Source) ? "-" : c.Source;
             ViewAddedDateText.Text = string.IsNullOrWhiteSpace(c.AddedDate) ? "-" : c.AddedDate;
 
             ViewFollowStatusText.Text = string.IsNullOrWhiteSpace(c.FollowStatus) ? "未设置" : c.FollowStatus;
@@ -798,52 +853,28 @@ namespace Client.Pages
 
         private async void AddCustomerButton_Click(object sender, RoutedEventArgs e)
         {
-            try { await ShowImportDialogAsync(autoPasteClipboard: false); }
-            catch (Exception ex) { ShowProfileStatus($"打开添加客户窗口失败：{ex.Message}", isError: true); }
-        }
-
-        private async void PasteAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
-        {
-            if (AppServices.IsModalDialogOpen) return;
-            if (AiChatInputBox.FocusState != FocusState.Unfocused) return;
-            if (OcrService.HasClipboardBitmapFast())
-            {
-                args.Handled = true;
-                try { await ShowImportDialogAsync(autoPasteClipboard: true); }
-                catch (Exception ex) { ShowProfileStatus($"快捷导入失败：{ex.Message}", isError: true); }
-                return;
-            }
-            if (!await OcrService.HasClipboardImageAsync()) return;
-
-            args.Handled = true;
-            try { await ShowImportDialogAsync(autoPasteClipboard: true); }
-            catch (Exception ex) { ShowProfileStatus($"快捷导入失败：{ex.Message}", isError: true); }
-        }
-
-        private async Task ShowImportDialogAsync(bool autoPasteClipboard)
-        {
             if (!AppServices.TryBeginModalDialog()) return;
             try
             {
-                var dialog = new ImportCustomerDialog { XamlRoot = XamlRoot };
-                if (autoPasteClipboard)
+                var dialog = new ImportWeChatFriendsDialog(_allCustomers)
                 {
-                    dialog.Opened += async (_, _) => await dialog.TriggerClipboardImportAsync();
-                }
-
+                    XamlRoot = XamlRoot
+                };
                 await dialog.ShowAsync();
-                if (dialog.CreatedCustomer is { } created)
-                {
-                    await LoadCustomersAsync(created.Id);
-                    ShowProfileStatus(dialog.WasOverwritten
-                        ? $"✓ 已覆盖更新客户「{created.DisplayName}」。"
-                        : $"✓ 已成功导入新客户「{created.DisplayName}」。");
-                }
-                else if (dialog.TotalBatchImportedOrUpdated > 0)
+
+                if (dialog.CompletedReport is { } report)
                 {
                     await LoadCustomersAsync(_selectedCustomer?.Id);
-                    ShowProfileStatus($"✓ 微信标签批量导入完成，共新增/更新 {dialog.TotalBatchImportedOrUpdated} 位客户。");
+                    if (_selectedCustomer is not null)
+                    {
+                        await LoadCustomerMessagesAsync(_selectedCustomer);
+                    }
+                    ShowProfileStatus($"✓ 已导入微信好友：新增 {report.CustomersCreated} 位 / 更新 {report.CustomersUpdated} 位，同步消息 +{report.CustomerMessagesInserted} 条。");
                 }
+            }
+            catch (Exception ex)
+            {
+                ShowProfileStatus($"打开添加客户弹窗失败：{ex.Message}", isError: true);
             }
             finally
             {
@@ -853,7 +884,11 @@ namespace Client.Pages
 
         private async Task LoadCustomerMessagesAsync(CustomerDto customer)
         {
-            var res = await AppServices.Backend.ListCustomerMessagesAsync(customer.Id);
+            _nextOlderMessageCursor = 0;
+            _isLoadingOlderMessages = false;
+            LoadOlderMessagesBar.Visibility = Visibility.Collapsed;
+
+            var res = await AppServices.Backend.ListCustomerMessagesAsync(customer.Id, limit: 100);
             if (_selectedCustomer?.Id != customer.Id) return;
 
             _currentMessages.Clear();
@@ -867,25 +902,13 @@ namespace Client.Pages
                 return;
             }
 
+            _nextOlderMessageCursor = res.Data.NextCursor;
+            UpdateLoadOlderMessagesBar();
+
             foreach (var m in res.Data.Items.AsEnumerable().Reverse())
             {
                 if (SessionDeletedMessageIds.Contains(m.Id)) continue;
-                bool isOutgoing = m.IsOutgoing;
-                string content = m.Content;
-                if (SessionEditedMessages.TryGetValue(m.Id, out var patch))
-                {
-                    isOutgoing = patch.IsOutgoing;
-                    content = patch.Content;
-                }
-                _currentMessages.Add(new ChatBubbleItem
-                {
-                    Id = m.Id,
-                    SenderInitial = customer.AvatarInitial,
-                    SenderAvatar = customer.AvatarImage,
-                    Content = content,
-                    TimeLabel = m.TimeLabel,
-                    IsOutgoing = isOutgoing
-                });
+                _currentMessages.Add(BuildCustomerBubbleItem(customer, m));
             }
 
             // Re-apply session-local inserted bubbles around their anchors
@@ -902,10 +925,137 @@ namespace Client.Pages
                 }
             }
 
+            StartChatImageHydration(_currentMessages.ToList());
             RefreshMessageListEmptyState(customer.DisplayName);
             if (_currentMessages.Count > 0)
             {
                 MessagesListView.ScrollIntoView(_currentMessages[^1]);
+            }
+        }
+
+        private ChatBubbleItem BuildCustomerBubbleItem(CustomerDto customer, MessageDto m)
+        {
+            bool isOutgoing = m.IsOutgoing;
+            string content = m.Content;
+            string imageUrl = m.ImageUrl;
+            ImageSource? cachedImg = null;
+            byte[]? cachedBytes = null;
+            if (SessionEditedMessages.TryGetValue(m.Id, out var patch))
+            {
+                isOutgoing = patch.IsOutgoing;
+                content = patch.Content;
+                imageUrl = patch.ImageUrl;
+                cachedImg = patch.ImagePreview;
+                cachedBytes = patch.ImageBytes;
+            }
+            return new ChatBubbleItem
+            {
+                Id = m.Id,
+                SenderInitial = customer.AvatarInitial,
+                SenderAvatar = customer.AvatarImage,
+                Content = content,
+                ImageUrl = imageUrl,
+                AudioUrl = m.AudioUrl,
+                VideoUrl = m.VideoUrl,
+                BubbleImage = cachedImg,
+                BubbleImageBytes = cachedBytes,
+                TimeLabel = m.TimeLabel,
+                IsOutgoing = isOutgoing,
+                IsSelectionMode = _isMultiSelectMode
+            };
+        }
+
+        private void UpdateLoadOlderMessagesBar()
+        {
+            LoadOlderMessagesBar.Visibility = _nextOlderMessageCursor > 0 ? Visibility.Visible : Visibility.Collapsed;
+            LoadOlderMessagesButton.IsEnabled = !_isLoadingOlderMessages && _nextOlderMessageCursor > 0;
+            LoadOlderMessagesText.Text = _isLoadingOlderMessages ? "正在加载更早记录..." : "查看更早聊天记录";
+        }
+
+        private async void LoadOlderMessagesButton_Click(object sender, RoutedEventArgs e)
+        {
+            var customer = _selectedCustomer;
+            if (customer is null || _isLoadingOlderMessages || _nextOlderMessageCursor <= 0) return;
+
+            _isLoadingOlderMessages = true;
+            UpdateLoadOlderMessagesBar();
+            try
+            {
+                var anchor = _currentMessages.Count > 0 ? _currentMessages[0] : null;
+                var res = await AppServices.Backend.ListCustomerMessagesAsync(customer.Id, limit: 100, cursor: _nextOlderMessageCursor);
+                if (_selectedCustomer?.Id != customer.Id) return;
+
+                if (res.IsSuccess && res.Data is not null)
+                {
+                    var existingIds = _currentMessages.Where(x => x.Id > 0).Select(x => x.Id).ToHashSet();
+                    var olderBubbles = new List<ChatBubbleItem>();
+                    foreach (var m in res.Data.Items.AsEnumerable().Reverse())
+                    {
+                        if (SessionDeletedMessageIds.Contains(m.Id) || existingIds.Contains(m.Id)) continue;
+                        olderBubbles.Add(BuildCustomerBubbleItem(customer, m));
+                    }
+
+                    for (int i = 0; i < olderBubbles.Count; i++)
+                    {
+                        _currentMessages.Insert(i, olderBubbles[i]);
+                    }
+
+                    _nextOlderMessageCursor = res.Data.NextCursor;
+                    if (olderBubbles.Count > 0)
+                    {
+                        _ = HydrateChatBubbleImagesAsync(olderBubbles, _chatImageHydrationCts?.Token ?? CancellationToken.None);
+                        if (anchor is not null)
+                        {
+                            MessagesListView.ScrollIntoView(anchor, ScrollIntoViewAlignment.Leading);
+                        }
+                    }
+                    UpdateAiContextLabels();
+                }
+            }
+            catch (Exception ex)
+            {
+                AppServices.Logs.Warn("UI", $"加载更早聊天记录失败：{ex.Message}");
+            }
+            finally
+            {
+                _isLoadingOlderMessages = false;
+                UpdateLoadOlderMessagesBar();
+            }
+        }
+
+        private void StartChatImageHydration(List<ChatBubbleItem> bubbles)
+        {
+            _chatImageHydrationCts?.Cancel();
+            _chatImageHydrationCts?.Dispose();
+            var cts = new CancellationTokenSource();
+            _chatImageHydrationCts = cts;
+            _ = HydrateChatBubbleImagesAsync(bubbles, cts.Token);
+        }
+
+        private async Task HydrateChatBubbleImagesAsync(List<ChatBubbleItem> bubbles, CancellationToken ct)
+        {
+            try
+            {
+                foreach (var b in bubbles)
+                {
+                    if (ct.IsCancellationRequested) return;
+                    if (string.IsNullOrWhiteSpace(b.ImageUrl) || b.BubbleImage is not null) continue;
+                    byte[]? bytes = await AppServices.Backend.DownloadChatImageBytesAsync(b.ImageUrl, ct);
+                    if (bytes is null || ct.IsCancellationRequested) continue;
+                    var img = await ChatImageHelper.BytesToBitmapImageAsync(bytes);
+                    if (img is not null && !ct.IsCancellationRequested)
+                    {
+                        b.BubbleImageBytes = bytes;
+                        b.BubbleImage = img;
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                AppServices.Logs.Warn("UI", $"加载聊天图片异常：{ex.Message}");
             }
         }
 
@@ -927,6 +1077,7 @@ namespace Client.Pages
         private void SetMultiSelectMode(bool enabled)
         {
             _isMultiSelectMode = enabled;
+            MessagesListView.IsItemClickEnabled = enabled;
             MessageMultiSelectBar.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
             MultiSelectMessagesButton.Content = enabled ? "取消多选" : "多选";
             foreach (var item in _currentMessages)
@@ -979,25 +1130,147 @@ namespace Client.Pages
             return -1;
         }
 
+        private async void ChatBubbleImage_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
+            if (_isMultiSelectMode)
+            {
+                item.IsSelected = !item.IsSelected;
+                UpdateMultiSelectSummary();
+                return;
+            }
+
+            byte[]? bytes = item.BubbleImageBytes;
+            if ((bytes is null || bytes.Length == 0) && !string.IsNullOrWhiteSpace(item.ImageUrl))
+            {
+                bytes = await AppServices.Backend.DownloadChatImageBytesAsync(item.ImageUrl);
+                if (bytes is { Length: > 0 })
+                {
+                    item.BubbleImageBytes = bytes;
+                }
+            }
+
+            if (bytes is { Length: > 0 })
+            {
+                string kind = item.IsVideoMessage ? "视频封面" : "聊天图片";
+                string title = _selectedCustomer is not null
+                    ? $"{_selectedCustomer.DisplayName} · {kind}"
+                    : $"{kind}查看器";
+                ImageViewerWindow.ShowImage(bytes, title);
+            }
+        }
+
+        private void BubbleContextFlyout_Opening(object sender, object e)
+        {
+            if (sender is not MenuFlyout flyout || flyout.Target is not FrameworkElement target || target.DataContext is not ChatBubbleItem item)
+            {
+                return;
+            }
+            foreach (var mi in flyout.Items.OfType<MenuFlyoutItem>())
+            {
+                if (mi.Tag as string == "VoiceTranscribe")
+                {
+                    mi.Visibility = item.VoiceTranscribeMenuVisibility;
+                    mi.Text = VoiceTranscriptionService.HasSavedTranscript(item.Content) ? "重新转文字" : "语音转文字";
+                }
+            }
+        }
+
+        private async void TranscribeVoiceBubbleMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
+            if (string.IsNullOrWhiteSpace(item.AudioUrl))
+            {
+                ComposerHintText.Text = "该条语音暂无音频文件，请先点击顶部「刷新同步」。";
+                return;
+            }
+
+            var customer = _selectedCustomer;
+            ComposerHintText.Text = "正在将语音转为文字...";
+            var res = await VoiceTranscriptionService.TranscribeAsync(item.AudioUrl);
+            if (!res.Success || string.IsNullOrWhiteSpace(res.Text))
+            {
+                ComposerHintText.Text = res.ErrorMessage;
+                return;
+            }
+
+            string mergedContent = VoiceTranscriptionService.MergeTranscriptIntoContent(item.Content, res.Text);
+            item.Content = mergedContent;
+
+            if (item.Id > 0 && customer is not null)
+            {
+                string dir = item.IsOutgoing ? "outgoing" : "incoming";
+                var patchRes = await AppServices.Backend.UpdateCustomerMessageAsync(
+                    customer.Id, item.Id, dir, mergedContent, item.ImageUrl);
+                if (patchRes.IsSuccess)
+                {
+                    SessionEditedMessages.Remove(item.Id);
+                    ComposerHintText.Text = $"✓ 语音转文字已完成并永久保存（{res.EngineLabel}）。";
+                }
+                else
+                {
+                    ComposerHintText.Text = $"已识别文字，但保存到服务端失败：{patchRes.ErrorMessage}";
+                }
+            }
+            else
+            {
+                ComposerHintText.Text = $"✓ 语音转文字已完成（{res.EngineLabel}）。";
+            }
+        }
+
         private async void EditBubbleMenuItem_Click(object sender, RoutedEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
+            var customer = _selectedCustomer;
             var res = await ChatBubbleEditorHelper.ShowAsync(
                 XamlRoot,
                 title: "编辑对话消息",
                 primaryButtonText: "保存修改",
                 initialIsOutgoing: item.IsOutgoing,
                 initialContent: item.Content,
-                isGroupChat: false);
+                isGroupChat: false,
+                initialImageUrl: item.ImageUrl,
+                initialImagePreview: item.BubbleImage,
+                initialImageBytes: item.BubbleImageBytes);
             if (!res.Confirmed) return;
+
+            string finalImageUrl = res.ImageRemoved ? string.Empty : item.ImageUrl;
+            ImageSource? finalPreview = res.ImageRemoved ? null : item.BubbleImage;
+            byte[]? finalBytes = res.ImageRemoved ? null : item.BubbleImageBytes;
+
+            if (res.NewImageBytes is { Length: > 0 })
+            {
+                var upRes = await AppServices.Backend.UploadChatImageAsync(res.NewImageBytes);
+                if (!upRes.IsSuccess || upRes.Data is null || string.IsNullOrWhiteSpace(upRes.Data.ImageUrl))
+                {
+                    ComposerHintText.Text = $"上传图片失败：{upRes.ErrorMessage}";
+                    return;
+                }
+                finalImageUrl = upRes.Data.ImageUrl;
+                finalPreview = res.ImagePreview;
+                finalBytes = res.NewImageBytes;
+            }
 
             item.IsOutgoing = res.IsOutgoing;
             item.Content = res.Content;
+            item.ImageUrl = finalImageUrl;
+            item.BubbleImageBytes = finalBytes;
+            item.BubbleImage = finalPreview;
+
             if (item.Id > 0)
             {
-                SessionEditedMessages[item.Id] = new LocalBubbleEdit(res.IsOutgoing, res.Content);
+                SessionEditedMessages[item.Id] = new LocalBubbleEdit(res.IsOutgoing, res.Content, finalImageUrl, finalPreview, finalBytes);
+                if (customer is not null)
+                {
+                    string dir = res.IsOutgoing ? "outgoing" : "incoming";
+                    var patchRes = await AppServices.Backend.UpdateCustomerMessageAsync(customer.Id, item.Id, dir, res.Content, finalImageUrl);
+                    if (patchRes.IsSuccess)
+                    {
+                        SessionEditedMessages.Remove(item.Id);
+                    }
+                }
             }
-            ComposerHintText.Text = "已修改该条消息内容。";
+            ComposerHintText.Text = "已修改该条消息。";
         }
 
         private async void InsertAboveBubbleMenuItem_Click(object sender, RoutedEventArgs e)
@@ -1029,12 +1302,25 @@ namespace Client.Pages
             int idx = _currentMessages.IndexOf(anchor);
             if (idx < 0) return;
 
+            string uploadedUrl = string.Empty;
+            if (res.NewImageBytes is { Length: > 0 })
+            {
+                var upRes = await AppServices.Backend.UploadChatImageAsync(res.NewImageBytes);
+                if (upRes.IsSuccess && upRes.Data is not null)
+                {
+                    uploadedUrl = upRes.Data.ImageUrl;
+                }
+            }
+
             var newBubble = new ChatBubbleItem
             {
                 Id = 0,
                 SenderInitial = customer.AvatarInitial,
                 SenderAvatar = customer.AvatarImage,
                 Content = res.Content,
+                ImageUrl = uploadedUrl,
+                BubbleImageBytes = res.NewImageBytes,
+                BubbleImage = res.ImagePreview,
                 TimeLabel = string.IsNullOrWhiteSpace(anchor.TimeLabel) ? DateTime.Now.ToString("HH:mm") : anchor.TimeLabel,
                 IsOutgoing = res.IsOutgoing,
                 IsSelectionMode = _isMultiSelectMode
@@ -1054,15 +1340,27 @@ namespace Client.Pages
             ComposerHintText.Text = insertAfter ? "已在下方插入 1 条消息。" : "已在上方插入 1 条消息。";
         }
 
-        private void CopyBubbleMenuItem_Click(object sender, RoutedEventArgs e)
+        private async void CopyBubbleMenuItem_Click(object sender, RoutedEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is not ChatBubbleItem item) return;
             try
             {
                 var pkg = new DataPackage();
-                pkg.SetText(item.Content);
-                Clipboard.SetContent(pkg);
-                ComposerHintText.Text = "已复制该条消息内容。";
+                if (!string.IsNullOrWhiteSpace(item.Content))
+                {
+                    pkg.SetText(item.Content);
+                    Clipboard.SetContent(pkg);
+                    ComposerHintText.Text = "已复制该条消息内容。";
+                }
+                else if (item.BubbleImageBytes is { Length: > 0 } bytes)
+                {
+                    var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+                    await stream.WriteAsync(bytes.AsBuffer());
+                    stream.Seek(0);
+                    pkg.SetBitmap(Windows.Storage.Streams.RandomAccessStreamReference.CreateFromStream(stream));
+                    Clipboard.SetContent(pkg);
+                    ComposerHintText.Text = "已复制该条消息图片。";
+                }
             }
             catch (Exception ex)
             {
@@ -1436,7 +1734,7 @@ namespace Client.Pages
                 {
                     Role = "assistant",
                     IsPending = true,
-                    Content = "正在思考回复..."
+                    Content = "正在查阅记录并思考回复..."
                 };
                 _aiChatMessages.Add(pendingBubble);
 
@@ -1458,10 +1756,19 @@ namespace Client.Pages
                     ? res.Data.Reply
                     : $"请求失败：{res.ErrorMessage}";
 
+                List<AiToolTraceDto> traceList = res.IsSuccess && res.Data?.ToolTrace is { Count: > 0 }
+                    ? res.Data.ToolTrace
+                    : [];
+                string traceText = traceList.Count > 0
+                    ? "已调用工具：" + string.Join(" · ", traceList.Select(t => string.IsNullOrWhiteSpace(t.Summary) ? t.SkillName : $"{t.SkillName}（{t.Summary}）"))
+                    : string.Empty;
+
                 var reply = new AiChatMessageItem
                 {
                     Role = "assistant",
                     Content = replyText,
+                    ToolTrace = traceList,
+                    ToolTraceSummary = traceText,
                     Timestamp = DateTime.Now.ToString("HH:mm")
                 };
                 _currentAiWorkspace.Messages.Add(reply);
@@ -1538,21 +1845,111 @@ namespace Client.Pages
             await SendCurrentCustomerMessageAsync();
         }
 
+        private void SetPendingChatImage(PendingChatImage? image)
+        {
+            _pendingChatImage = image;
+            if (image is not null)
+            {
+                PendingChatImageThumb.Source = image.Preview;
+                PendingChatImageNameText.Text = $"{image.DisplayName}（点击缩略图可放大）";
+                PendingChatImageBar.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                PendingChatImageThumb.Source = null;
+                PendingChatImageBar.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void ClearPendingChatImage() => SetPendingChatImage(null);
+
+        private void ClearPendingChatImage_Click(object sender, RoutedEventArgs e) => ClearPendingChatImage();
+
+        private void PreviewPendingChatImage_Click(object sender, RoutedEventArgs e)
+        {
+            if (_pendingChatImage is { Bytes.Length: > 0 } img)
+            {
+                ImageViewerWindow.ShowImage(img.Bytes, img.DisplayName);
+            }
+        }
+
+        private async void UploadChatImageButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedCustomer is null) return;
+            string? path = Win32WindowHelper.PickImageFilePath(AppServices.MainWindowHandle);
+            if (string.IsNullOrWhiteSpace(path)) return;
+            try
+            {
+                var loaded = await ChatImageHelper.TryLoadFromFileAsync(path);
+                if (loaded is not null)
+                {
+                    SetPendingChatImage(loaded);
+                    ComposerHintText.Text = $"已附加图片「{loaded.DisplayName}」，按 Enter 或点发送即可插入。";
+                }
+                else
+                {
+                    ComposerHintText.Text = "读取图片失败，请选择 PNG / JPG / WebP 格式。";
+                }
+            }
+            catch (Exception ex)
+            {
+                ComposerHintText.Text = $"加载图片异常：{ex.Message}";
+            }
+        }
+
+        private async void MessageInputBox_Paste(object sender, TextControlPasteEventArgs e)
+        {
+            if (_selectedCustomer is null) return;
+            try
+            {
+                var content = Clipboard.GetContent();
+                if (content.Contains(StandardDataFormats.Bitmap))
+                {
+                    e.Handled = true;
+                    var loaded = await ChatImageHelper.TryLoadFromClipboardAsync();
+                    if (loaded is not null)
+                    {
+                        SetPendingChatImage(loaded);
+                        ComposerHintText.Text = "已从剪贴板附加图片，发送即可插入聊天记录。";
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
         private async Task SendCurrentCustomerMessageAsync()
         {
             var target = _selectedCustomer;
             if (target is null) return;
-            string content = MessageInputBox.Text.Trim();
-            if (string.IsNullOrEmpty(content)) return;
+            string content = MessageInputBox.Text.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
+            var pendingImage = _pendingChatImage;
+            if (string.IsNullOrEmpty(content) && pendingImage is null) return;
 
             string direction = _isIncomingDirection ? "incoming" : "outgoing";
             SendMessageButton.IsEnabled = false;
             try
             {
-                var res = await AppServices.Backend.CreateCustomerMessageAsync(target.Id, direction, content);
+                string imageUrl = string.Empty;
+                if (pendingImage is not null)
+                {
+                    ComposerHintText.Text = "正在上传图片...";
+                    var upRes = await AppServices.Backend.UploadChatImageAsync(pendingImage.Bytes);
+                    if (!upRes.IsSuccess || upRes.Data is null || string.IsNullOrWhiteSpace(upRes.Data.ImageUrl))
+                    {
+                        ComposerHintText.Text = $"上传图片失败：{upRes.ErrorMessage}";
+                        return;
+                    }
+                    imageUrl = upRes.Data.ImageUrl;
+                }
+
+                var res = await AppServices.Backend.CreateCustomerMessageAsync(target.Id, direction, content, imageUrl);
                 if (res.IsSuccess)
                 {
                     MessageInputBox.Text = string.Empty;
+                    ClearPendingChatImage();
+                    ComposerHintText.Text = string.Empty;
                     await LoadCustomersAsync(target.Id);
                 }
                 else
@@ -1570,89 +1967,6 @@ namespace Client.Pages
             }
         }
 
-        private async void ImportChatScreenshotButton_Click(object sender, RoutedEventArgs e)
-        {
-            var target = _selectedCustomer;
-            if (target is null || !AppServices.TryBeginModalDialog()) return;
-            try
-            {
-                string defaultKey = !string.IsNullOrWhiteSpace(target.WechatAccount)
-                    ? target.WechatAccount
-                    : !string.IsNullOrWhiteSpace(target.WechatRemark)
-                        ? target.WechatRemark
-                        : target.WechatName;
-
-                var aliases = new[] { target.WechatRemark, target.WechatName, target.DisplayName }
-                    .Where(s => !string.IsNullOrWhiteSpace(s))
-                    .ToList();
-                var fallbacks = new[] { target.WechatRemark, target.WechatName, target.WechatAccount }
-                    .Where(s => !string.IsNullOrWhiteSpace(s))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                var existing = _currentMessages.Select(m => (m.IsOutgoing ? "outgoing" : "incoming", m.Content));
-
-                var dialog = new ImportChatScreenshotDialog(defaultKey, aliases, existing, isGroupSearch: false, fallbackSearchKeywords: fallbacks)
-                {
-                    XamlRoot = XamlRoot
-                };
-                await dialog.ShowAsync();
-                if (dialog.ConfirmedMessages.Count == 0) return;
-
-                int saved = 0;
-                foreach (var msg in dialog.ConfirmedMessages)
-                {
-                    var res = await AppServices.Backend.CreateCustomerMessageAsync(target.Id, msg.Direction, msg.Content);
-                    if (res.IsSuccess) saved++;
-                }
-
-                if (_selectedCustomer?.Id == target.Id)
-                {
-                    await LoadCustomerMessagesAsync(target);
-                }
-                ComposerHintText.Text = dialog.WasBatchImported
-                    ? $"已从微信聊天记录批量导入 {saved} 条消息。"
-                    : $"已从聊天截图批量导入 {saved} 条消息。";
-            }
-            catch (Exception ex)
-            {
-                ComposerHintText.Text = $"导入对话异常：{ex.Message}";
-            }
-            finally
-            {
-                AppServices.EndModalDialog();
-            }
-        }
-
-        private async void OcrChatClipboardButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                ComposerHintText.Text = "正在提取截图文字...";
-                var (ocr, err) = await AppServices.Ocr.TryRecognizeClipboardTextAsync();
-                if (ocr is null)
-                {
-                    ComposerHintText.Text = err;
-                    return;
-                }
-
-                if (!string.IsNullOrWhiteSpace(ocr.FullText))
-                {
-                    MessageInputBox.Text = string.IsNullOrWhiteSpace(MessageInputBox.Text)
-                        ? ocr.FullText
-                        : $"{MessageInputBox.Text}\n{ocr.FullText}";
-                    ComposerHintText.Text = $"已识别 {ocr.Lines.Count} 行聊天文字（{ocr.ElapsedMilliseconds} ms）。";
-                }
-                else
-                {
-                    ComposerHintText.Text = "未从剪贴板图片识别出文字。";
-                }
-            }
-            catch (Exception ex)
-            {
-                ComposerHintText.Text = $"识别失败：{ex.Message}";
-            }
-        }
-
         // ---- Avatar Management (Clipboard Paste / Local File / Clear) ----
 
         private async void PasteAvatar_Click(object sender, RoutedEventArgs e)
@@ -1661,7 +1975,7 @@ namespace Client.Pages
             var target = _selectedCustomer;
             try
             {
-                var (bmp, _) = await AppServices.Ocr.TryLoadImageFromClipboardAsync();
+                var (bmp, _) = await OcrService.TryLoadImageFromClipboardAsync();
                 if (bmp is null)
                 {
                     ShowProfileStatus("剪贴板中没有图片，请先截图或复制头像后再粘贴。", isError: true);
@@ -1688,7 +2002,7 @@ namespace Client.Pages
 
             try
             {
-                using var bmp = await Task.Run(() => AppServices.Ocr.LoadImageFileFromPathAsync(filePath));
+                using var bmp = await Task.Run(() => OcrService.LoadImageFileFromPathAsync(filePath));
                 byte[] pngBytes = await AvatarImageService.EncodeSquarePngAsync(bmp, 256);
                 await SaveCustomerAvatarBytesAsync(target, pngBytes, "已上传并保存客户头像。");
             }

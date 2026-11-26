@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Client.Models;
 using Microsoft.UI.Xaml;
 
 namespace Client.Services
@@ -10,6 +11,7 @@ namespace Client.Services
         public string Content { get; set; } = string.Empty;
         public string Timestamp { get; set; } = string.Empty;
         public string ToolTraceSummary { get; set; } = string.Empty;
+        public List<AiToolTraceDto> ToolTrace { get; set; } = [];
         public List<string> Images { get; set; } = [];
 
         [JsonIgnore]
@@ -37,7 +39,8 @@ namespace Client.Services
         public Visibility AssistantContentVisibility => !IsUser && !IsPending ? Visibility.Visible : Visibility.Collapsed;
 
         [JsonIgnore]
-        public Visibility ToolTraceVisibility => !IsUser && !IsPending && !string.IsNullOrWhiteSpace(ToolTraceSummary)
+        public Visibility ToolTraceVisibility => !IsUser && !IsPending &&
+            ((ToolTrace is { Count: > 0 }) || !string.IsNullOrWhiteSpace(ToolTraceSummary))
             ? Visibility.Visible
             : Visibility.Collapsed;
 
@@ -50,6 +53,15 @@ namespace Client.Services
     public sealed class CustomerAiWorkspaceData
     {
         public long CustomerId { get; set; }
+        public string SummaryText { get; set; } = string.Empty;
+        public string SummaryUpdatedAt { get; set; } = string.Empty;
+        public string SummaryContextMeta { get; set; } = string.Empty;
+        public List<AiChatMessageItem> Messages { get; set; } = [];
+    }
+
+    public sealed class GroupAiWorkspaceData
+    {
+        public long GroupId { get; set; }
         public string SummaryText { get; set; } = string.Empty;
         public string SummaryUpdatedAt { get; set; } = string.Empty;
         public string SummaryContextMeta { get; set; } = string.Empty;
@@ -102,6 +114,46 @@ namespace Client.Services
 
         private string GetCustomerFilePath(long customerId) =>
             Path.Combine(_rootDir, $"customer_{customerId}.json");
+
+        private string GetGroupFilePath(long groupId) =>
+            Path.Combine(_rootDir, $"group_{groupId}.json");
+
+        public GroupAiWorkspaceData LoadGroup(long groupId)
+        {
+            try
+            {
+                string path = GetGroupFilePath(groupId);
+                if (File.Exists(path))
+                {
+                    string json = File.ReadAllText(path);
+                    var data = JsonSerializer.Deserialize<GroupAiWorkspaceData>(json, JsonOpts);
+                    if (data is not null)
+                    {
+                        data.GroupId = groupId;
+                        data.Messages ??= [];
+                        return data;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return new GroupAiWorkspaceData { GroupId = groupId };
+        }
+
+        public void SaveGroup(GroupAiWorkspaceData data)
+        {
+            try
+            {
+                Directory.CreateDirectory(_rootDir);
+                string json = JsonSerializer.Serialize(data, JsonOpts);
+                File.WriteAllText(GetGroupFilePath(data.GroupId), json);
+            }
+            catch
+            {
+            }
+        }
 
         public CustomerAiWorkspaceData Load(long customerId)
         {

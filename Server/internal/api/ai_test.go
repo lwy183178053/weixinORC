@@ -1,11 +1,11 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"weixinorc/server/internal/auth"
@@ -48,8 +48,8 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 	if statusBody.Configured {
 		t.Fatal("expected initial AI status configured=false")
 	}
-	if len(statusBody.Skills) != 6 {
-		t.Fatalf("expected 6 builtin skills, got %d", len(statusBody.Skills))
+	if len(statusBody.Skills) != 9 {
+		t.Fatalf("expected 9 builtin skills, got %d", len(statusBody.Skills))
 	}
 
 	// 3. Seed one customer for Alice and one for Bob to verify owner-scoped Skills
@@ -105,15 +105,21 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 		t.Fatalf("knowledge search hit-test failed: %d %s", kbSearch.Code, kbSearch.Body.String())
 	}
 
-	// 5. Mock OpenAI-compatible server supporting both direct chat and 2-round Function Calling
-	var agentRound atomic.Int32
+	// 5. Mock OpenAI-compatible server supporting direct chat, tool-calling (for both CustomerChat & AgentChat), and /audio/transcriptions
 	mockLLM := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
 		if r.Header.Get("Authorization") != "Bearer sk-test-secret-123456" {
 			http.Error(w, "bad auth", http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/v1/audio/transcriptions" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"text": "你下来的时候拿两张纸，车上就鸟屎。",
+			})
+			return
+		}
+		if r.URL.Path != "/v1/chat/completions" {
+			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
 
@@ -122,7 +128,7 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 			Tools    []any  `json:"tools"`
 			Messages []struct {
 				Role    string `json:"role"`
-				Content string `json:"content"`
+				Content any    `json:"content"`
 			} `json:"messages"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
@@ -132,10 +138,19 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 
-		// Agent call (has tools): Round 1 invokes list_customers; Round 2 verifies Alice only sees her own customer
+		// Tool-enabled calls (AgentChat & CustomerChat): Round 1 invokes list_customers; Round 2 verifies Alice only sees her own customer
 		if len(reqBody.Tools) > 0 {
-			round := agentRound.Add(1)
-			if round == 1 {
+			hasToolReply := false
+			joined := ""
+			for _, m := range reqBody.Messages {
+				if m.Role == "tool" {
+					hasToolReply = true
+					if s, ok := m.Content.(string); ok {
+						joined += s
+					}
+				}
+			}
+			if !hasToolReply {
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"choices": []map[string]any{
 						{
@@ -160,12 +175,6 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 			}
 
 			// Verify tool response includes Alice's customer and NEVER includes Bob's customer
-			joined := ""
-			for _, m := range reqBody.Messages {
-				if m.Role == "tool" {
-					joined += m.Content
-				}
-			}
 			if !strings.Contains(joined, "王女士") {
 				t.Errorf("expected tool output to contain Alice's customer 王女士, got: %s", joined)
 			}
@@ -186,7 +195,7 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 			return
 		}
 
-		// Direct completion (test connection / customer summary / customer chat)
+		// Direct completion (test connection / customer summary)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{
 				{
@@ -238,8 +247,39 @@ func TestAdminUIAndAIConfigAndKnowledgeAndAgentSkills(t *testing.T) {
 		"history":     []map[string]string{},
 		"message":     "帮我写一句报价跟进话术",
 	})
-	if chatResp.Code != http.StatusOK || !strings.Contains(chatResp.Body.String(), `"reply"`) {
-		t.Fatalf("customer-chat failed: %d %s", chatResp.Code, chatResp.Body.String())
+	if chatResp.Code != http.StatusOK || !strings.Contains(chatResp.Body.String(), `"tool_trace"`) {
+		t.Fatalf("customer-chat with tools failed: %d %s", chatResp.Code, chatResp.Body.String())
+	}
+
+	// 8.5 Test voice transcription endpoint (/api/v1/ai/transcribe) with owner isolation
+	miniWav := make([]byte, 48)
+	copy(miniWav[0:4], "RIFF")
+	copy(miniWav[8:12], "WAVE")
+	copy(miniWav[12:16], "fmt ")
+	upAudio := app.request(t, http.MethodPost, "/api/v1/chat-audio", aliceToken, map[string]any{
+		"audio_base64": base64.StdEncoding.EncodeToString(miniWav),
+	})
+	if upAudio.Code != http.StatusCreated {
+		t.Fatalf("upload audio failed: %d %s", upAudio.Code, upAudio.Body.String())
+	}
+	var audioBody struct {
+		AudioURL string `json:"audio_url"`
+	}
+	_ = json.Unmarshal(upAudio.Body.Bytes(), &audioBody)
+
+	// Bob must not be able to transcribe Alice's audio
+	bobTrans := app.request(t, http.MethodPost, "/api/v1/ai/transcribe", bobToken, map[string]any{
+		"audio_url": audioBody.AudioURL,
+	})
+	if bobTrans.Code != http.StatusBadRequest {
+		t.Fatalf("expected bob transcribe alice audio -> 400, got %d %s", bobTrans.Code, bobTrans.Body.String())
+	}
+
+	aliceTrans := app.request(t, http.MethodPost, "/api/v1/ai/transcribe", aliceToken, map[string]any{
+		"audio_url": audioBody.AudioURL,
+	})
+	if aliceTrans.Code != http.StatusOK || !strings.Contains(aliceTrans.Body.String(), "两张纸") {
+		t.Fatalf("alice transcribe failed: %d %s", aliceTrans.Code, aliceTrans.Body.String())
 	}
 
 	// 9. Test Agent Chat with Function Calling & tool_trace

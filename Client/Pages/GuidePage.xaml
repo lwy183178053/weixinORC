@@ -33,7 +33,7 @@
                     BorderThickness="0,0,0,1">
                     <StackPanel VerticalAlignment="Center" Spacing="1">
                         <TextBlock FontSize="14.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="使用介绍" />
-                        <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="按功能模块查阅操作说明" />
+                        <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="按功能模块查阅最新操作说明" />
                     </StackPanel>
                 </Border>
 
@@ -48,31 +48,31 @@
                             </StackPanel>
                         </Button>
 
-                        <Button x:Name="NavCustomersBtn" Height="38" Padding="11,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" Click="GuideNav_Click" CornerRadius="8" Tag="customers">
+                        <Button x:Name="NavOcrBtn" Height="38" Padding="11,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" Click="GuideNav_Click" CornerRadius="8" Tag="ocr">
                             <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
-                                <FontIcon x:Name="NavCustomersIcon" FontSize="14" Glyph="&#xE77B;" />
-                                <TextBlock x:Name="NavCustomersText" FontSize="13" Text="客户档案与导入" />
+                                <FontIcon x:Name="NavOcrIcon" FontSize="14" Glyph="&#xE895;" />
+                                <TextBlock x:Name="NavOcrText" FontSize="13" Text="微信自动监听" />
                             </StackPanel>
                         </Button>
 
-                        <Button x:Name="NavChatBtn" Height="38" Padding="11,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" Click="GuideNav_Click" CornerRadius="8" Tag="chat">
+                        <Button x:Name="NavCustomersBtn" Height="38" Padding="11,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" Click="GuideNav_Click" CornerRadius="8" Tag="customers">
                             <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
-                                <FontIcon x:Name="NavChatIcon" FontSize="14" Glyph="&#xE8BD;" />
-                                <TextBlock x:Name="NavChatText" FontSize="13" Text="聊天记录管理" />
+                                <FontIcon x:Name="NavCustomersIcon" FontSize="14" Glyph="&#xE77B;" />
+                                <TextBlock x:Name="NavCustomersText" FontSize="13" Text="客户档案与标签" />
                             </StackPanel>
                         </Button>
 
                         <Button x:Name="NavGroupsBtn" Height="38" Padding="11,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" Click="GuideNav_Click" CornerRadius="8" Tag="groups">
                             <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
                                 <FontIcon x:Name="NavGroupsIcon" FontSize="14" Glyph="&#xE716;" />
-                                <TextBlock x:Name="NavGroupsText" FontSize="13" Text="群组档案" />
+                                <TextBlock x:Name="NavGroupsText" FontSize="13" Text="群组档案与群聊" />
                             </StackPanel>
                         </Button>
 
-                        <Button x:Name="NavOcrBtn" Height="38" Padding="11,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" Click="GuideNav_Click" CornerRadius="8" Tag="ocr">
+                        <Button x:Name="NavChatBtn" Height="38" Padding="11,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0" Click="GuideNav_Click" CornerRadius="8" Tag="chat">
                             <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
-                                <FontIcon x:Name="NavOcrIcon" FontSize="14" Glyph="&#xE7F4;" />
-                                <TextBlock x:Name="NavOcrText" FontSize="13" Text="微信监控" />
+                                <FontIcon x:Name="NavChatIcon" FontSize="14" Glyph="&#xE99A;" />
+                                <TextBlock x:Name="NavChatText" FontSize="13" Text="AI 助手与聊天查阅" />
                             </StackPanel>
                         </Button>
 
@@ -94,7 +94,6 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <!-- Active Module Header -->
             <Border
                 Grid.Row="0"
                 Padding="26,0"
@@ -107,12 +106,11 @@
                     </Border>
                     <StackPanel VerticalAlignment="Center" Spacing="1">
                         <TextBlock x:Name="ActiveSectionTitle" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="快速上手" />
-                        <TextBlock x:Name="ActiveSectionSubtitle" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="三步了解工作台的日常使用流程" />
+                        <TextBlock x:Name="ActiveSectionSubtitle" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="三步开启微信自动监听与 AI 客户工作台" />
                     </StackPanel>
                 </StackPanel>
             </Border>
 
-            <!-- Scrollable Module Panels -->
             <ScrollViewer x:Name="GuideContentScroll" Grid.Row="1" Padding="28,22">
                 <Grid MaxWidth="860" HorizontalAlignment="Left">
 
@@ -135,9 +133,9 @@
                                                 <Border Width="22" Height="22" Background="{StaticResource BrandPrimaryBrush}" CornerRadius="11">
                                                     <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11.5" FontWeight="Bold" Foreground="#FFFFFF" Text="1" />
                                                 </Border>
-                                                <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="录入客户档案" />
+                                                <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="添加微信客户与群聊" />
                                             </StackPanel>
-                                            <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="20" Text="截取微信资料页后直接按 Ctrl+V，或点击客户列表上方的批量导入图标按微信标签一键导入。" TextWrapping="Wrap" />
+                                            <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="20" Text="登录电脑微信后，在「客户档案」或「群组档案」点左上角「+」，按标签挑选好友或勾选需要管理的群聊导入。" TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
 
@@ -147,9 +145,9 @@
                                                 <Border Width="22" Height="22" Background="{StaticResource BrandPrimaryBrush}" CornerRadius="11">
                                                     <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11.5" FontWeight="Bold" Foreground="#FFFFFF" Text="2" />
                                                 </Border>
-                                                <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="记录沟通与备注" />
+                                                <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="自动监听新消息" />
                                             </StackPanel>
-                                            <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="20" Text="中间会话区支持导入整张聊天截图并自动区分双方气泡；右侧面板随时编辑资料、维护标签与跟进备注。" TextWrapping="Wrap" />
+                                            <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="20" Text="系统默认自动监听电脑微信消息变化，仅同步您已导入的客户和群聊，收到新消息自动更新且自动去重。" TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
 
@@ -159,9 +157,9 @@
                                                 <Border Width="22" Height="22" Background="{StaticResource BrandPrimaryBrush}" CornerRadius="11">
                                                     <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11.5" FontWeight="Bold" Foreground="#FFFFFF" Text="3" />
                                                 </Border>
-                                                <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="个性化与多栏协作" />
+                                                <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="AI 助手自动查阅记录" />
                                             </StackPanel>
-                                            <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="20" Text="各分栏分隔线均可自由拖拽调整宽高度；左下角可随时切换明亮/黑夜模式，或在设置中更换主题配色。" TextWrapping="Wrap" />
+                                            <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="20" Text="AI 助手可直接搜索全部客户与群聊记录、按标签复盘沟通进展、排查待回复客户并起草回复话术。" TextWrapping="Wrap" />
                                         </StackPanel>
                                     </Border>
                                 </Grid>
@@ -171,50 +169,33 @@
                         <Border Padding="18" Background="{StaticResource BrandCardTintBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
                             <StackPanel Spacing="8">
                                 <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource BrandHighlightTextBrush}" Text="工作台三栏布局说明" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 左栏：客户/群组列表与搜索框，支持按昵称、备注、微信号、手机号、标签和员工备注即时检索。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 中栏：微信风格会话记录区与底部输入框，支持截图自动识别对话、右键单删与多选批量删除。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 右栏：客户资料与智能辅助区，通过顶部选项卡在「基本资料」「AI 总结」「AI 对话」之间快速切换。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 左栏：按微信标签分组展示客户列表，或在群组页展示群头像列表，支持即时搜索与批量勾选删除。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 中栏：微信风格会话记录区，完整展示文本、表情、图片（点击查看大图）、语音时长、文件、引用与转账。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 右栏：客户/群组资料与 AI 辅助区，可在「基本资料」「AI 总结」「AI 对话」之间快速切换。" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
 
-                    <!-- 2. CUSTOMERS & BATCH IMPORT -->
+                    <!-- 2. WECHAT AUTO MONITOR -->
+                    <StackPanel x:Name="PanelOcr" Spacing="14" Visibility="Collapsed">
+                        <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
+                            <StackPanel Spacing="9">
+                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="自动监听微信消息变化（全自动免操心）" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 仅在本地只读获取微信聊天记录，不影响电脑微信正常使用，也不修改微信自身数据。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 系统会自动检测微信消息变化，并在数秒内把您已导入的客户和群聊的最新对话同步到工作台，无需手工反复同步。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 首次连接若提示权限不足，点击提示中的「以管理员身份重启」即可恢复正常。" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- 3. CUSTOMERS -->
                     <StackPanel x:Name="PanelCustomers" Spacing="14" Visibility="Collapsed">
                         <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                             <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="统一添加客户入口（截图新建 / 标签批量导入）" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 点击客户列表搜索框旁的「+」，可在弹窗顶部自由切换「截图识别 / 手动新建」与「按微信标签批量导入」两种方式。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 单条模式：截微信资料页后直接按 Ctrl+V，自动提取资料、性别并精准裁剪头像；重复客户支持「覆盖已有」或「仍要新建」。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 批量模式：自动唤起微信并打开「通讯录管理」扫描标签，勾选标签后自动逐人采集并按微信号去重；移动鼠标或按 Esc 可随时熔断停止。" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
-                            <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="右侧三选项卡与资料维护" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 左侧分组与批量管理：客户列表自动按标签分类并支持点击分组折叠/展开；点击搜索栏旁的多选图标或右键客户/分组，可批量勾选并一键删除。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 基本资料：点击头像可粘贴、上传或清除头像；点击头像与姓名右下角的编辑/删除小图标，可在弹窗中分页编辑「基本资料」与「员工备注」。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• AI 总结 / AI 对话：可一键汇总客户画像，或围绕当前客户开展讨论（对话上下文仅保存于本地）。" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-
-                    <!-- 3. CHAT HISTORY MANAGEMENT -->
-                    <StackPanel x:Name="PanelChat" Spacing="14" Visibility="Collapsed">
-                        <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
-                            <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="聊天记录录入与截图提取" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 导入对话（双模式）：点击输入框上方的「导入对话」，可在「截图识别导入」（单图识别绿/白气泡）与「微信聊天记录批量导入」（自动搜索账号 → 打开查找聊天内容 → 逐屏 OCR 批量采集并去重）之间切换。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 粘贴提取单条：将单段文字截图复制到剪贴板，点击「粘贴提取单条」即可快速把文字填入输入框。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 上下拖动聊天区与输入框之间的横条，可自由调整输入框高度。" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
-                            <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="气泡右键菜单与多选删除" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 右键点击任意聊天气泡，可快速执行「编辑消息」「在上方插入消息」「在下方插入消息」「复制内容」「多选消息」或「删除消息」。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 点击聊天栏右上角的「多选」按钮，可进入批量勾选模式，支持全选与一键批量删除冗余记录。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="按微信标签导入与管理客户" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 点击左上角「+」打开添加客户弹窗，可按微信标签分类浏览所有好友，自由勾选单个好友或一键导入整个标签下的好友。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 左侧列表按微信标签自动分组，支持折叠/展开、多选批量删除以及按备注、昵称、微信号或标签检索。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 右栏编辑保存的员工跟进备注与跟进状态受到保护，不会被后续同步覆盖。" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -223,36 +204,22 @@
                     <StackPanel x:Name="PanelGroups" Spacing="14" Visibility="Collapsed">
                         <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                             <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="群组录入与成员整理" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 点击群组列表上方「+」或在截取群信息/群成员面板后按 Ctrl+V，自动提取群名称、人数与成员名单。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 右侧详情面板可随时编辑群名称、群标识、成员清单及员工跟进备注，并支持按群名、成员或备注搜索。" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
-                            <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="群聊记录维护" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 发言时可切换「我方发出」或「群成员」并填写发言人姓名，便于清晰回溯群内关键决策。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 同样支持整图气泡导入、单条截图提字、气泡右键复制/删除以及顶部「多选」批量管理。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="挑选导入群聊、展示群头像与自动更新" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 点击左上角「+」打开添加群聊弹窗，自由勾选需要管理的微信群，自动导入群头像、群成员与历史群聊记录。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 导入后自动巡检群内新消息并同步，左侧群列表支持多选全选批量删除，与客户档案保持一致操作体验。" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
 
-                    <!-- 5. WECHAT MONITOR -->
-                    <StackPanel x:Name="PanelOcr" Spacing="14" Visibility="Collapsed">
+                    <!-- 5. AI ASSISTANT -->
+                    <StackPanel x:Name="PanelChat" Spacing="14" Visibility="Collapsed">
                         <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                             <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信存活监听与启停控制" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 自动实时监听个人微信（3.x / 4.x）与企业微信存活状态，展示进程 PID、版本号、内存占用、运行时长、窗口句柄与登录状态。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 支持一键启动/唤起微信、安全重启微信以及自定义微信程序路径；所有上线、退出与窗口变化均会自动记录在实时事件栏。" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
-                            <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="自动唤起与窗口 OCR 诊断" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 在标签批量导入或执行窗口诊断时，若微信处于最小化、系统托盘隐藏或未运行状态，系统会自动唤起或启动微信，无需手动切换。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 选中任意微信窗口可一键唤起前台、最小化，或执行「截图诊断」快速确认当前页面是否处于已登录、待扫码或掉线状态。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="智能查阅全部聊天记录，辅助跟进与回复" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 全文搜索聊天记录：直接问“最近谁问过报价/某项目”，AI 自动跨所有私聊与群聊检索定位。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 排查待回复客户：一键梳理近期活跃的客户与群聊，筛选出对方刚发消息尚未回复的会话。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 按标签复盘跟进：直接问“帮我总结 VIP 标签客户最近的沟通进展”，自动汇总该标签下客户聊天情况。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 支持结合企业知识库内容，直接生成得体的客户回复话术与群通知。" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -261,45 +228,15 @@
                     <StackPanel x:Name="PanelSettings" Spacing="14" Visibility="Collapsed">
                         <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                             <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="外观模式与颜色偏好" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 点击左下角「明亮 / 黑夜」按钮，或在「设置 → 通用」中可一键切换浅色/深色主题。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 在「设置 → 通用 → 颜色偏好」中提供 5 套柔和浅色配色（暮紫、柔杏、晴蓝、暖黄、竹绿），切换后立即生效并自动记住。" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
-                        <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
-                            <StackPanel Spacing="9">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="服务配置与运行日志" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 在「设置 → 账号」可查看当前已登录的员工账号信息。" TextWrapping="Wrap" />
-                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 在「设置 → 服务」可修改服务端 IP 地址并测试连通性；若需排查异常，点击「查看运行日志」可筛选、自检或一键复制日志。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="外观模式、服务配置与运行状态" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 左下角一键切换明亮/黑夜模式，在「设置 → 通用」提供 5 套柔和浅色配色并自动记住。" TextWrapping="Wrap" />
+                                <TextBlock FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" LineHeight="21" Text="• 在「设置 → 服务」可配置服务地址并测试连接状态，也可在运行日志中一键检测本机微信连接情况。" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
 
                         <Border Padding="18" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
                             <StackPanel Spacing="10">
-                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="常用快捷键" />
-
-                                <Grid ColumnSpacing="12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="120" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border HorizontalAlignment="Left" Padding="8,3" Background="{StaticResource AppInputBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="5">
-                                        <TextBlock FontFamily="Consolas" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="Ctrl + V" />
-                                    </Border>
-                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Text="在客户页、群组页或导入弹窗中，直接粘贴剪贴板截图并自动识别" TextWrapping="Wrap" />
-                                </Grid>
-
-                                <Grid ColumnSpacing="12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="120" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border HorizontalAlignment="Left" Padding="8,3" Background="{StaticResource AppInputBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="5">
-                                        <TextBlock FontFamily="Consolas" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="Esc" />
-                                    </Border>
-                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Text="关闭当前弹窗，或在批量导入运行期间立即安全中止任务" TextWrapping="Wrap" />
-                                </Grid>
+                                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="常用操作" />
 
                                 <Grid ColumnSpacing="12">
                                     <Grid.ColumnDefinitions>
@@ -309,7 +246,18 @@
                                     <Border HorizontalAlignment="Left" Padding="8,3" Background="{StaticResource AppInputBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="5">
                                         <TextBlock FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="右键气泡" />
                                     </Border>
-                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Text="在聊天气泡上打开快捷菜单，支持复制内容、进入多选或单条删除" TextWrapping="Wrap" />
+                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Text="在聊天气泡上打开快捷菜单，支持编辑、插入、复制、多选或单条删除" TextWrapping="Wrap" />
+                                </Grid>
+
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="120" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border HorizontalAlignment="Left" Padding="8,3" Background="{StaticResource AppInputBgBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="5">
+                                        <TextBlock FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="点击聊天图片" />
+                                    </Border>
+                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Text="打开高清大图预览窗口，支持滚轮缩放与拖拽查看" TextWrapping="Wrap" />
                                 </Grid>
                             </StackPanel>
                         </Border>

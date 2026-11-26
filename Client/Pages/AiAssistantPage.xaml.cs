@@ -458,7 +458,7 @@ namespace Client.Pages
                 {
                     Role = "assistant",
                     IsPending = true,
-                    Content = "正在思考并生成回复..."
+                    Content = "正在调用工具检索并生成回复..."
                 };
                 _messages.Add(pendingBubble);
 
@@ -477,15 +477,17 @@ namespace Client.Pages
 
                 string replyText;
                 string traceText = string.Empty;
+                List<AiToolTraceDto> traceList = [];
 
                 if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.Reply))
                 {
                     replyText = res.Data.Reply;
                     if (res.Data.ToolTrace is { Count: > 0 })
                     {
+                        traceList = res.Data.ToolTrace;
                         var labels = res.Data.ToolTrace
                             .Select(t => string.IsNullOrWhiteSpace(t.Summary) ? t.SkillName : $"{t.SkillName}（{t.Summary}）");
-                        traceText = "已调用技能：" + string.Join(" · ", labels);
+                        traceText = "已调用工具：" + string.Join(" · ", labels);
                     }
                 }
                 else
@@ -497,6 +499,7 @@ namespace Client.Pages
                 {
                     Role = "assistant",
                     Content = replyText,
+                    ToolTrace = traceList,
                     ToolTraceSummary = traceText,
                     Timestamp = DateTime.Now.ToString("HH:mm")
                 };

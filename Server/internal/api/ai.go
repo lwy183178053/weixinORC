@@ -4,6 +4,8 @@ import (
 	_ "embed"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -330,6 +332,55 @@ func (s *server) aiCustomerChat(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
+type groupSummaryRequest struct {
+	GroupID int64 `json:"group_id"`
+}
+
+func (s *server) aiGroupSummary(c *gin.Context) {
+	var req groupSummaryRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	if req.GroupID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_group_id"})
+		return
+	}
+	id := auth.IdentityFromContext(c)
+	res, err := s.ai.SummarizeGroup(c.Request.Context(), id.EmployeeID, req.GroupID)
+	if err != nil {
+		writeAIError(c, err)
+		return
+	}
+	_, _ = s.store.CreateAuditLog(c.Request.Context(), id.EmployeeID, "ai_group_summary", "group", "", "model="+res.Model)
+	c.JSON(http.StatusOK, res)
+}
+
+type groupChatRequest struct {
+	GroupID int64         `json:"group_id"`
+	History []ai.ChatTurn `json:"history"`
+	Message string        `json:"message"`
+	Images  []string      `json:"images,omitempty"`
+}
+
+func (s *server) aiGroupChat(c *gin.Context) {
+	var req groupChatRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	if req.GroupID <= 0 || (strings.TrimSpace(req.Message) == "" && len(req.Images) == 0) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		return
+	}
+	id := auth.IdentityFromContext(c)
+	res, err := s.ai.GroupChat(c.Request.Context(), id.EmployeeID, req.GroupID, req.History, req.Message, req.Images)
+	if err != nil {
+		writeAIError(c, err)
+		return
+	}
+	_, _ = s.store.CreateAuditLog(c.Request.Context(), id.EmployeeID, "ai_group_chat", "group", "", "model="+res.Model)
+	c.JSON(http.StatusOK, res)
+}
+
 type agentChatRequest struct {
 	History []ai.ChatTurn `json:"history"`
 	Message string        `json:"message"`
@@ -352,6 +403,44 @@ func (s *server) aiAgentChat(c *gin.Context) {
 		return
 	}
 	_, _ = s.store.CreateAuditLog(c.Request.Context(), id.EmployeeID, "ai_agent_chat", "agent", "", "model="+res.Model)
+	c.JSON(http.StatusOK, res)
+}
+
+type transcribeAudioRequest struct {
+	AudioURL string `json:"audio_url"`
+}
+
+func (s *server) aiTranscribeAudio(c *gin.Context) {
+	var req transcribeAudioRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	audioURL := strings.TrimSpace(req.AudioURL)
+	ownerID := auth.IdentityFromContext(c).EmployeeID
+	if audioURL == "" || !validChatAudioURL(ownerID, audioURL) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_audio_url"})
+		return
+	}
+	filename := strings.TrimPrefix(audioURL, chatAudioRoutePrefix)
+	fullPath := filepath.Join(s.store.ChatAudioDir(), filename)
+	raw, err := os.ReadFile(fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "audio_not_found"})
+		return
+	}
+	raw = repairLegacyMalformedWav(raw)
+	ext, _, ok := detectAudioExt(raw)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported_audio_format"})
+		return
+	}
+	format := strings.TrimPrefix(ext, ".")
+	res, err := s.ai.TranscribeAudio(c.Request.Context(), raw, format)
+	if err != nil {
+		writeAIError(c, err)
+		return
+	}
+	_, _ = s.store.CreateAuditLog(c.Request.Context(), ownerID, "ai_transcribe_audio", "audio", filename, "engine="+res.Engine)
 	c.JSON(http.StatusOK, res)
 }
 

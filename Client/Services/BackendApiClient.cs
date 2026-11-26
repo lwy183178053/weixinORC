@@ -26,6 +26,8 @@ namespace Client.Services
         private readonly HttpClient _httpClient;
         private readonly HttpClient _aiHttpClient;
         private readonly ConcurrentDictionary<string, byte[]> _avatarCache = new(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, byte[]> _chatImageCache = new(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, byte[]> _chatAudioCache = new(StringComparer.Ordinal);
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
             PropertyNameCaseInsensitive = true
@@ -282,18 +284,261 @@ namespace Client.Services
             }
         }
 
-        public Task<ApiResult<MessageListResponse>> ListCustomerMessagesAsync(long customerId, int limit = 100, CancellationToken ct = default) =>
-            SendAuthedAsync<MessageListResponse>(HttpMethod.Get, $"/api/v1/customers/{customerId}/messages?limit={limit}", null, ct);
+        public async Task<ApiResult<UploadChatImageResponse>> UploadChatImageAsync(byte[] imageBytes, CancellationToken ct = default)
+        {
+            string b64 = Convert.ToBase64String(imageBytes);
+            var res = await SendAuthedAsync<UploadChatImageResponse>(
+                HttpMethod.Post,
+                "/api/v1/chat-images",
+                new UploadAvatarRequest { ImageBase64 = b64 },
+                ct);
+            if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.ImageUrl))
+            {
+                _chatImageCache[res.Data.ImageUrl] = imageBytes;
+            }
+            return res;
+        }
+
+        public async Task<byte[]?> DownloadChatImageBytesAsync(string? imageUrl, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(imageUrl) || !IsAuthenticated) return null;
+            if (_chatImageCache.TryGetValue(imageUrl, out var cached)) return cached;
+
+            try
+            {
+                if (imageUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                    imageUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!imageUrl.StartsWith(BaseUrl, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return null;
+                    }
+                }
+                string path = imageUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                    ? imageUrl
+                    : $"{BaseUrl}{(imageUrl.StartsWith('/') ? imageUrl : "/" + imageUrl)}";
+                using var req = new HttpRequestMessage(HttpMethod.Get, path);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", AccessToken);
+                using var resp = await _httpClient.SendAsync(req, ct);
+                if (!resp.IsSuccessStatusCode) return null;
+
+                byte[] bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+                if (bytes.Length > 0)
+                {
+                    _chatImageCache[imageUrl] = bytes;
+                }
+                return bytes;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public async Task<ApiResult<UploadChatAudioResponse>> UploadChatAudioAsync(byte[] audioBytes, CancellationToken ct = default)
+        {
+            string b64 = Convert.ToBase64String(audioBytes);
+            var res = await SendAuthedAsync<UploadChatAudioResponse>(
+                HttpMethod.Post,
+                "/api/v1/chat-audio",
+                new UploadAudioRequest { AudioBase64 = b64 },
+                ct);
+            if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.AudioUrl))
+            {
+                _chatAudioCache[res.Data.AudioUrl] = audioBytes;
+            }
+            return res;
+        }
+
+        public async Task<byte[]?> DownloadChatAudioBytesAsync(string? audioUrl, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(audioUrl) || !IsAuthenticated) return null;
+            if (_chatAudioCache.TryGetValue(audioUrl, out var cached)) return cached;
+
+            try
+            {
+                if (audioUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                    audioUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!audioUrl.StartsWith(BaseUrl, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return null;
+                    }
+                }
+                string path = audioUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                    ? audioUrl
+                    : $"{BaseUrl}{(audioUrl.StartsWith('/') ? audioUrl : "/" + audioUrl)}";
+                using var req = new HttpRequestMessage(HttpMethod.Get, path);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", AccessToken);
+                using var resp = await _httpClient.SendAsync(req, ct);
+                if (!resp.IsSuccessStatusCode) return null;
+
+                byte[] bytes = await resp.Content.ReadAsByteArrayAsync(ct);
+                if (bytes.Length > 0)
+                {
+                    _chatAudioCache[audioUrl] = bytes;
+                }
+                return bytes;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public async Task<ApiResult<UploadChatVideoResponse>> UploadChatVideoFileAsync(string localFilePath, CancellationToken ct = default)
+        {
+            if (!IsAuthenticated || string.IsNullOrWhiteSpace(localFilePath) || !File.Exists(localFilePath))
+            {
+                return ApiResult<UploadChatVideoResponse>.Fail("本地视频文件不存在。");
+            }
+
+            try
+            {
+                var fi = new FileInfo(localFilePath);
+                if (fi.Length < 16 || fi.Length > 75L * 1024 * 1024)
+                {
+                    return ApiResult<UploadChatVideoResponse>.Fail("视频文件过大（上限 75 MB）或无效。");
+                }
+
+                using var fs = new FileStream(localFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 256 * 1024);
+                using var content = new StreamContent(fs);
+                content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                using var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/api/v1/chat-video") { Content = content };
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", AccessToken);
+
+                using var resp = await _httpClient.SendAsync(req, ct);
+                string body = await resp.Content.ReadAsStringAsync(ct);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    return ApiResult<UploadChatVideoResponse>.Fail($"HTTP {(int)resp.StatusCode}: {body}");
+                }
+                var data = JsonSerializer.Deserialize<UploadChatVideoResponse>(body, JsonOptions);
+                return data is not null
+                    ? ApiResult<UploadChatVideoResponse>.Ok(data)
+                    : ApiResult<UploadChatVideoResponse>.Fail("上传视频响应为空。");
+            }
+            catch (Exception ex)
+            {
+                return ApiResult<UploadChatVideoResponse>.Fail(ex.Message);
+            }
+        }
+
+        public async Task<string?> DownloadChatVideoToTempFileAsync(string? videoUrl, CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(videoUrl) || !IsAuthenticated) return null;
+            try
+            {
+                if ((videoUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                     videoUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) &&
+                    !videoUrl.StartsWith(BaseUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+
+                string safeName = Path.GetFileName(videoUrl.Split('?')[0]);
+                if (string.IsNullOrWhiteSpace(safeName)) safeName = "video.mp4";
+                string cacheDir = Path.Combine(Path.GetTempPath(), "weixinORC_video_cache");
+                Directory.CreateDirectory(cacheDir);
+                string localPath = Path.Combine(cacheDir, safeName);
+                if (File.Exists(localPath) && new FileInfo(localPath).Length > 1024)
+                {
+                    return localPath;
+                }
+
+                string url = videoUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                    ? videoUrl
+                    : $"{BaseUrl}{(videoUrl.StartsWith('/') ? videoUrl : "/" + videoUrl)}";
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", AccessToken);
+                using var resp = await _httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                if (!resp.IsSuccessStatusCode) return null;
+
+                string tmpPath = localPath + ".part";
+                await using (var src = await resp.Content.ReadAsStreamAsync(ct))
+                await using (var dst = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None, 256 * 1024))
+                {
+                    await src.CopyToAsync(dst, ct);
+                }
+                File.Move(tmpPath, localPath, overwrite: true);
+                return localPath;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public Task<ApiResult<MessageListResponse>> ListCustomerMessagesAsync(long customerId, int limit = 100, long cursor = 0, CancellationToken ct = default)
+        {
+            string qs = cursor > 0 ? $"?limit={limit}&cursor={cursor}" : $"?limit={limit}";
+            return SendAuthedAsync<MessageListResponse>(HttpMethod.Get, $"/api/v1/customers/{customerId}/messages{qs}", null, ct);
+        }
 
         public Task<ApiResult<MessageDto>> CreateCustomerMessageAsync(
-            long customerId, string direction, string content, CancellationToken ct = default) =>
+            long customerId, string direction, string content, string? imageUrl = null, string? sentAtIso = null, CancellationToken ct = default) =>
             SendAuthedAsync<MessageDto>(HttpMethod.Post, $"/api/v1/customers/{customerId}/messages",
-                new CreateMessageRequest { Direction = direction, Content = content.Trim() }, ct);
+                new CreateMessageRequest
+                {
+                    Direction = direction,
+                    Content = content.Trim(),
+                    ImageUrl = imageUrl?.Trim() ?? string.Empty,
+                    SentAt = string.IsNullOrWhiteSpace(sentAtIso) ? null : sentAtIso.Trim()
+                }, ct);
+
+        public Task<ApiResult<MessageDto>> UpdateCustomerMessageAsync(
+            long customerId, long messageId, string direction, string content, string? imageUrl = null, CancellationToken ct = default) =>
+            SendAuthedAsync<MessageDto>(HttpMethod.Patch, $"/api/v1/customers/{customerId}/messages/{messageId}",
+                new CreateMessageRequest
+                {
+                    Direction = direction,
+                    Content = content.Trim(),
+                    ImageUrl = imageUrl?.Trim() ?? string.Empty
+                }, ct);
 
         // ---- Groups ----
 
-        public Task<ApiResult<GroupListResponse>> ListGroupsAsync(int limit = 100, CancellationToken ct = default) =>
-            SendAuthedAsync<GroupListResponse>(HttpMethod.Get, $"/api/v1/groups?limit={limit}", null, ct);
+        public Task<ApiResult<GroupListResponse>> ListGroupsAsync(int limit = 100, long cursor = 0, CancellationToken ct = default)
+        {
+            string qs = cursor > 0 ? $"?limit={limit}&cursor={cursor}" : $"?limit={limit}";
+            return SendAuthedAsync<GroupListResponse>(HttpMethod.Get, $"/api/v1/groups{qs}", null, ct);
+        }
+
+        public async Task<List<GroupDto>> ListAllGroupsAsync(int maxItems = 1000, CancellationToken ct = default)
+        {
+            var all = new List<GroupDto>();
+            long cursor = 0;
+            while (all.Count < maxItems)
+            {
+                var res = await ListGroupsAsync(limit: 100, cursor: cursor, ct: ct);
+                if (!res.IsSuccess || res.Data is null || res.Data.Items.Count == 0)
+                {
+                    break;
+                }
+                all.AddRange(res.Data.Items);
+                if (res.Data.NextCursor <= 0)
+                {
+                    break;
+                }
+                cursor = res.Data.NextCursor;
+            }
+            return all;
+        }
+
+        public async Task<ApiResult<GroupDto>> UploadGroupAvatarAsync(long groupId, byte[] imageBytes, CancellationToken ct = default)
+        {
+            string b64 = Convert.ToBase64String(imageBytes);
+            var res = await SendAuthedAsync<GroupDto>(
+                HttpMethod.Post,
+                $"/api/v1/groups/{groupId}/avatar",
+                new UploadAvatarRequest { ImageBase64 = b64 },
+                ct);
+            if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.AvatarUrl))
+            {
+                _avatarCache[res.Data.AvatarUrl] = imageBytes;
+            }
+            return res;
+        }
 
         public Task<ApiResult<GroupDto>> CreateGroupAsync(CreateGroupRequest payload, CancellationToken ct = default) =>
             SendAuthedAsync<GroupDto>(HttpMethod.Post, "/api/v1/groups", payload, ct);
@@ -304,17 +549,78 @@ namespace Client.Services
         public Task<ApiResult<bool>> DeleteGroupAsync(long groupId, CancellationToken ct = default) =>
             SendAuthedNoContentAsync(HttpMethod.Delete, $"/api/v1/groups/{groupId}", ct);
 
-        public Task<ApiResult<GroupMessageListResponse>> ListGroupMessagesAsync(long groupId, int limit = 100, CancellationToken ct = default) =>
-            SendAuthedAsync<GroupMessageListResponse>(HttpMethod.Get, $"/api/v1/groups/{groupId}/messages?limit={limit}", null, ct);
+        public Task<ApiResult<GroupMemberListResponse>> ListGroupMembersAsync(long groupId, int limit = 100, long cursor = 0, CancellationToken ct = default)
+        {
+            string qs = cursor > 0 ? $"?limit={limit}&cursor={cursor}" : $"?limit={limit}";
+            return SendAuthedAsync<GroupMemberListResponse>(HttpMethod.Get, $"/api/v1/groups/{groupId}/members{qs}", null, ct);
+        }
+
+        public async Task<List<GroupMemberDto>> ListAllGroupMembersAsync(long groupId, int maxItems = 500, CancellationToken ct = default)
+        {
+            var all = new List<GroupMemberDto>();
+            long cursor = 0;
+            while (all.Count < maxItems)
+            {
+                var res = await ListGroupMembersAsync(groupId, limit: 100, cursor: cursor, ct: ct);
+                if (!res.IsSuccess || res.Data is null || res.Data.Items.Count == 0) break;
+                all.AddRange(res.Data.Items);
+                if (res.Data.NextCursor <= 0) break;
+                cursor = res.Data.NextCursor;
+            }
+            return all;
+        }
+
+        public Task<ApiResult<GroupMemberDto>> CreateGroupMemberAsync(long groupId, CreateGroupMemberRequest payload, CancellationToken ct = default) =>
+            SendAuthedAsync<GroupMemberDto>(HttpMethod.Post, $"/api/v1/groups/{groupId}/members", payload, ct);
+
+        public Task<ApiResult<GroupMemberDto>> UpdateGroupMemberAsync(long groupId, long memberId, CreateGroupMemberRequest payload, CancellationToken ct = default) =>
+            SendAuthedAsync<GroupMemberDto>(HttpMethod.Patch, $"/api/v1/groups/{groupId}/members/{memberId}", payload, ct);
+
+        public Task<ApiResult<bool>> DeleteGroupMemberAsync(long groupId, long memberId, CancellationToken ct = default) =>
+            SendAuthedNoContentAsync(HttpMethod.Delete, $"/api/v1/groups/{groupId}/members/{memberId}", ct);
+
+        public async Task<ApiResult<GroupMemberDto>> UploadGroupMemberAvatarAsync(long groupId, long memberId, byte[] imageBytes, CancellationToken ct = default)
+        {
+            string b64 = Convert.ToBase64String(imageBytes);
+            var res = await SendAuthedAsync<GroupMemberDto>(
+                HttpMethod.Post,
+                $"/api/v1/groups/{groupId}/members/{memberId}/avatar",
+                new UploadAvatarRequest { ImageBase64 = b64 },
+                ct);
+            if (res.IsSuccess && res.Data is not null && !string.IsNullOrWhiteSpace(res.Data.AvatarUrl))
+            {
+                _avatarCache[res.Data.AvatarUrl] = imageBytes;
+            }
+            return res;
+        }
+
+        public Task<ApiResult<GroupMessageListResponse>> ListGroupMessagesAsync(long groupId, int limit = 100, long cursor = 0, CancellationToken ct = default)
+        {
+            string qs = cursor > 0 ? $"?limit={limit}&cursor={cursor}" : $"?limit={limit}";
+            return SendAuthedAsync<GroupMessageListResponse>(HttpMethod.Get, $"/api/v1/groups/{groupId}/messages{qs}", null, ct);
+        }
 
         public Task<ApiResult<GroupMessageDto>> CreateGroupMessageAsync(
-            long groupId, string senderName, string direction, string content, CancellationToken ct = default) =>
+            long groupId, string senderName, string direction, string content, string? imageUrl = null, string? sentAtIso = null, CancellationToken ct = default) =>
             SendAuthedAsync<GroupMessageDto>(HttpMethod.Post, $"/api/v1/groups/{groupId}/messages",
                 new CreateGroupMessageRequest
                 {
                     SenderName = senderName.Trim(),
                     Direction = direction,
-                    Content = content.Trim()
+                    Content = content.Trim(),
+                    ImageUrl = imageUrl?.Trim() ?? string.Empty,
+                    SentAt = string.IsNullOrWhiteSpace(sentAtIso) ? null : sentAtIso.Trim()
+                }, ct);
+
+        public Task<ApiResult<GroupMessageDto>> UpdateGroupMessageAsync(
+            long groupId, long messageId, string senderName, string direction, string content, string? imageUrl = null, CancellationToken ct = default) =>
+            SendAuthedAsync<GroupMessageDto>(HttpMethod.Patch, $"/api/v1/groups/{groupId}/messages/{messageId}",
+                new CreateGroupMessageRequest
+                {
+                    SenderName = senderName.Trim(),
+                    Direction = direction,
+                    Content = content.Trim(),
+                    ImageUrl = imageUrl?.Trim() ?? string.Empty
                 }, ct);
 
         // ---- Audit Logs ----
@@ -347,6 +653,25 @@ namespace Client.Services
                     images = images?.ToList() ?? []
                 }, ct);
 
+        public Task<ApiResult<AiCustomerSummaryResponse>> SummarizeGroupWithAiAsync(long groupId, CancellationToken ct = default) =>
+            SendAuthedLongRunningAsync<AiCustomerSummaryResponse>(HttpMethod.Post, "/api/v1/ai/group-summary",
+                new { group_id = groupId }, ct);
+
+        public Task<ApiResult<AiChatResponse>> GroupAiChatAsync(
+            long groupId,
+            IEnumerable<AiChatTurnDto> history,
+            string message,
+            IEnumerable<string>? images = null,
+            CancellationToken ct = default) =>
+            SendAuthedLongRunningAsync<AiChatResponse>(HttpMethod.Post, "/api/v1/ai/group-chat",
+                new
+                {
+                    group_id = groupId,
+                    history = history.ToList(),
+                    message = message.Trim(),
+                    images = images?.ToList() ?? []
+                }, ct);
+
         public Task<ApiResult<AiChatResponse>> AgentAiChatAsync(
             IEnumerable<AiChatTurnDto> history,
             string message,
@@ -359,6 +684,78 @@ namespace Client.Services
                     message = message.Trim(),
                     images = images?.ToList() ?? []
                 }, ct);
+
+        public Task<ApiResult<AiTranscribeResponse>> TranscribeChatAudioAsync(
+            string audioUrl,
+            CancellationToken ct = default) =>
+            SendAuthedLongRunningAsync<AiTranscribeResponse>(HttpMethod.Post, "/api/v1/ai/transcribe",
+                new { audio_url = audioUrl.Trim() }, ct);
+
+        // ---- WeChat 4.x Direct DB Batch Sync ----
+
+        public Task<ApiResult<JsonElement>> UpsertWeChatAccountAsync(
+            string accountType,
+            string wechatId,
+            string nickname,
+            string status = "online",
+            CancellationToken ct = default) =>
+            SendAuthedAsync<JsonElement>(HttpMethod.Post, "/api/v1/wechat-accounts",
+                new
+                {
+                    account_type = accountType,
+                    wechat_id = wechatId,
+                    nickname = nickname,
+                    status = status
+                }, ct);
+
+        public Task<ApiResult<WeChatSyncCustomersResponse>> SyncWeChatCustomersAsync(
+            List<WeChatSyncCustomerPayload> items,
+            CancellationToken ct = default) =>
+            SendAuthedLongRunningAsync<WeChatSyncCustomersResponse>(
+                HttpMethod.Post,
+                "/api/v1/wechat-sync/customers",
+                new { items },
+                ct);
+
+        public Task<ApiResult<WeChatSyncGroupsResponse>> SyncWeChatGroupsAsync(
+            List<WeChatSyncGroupPayload> items,
+            CancellationToken ct = default) =>
+            SendAuthedLongRunningAsync<WeChatSyncGroupsResponse>(
+                HttpMethod.Post,
+                "/api/v1/wechat-sync/groups",
+                new { items },
+                ct);
+
+        public Task<ApiResult<WeChatSyncMessagesResponse>> SyncCustomerMessagesAsync(
+            long customerId,
+            List<WeChatSyncMessagePayload> items,
+            CancellationToken ct = default) =>
+            SendAuthedLongRunningAsync<WeChatSyncMessagesResponse>(
+                HttpMethod.Post,
+                $"/api/v1/wechat-sync/customers/{customerId}/messages",
+                new { items },
+                ct);
+
+        public Task<ApiResult<WeChatSyncMessagesResponse>> SyncGroupMessagesAsync(
+            long groupId,
+            List<WeChatSyncMessagePayload> items,
+            CancellationToken ct = default) =>
+            SendAuthedLongRunningAsync<WeChatSyncMessagesResponse>(
+                HttpMethod.Post,
+                $"/api/v1/wechat-sync/groups/{groupId}/messages",
+                new { items },
+                ct);
+
+        public Task<ApiResult<WeChatExistingIdsResponse>> CheckExistingMessageIdsAsync(
+            string scope,
+            long targetId,
+            List<string> externalIds,
+            CancellationToken ct = default) =>
+            SendAuthedAsync<WeChatExistingIdsResponse>(
+                HttpMethod.Post,
+                "/api/v1/wechat-sync/existing-ids",
+                new { scope, target_id = targetId, external_ids = externalIds },
+                ct);
 
         private Task<ApiResult<T>> SendAuthedLongRunningAsync<T>(HttpMethod method, string path, object? body, CancellationToken ct) =>
             SendAuthedCoreAsync(_aiHttpClient, method, path, body, async (resp, token) =>
@@ -437,6 +834,8 @@ namespace Client.Services
             AccessToken = null;
             CurrentEmployee = null;
             _avatarCache.Clear();
+            _chatImageCache.Clear();
+            _chatAudioCache.Clear();
         }
 
         private static async Task<string> ReadFriendlyErrorAsync(HttpResponseMessage response, CancellationToken ct)

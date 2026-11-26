@@ -1,9 +1,16 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"weixinorc/server/internal/auth"
@@ -138,7 +145,13 @@ type createGroupMemberRequest struct {
 	NativeID      string `json:"native_id"`
 	GroupNickname string `json:"group_nickname"`
 	WechatName    string `json:"wechat_name"`
+	WechatRemark  string `json:"wechat_remark"`
 	WechatAccount string `json:"wechat_account"`
+	Gender        string `json:"gender"`
+	Region        string `json:"region"`
+	Phone         string `json:"phone"`
+	Signature     string `json:"signature"`
+	Source        string `json:"source"`
 	Role          string `json:"role"`
 	Note          string `json:"note"`
 }
@@ -148,7 +161,13 @@ type patchGroupMemberRequest struct {
 	NativeID      *string `json:"native_id"`
 	GroupNickname *string `json:"group_nickname"`
 	WechatName    *string `json:"wechat_name"`
+	WechatRemark  *string `json:"wechat_remark"`
 	WechatAccount *string `json:"wechat_account"`
+	Gender        *string `json:"gender"`
+	Region        *string `json:"region"`
+	Phone         *string `json:"phone"`
+	Signature     *string `json:"signature"`
+	Source        *string `json:"source"`
 	Role          *string `json:"role"`
 	Note          *string `json:"note"`
 }
@@ -184,14 +203,22 @@ func (s *server) createGroupMember(c *gin.Context) {
 	req.NativeID = strings.TrimSpace(req.NativeID)
 	req.GroupNickname = strings.TrimSpace(req.GroupNickname)
 	req.WechatName = strings.TrimSpace(req.WechatName)
+	req.WechatRemark = strings.TrimSpace(req.WechatRemark)
 	req.WechatAccount = strings.TrimSpace(req.WechatAccount)
+	req.Gender = strings.TrimSpace(req.Gender)
+	req.Region = strings.TrimSpace(req.Region)
+	req.Phone = strings.TrimSpace(req.Phone)
+	req.Signature = strings.TrimSpace(req.Signature)
+	req.Source = strings.TrimSpace(req.Source)
 	req.Role = strings.TrimSpace(req.Role)
-	if req.GroupNickname == "" && req.WechatName == "" && req.WechatAccount == "" {
+	if req.GroupNickname == "" && req.WechatName == "" && req.WechatRemark == "" && req.WechatAccount == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "member_name_required"})
 		return
 	}
 	if !validText(req.LocalKey, 128) || !validText(req.NativeID, 128) || !validText(req.GroupNickname, 128) ||
-		!validText(req.WechatName, 128) || !validText(req.WechatAccount, 128) || !validText(req.Role, 32) || !validText(req.Note, 1000) {
+		!validText(req.WechatName, 128) || !validText(req.WechatRemark, 128) || !validText(req.WechatAccount, 128) ||
+		!validText(req.Gender, 16) || !validText(req.Region, 128) || !validText(req.Phone, 64) ||
+		!validText(req.Signature, 500) || !validText(req.Source, 128) || !validText(req.Role, 32) || !validText(req.Note, 1000) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "field_too_long"})
 		return
 	}
@@ -202,7 +229,13 @@ func (s *server) createGroupMember(c *gin.Context) {
 		NativeID:      req.NativeID,
 		GroupNickname: req.GroupNickname,
 		WechatName:    req.WechatName,
+		WechatRemark:  req.WechatRemark,
 		WechatAccount: req.WechatAccount,
+		Gender:        req.Gender,
+		Region:        req.Region,
+		Phone:         req.Phone,
+		Signature:     req.Signature,
+		Source:        req.Source,
 		Role:          req.Role,
 		Note:          req.Note,
 	})
@@ -227,12 +260,16 @@ func (s *server) updateGroupMember(c *gin.Context) {
 		return
 	}
 	if req.LocalKey == nil && req.NativeID == nil && req.GroupNickname == nil &&
-		req.WechatName == nil && req.WechatAccount == nil && req.Role == nil && req.Note == nil {
+		req.WechatName == nil && req.WechatRemark == nil && req.WechatAccount == nil &&
+		req.Gender == nil && req.Region == nil && req.Phone == nil &&
+		req.Signature == nil && req.Source == nil && req.Role == nil && req.Note == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "empty_patch"})
 		return
 	}
 	if !trimAndCheck(&req.LocalKey, 128) || !trimAndCheck(&req.NativeID, 128) || !trimAndCheck(&req.GroupNickname, 128) ||
-		!trimAndCheck(&req.WechatName, 128) || !trimAndCheck(&req.WechatAccount, 128) || !trimAndCheck(&req.Role, 32) ||
+		!trimAndCheck(&req.WechatName, 128) || !trimAndCheck(&req.WechatRemark, 128) || !trimAndCheck(&req.WechatAccount, 128) ||
+		!trimAndCheck(&req.Gender, 16) || !trimAndCheck(&req.Region, 128) || !trimAndCheck(&req.Phone, 64) ||
+		!trimAndCheck(&req.Signature, 500) || !trimAndCheck(&req.Source, 128) || !trimAndCheck(&req.Role, 32) ||
 		(req.Note != nil && !validText(*req.Note, 1000)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "field_too_long"})
 		return
@@ -244,7 +281,13 @@ func (s *server) updateGroupMember(c *gin.Context) {
 		NativeID:      req.NativeID,
 		GroupNickname: req.GroupNickname,
 		WechatName:    req.WechatName,
+		WechatRemark:  req.WechatRemark,
 		WechatAccount: req.WechatAccount,
+		Gender:        req.Gender,
+		Region:        req.Region,
+		Phone:         req.Phone,
+		Signature:     req.Signature,
+		Source:        req.Source,
 		Role:          req.Role,
 		Note:          req.Note,
 	})
@@ -253,6 +296,68 @@ func (s *server) updateGroupMember(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, member)
+}
+
+func (s *server) uploadGroupMemberAvatar(c *gin.Context) {
+	groupID, ok := parsePathID(c, "id", "invalid_group_id")
+	if !ok {
+		return
+	}
+	memberID, ok := parsePathID(c, "memberId", "invalid_member_id")
+	if !ok {
+		return
+	}
+
+	var req uploadAvatarRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+
+	b64 := strings.TrimSpace(req.ImageBase64)
+	if idx := strings.Index(b64, ","); idx >= 0 && strings.HasPrefix(b64[:idx], "data:") {
+		b64 = b64[idx+1:]
+	}
+	if b64 == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "empty_avatar"})
+		return
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil || len(raw) == 0 || len(raw) > 2<<20 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_avatar_image"})
+		return
+	}
+
+	ext, _, validImg := detectImageExt(raw)
+	if !validImg {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported_image_format"})
+		return
+	}
+
+	ownerID := auth.IdentityFromContext(c).EmployeeID
+	var nonce [6]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "avatar_save_failed"})
+		return
+	}
+	filename := fmt.Sprintf("%sgm%d_%d_%d_%s%s", ownerAvatarPrefix(ownerID), groupID, memberID, time.Now().UnixNano(), hex.EncodeToString(nonce[:]), ext)
+	fullPath := filepath.Join(s.store.AvatarDir(), filename)
+	if err := os.WriteFile(fullPath, raw, 0o640); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "avatar_save_failed"})
+		return
+	}
+
+	avatarURL := "/api/v1/avatars/" + filename
+	updated, prevURL, err := s.store.SetGroupMemberAvatar(c.Request.Context(), ownerID, groupID, memberID, avatarURL)
+	if err != nil {
+		_ = os.Remove(fullPath)
+		writeStoreErr(c, err)
+		return
+	}
+	if prevURL != "" && prevURL != avatarURL {
+		s.removeAvatarFile(ownerID, prevURL)
+	}
+	c.JSON(http.StatusOK, updated)
 }
 
 func (s *server) deleteGroupMember(c *gin.Context) {

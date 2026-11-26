@@ -37,9 +37,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Konata.Codec" Version="1.4.2" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="*" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="*" />
     <PackageReference Include="RapidOcrNet" Version="4.2.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="11.0.0" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.9.1" />
   </ItemGroup>
 
   <!-- Publish Properties -->

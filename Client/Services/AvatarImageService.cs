@@ -129,6 +129,152 @@ namespace Client.Services
         }
 
         /// <summary>
+        /// Composes up to 9 member avatar images into a classic WeChat-style square group collage PNG
+        /// (2x2 for 2-4 members, 3x3 for 5-9 members) using WinRT BitmapDecoder/BitmapEncoder.
+        /// </summary>
+        public static async Task<byte[]?> BuildWeChatGroupCollagePngAsync(IReadOnlyList<byte[]> memberAvatarBytes, int canvasSize = 192)
+        {
+            if (memberAvatarBytes is null || memberAvatarBytes.Count == 0) return null;
+            int count = Math.Min(9, memberAvatarBytes.Count);
+            if (count == 1) return memberAvatarBytes[0];
+
+            try
+            {
+                int gap = Math.Max(3, canvasSize / 48);
+                int pad = Math.Max(4, canvasSize / 32);
+                int cols = count <= 4 ? 2 : 3;
+                int tileSize = Math.Max(16, (canvasSize - pad * 2 - gap * (cols - 1)) / cols);
+
+                // Row layouts matching official WeChat group avatar grid
+                int[] rowCounts = count switch
+                {
+                    2 => [2],
+                    3 => [1, 2],
+                    4 => [2, 2],
+                    5 => [2, 3],
+                    6 => [3, 3],
+                    7 => [1, 3, 3],
+                    8 => [2, 3, 3],
+                    _ => [3, 3, 3]
+                };
+
+                // Allocate BGRA8 premultiplied canvas filled with WeChat soft neutral gray (#E5E7EB)
+                byte[] canvas = new byte[canvasSize * canvasSize * 4];
+                for (int i = 0; i < canvas.Length; i += 4)
+                {
+                    canvas[i] = 0xEB;     // B
+                    canvas[i + 1] = 0xE7; // G
+                    canvas[i + 2] = 0xE5; // R
+                    canvas[i + 3] = 0xFF; // A
+                }
+
+                int totalGridH = rowCounts.Length * tileSize + (rowCounts.Length - 1) * gap;
+                int startY = (canvasSize - totalGridH) / 2;
+
+                int imgIdx = 0;
+                int drawn = 0;
+                for (int r = 0; r < rowCounts.Length && imgIdx < count; r++)
+                {
+                    int inRow = rowCounts[r];
+                    int rowW = inRow * tileSize + (inRow - 1) * gap;
+                    int startX = (canvasSize - rowW) / 2;
+                    int dstY = startY + r * (tileSize + gap);
+
+                    for (int c = 0; c < inRow && imgIdx < count; c++, imgIdx++)
+                    {
+                        byte[]? tileBgra = await DecodeSquareTileBgraAsync(memberAvatarBytes[imgIdx], tileSize);
+                        if (tileBgra is null) continue;
+
+                        int dstX = startX + c * (tileSize + gap);
+                        for (int y = 0; y < tileSize; y++)
+                        {
+                            int cy = dstY + y;
+                            if (cy < 0 || cy >= canvasSize) continue;
+                            int copyPixels = Math.Min(tileSize, canvasSize - Math.Max(0, dstX));
+                            if (copyPixels <= 0) continue;
+                            int srcStart = y * tileSize * 4 + (dstX < 0 ? -dstX * 4 : 0);
+                            int dstStart = (cy * canvasSize + Math.Max(0, dstX)) * 4;
+                            System.Buffer.BlockCopy(tileBgra, srcStart, canvas, dstStart, copyPixels * 4);
+                        }
+                        drawn++;
+                    }
+                }
+
+                if (drawn == 0) return null;
+
+                using var outBmp = SoftwareBitmap.CreateCopyFromBuffer(
+                    canvas.AsBuffer(),
+                    BitmapPixelFormat.Bgra8,
+                    canvasSize,
+                    canvasSize,
+                    BitmapAlphaMode.Premultiplied);
+
+                using var outStream = new InMemoryRandomAccessStream();
+                var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, outStream);
+                encoder.SetSoftwareBitmap(outBmp);
+                await encoder.FlushAsync();
+                outStream.Seek(0);
+
+                var pngBytes = new byte[outStream.Size];
+                await outStream.ReadAsync(pngBytes.AsBuffer(), (uint)pngBytes.Length, InputStreamOptions.None);
+                return pngBytes;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static async Task<byte[]?> DecodeSquareTileBgraAsync(byte[] rawBytes, int tileSize)
+        {
+            if (rawBytes is null || rawBytes.Length < 12) return null;
+            try
+            {
+                using var stream = new InMemoryRandomAccessStream();
+                await stream.WriteAsync(rawBytes.AsBuffer());
+                stream.Seek(0);
+
+                var decoder = await BitmapDecoder.CreateAsync(stream);
+                uint srcW = decoder.PixelWidth;
+                uint srcH = decoder.PixelHeight;
+                if (srcW == 0 || srcH == 0) return null;
+
+                // Scale so the shorter side equals tileSize, then center-crop to exact square
+                double scale = Math.Max(tileSize / (double)srcW, tileSize / (double)srcH);
+                uint scaledW = Math.Max((uint)tileSize, (uint)Math.Round(srcW * scale));
+                uint scaledH = Math.Max((uint)tileSize, (uint)Math.Round(srcH * scale));
+
+                var transform = new BitmapTransform
+                {
+                    ScaledWidth = scaledW,
+                    ScaledHeight = scaledH,
+                    InterpolationMode = BitmapInterpolationMode.Fant,
+                    Bounds = new BitmapBounds
+                    {
+                        X = (scaledW - (uint)tileSize) / 2,
+                        Y = (scaledH - (uint)tileSize) / 2,
+                        Width = (uint)tileSize,
+                        Height = (uint)tileSize
+                    }
+                };
+
+                var pixelData = await decoder.GetPixelDataAsync(
+                    BitmapPixelFormat.Bgra8,
+                    BitmapAlphaMode.Premultiplied,
+                    transform,
+                    ExifOrientationMode.RespectExifOrientation,
+                    ColorManagementMode.DoNotColorManage);
+
+                byte[] pixels = pixelData.DetachPixelData();
+                return pixels.Length == tileSize * tileSize * 4 ? pixels : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// 从微信资料卡截图（支持单卡片截图与整窗截图）中，结合 OCR 锚点与从右向左投影扫描，
         /// 精准裁剪左侧方形头像并识别昵称旁的蓝色男/粉色女图标。
         /// </summary>
@@ -141,7 +287,10 @@ namespace Client.Services
                 return (null, string.Empty);
             }
 
-            // Prefer lines starting with "微信号" / "地区:" / "昵称:" (avoid false matches like "通过搜索微信号添加" or table header "昵称↑")
+            int w = source.PixelWidth;
+            int h = source.PixelHeight;
+
+            // Prefer lines starting with "微信号" / "地区:" / "昵称:" / "群昵称:"
             var anchorLine = ocr.Lines
                 .OrderBy(l => l.Bounds.Y)
                 .FirstOrDefault(l => l.Text.TrimStart().StartsWith("微信号", StringComparison.OrdinalIgnoreCase))
@@ -152,36 +301,89 @@ namespace Client.Services
                         string t = l.Text.TrimStart();
                         return t.StartsWith("昵称:", StringComparison.OrdinalIgnoreCase) ||
                                t.StartsWith("昵称：", StringComparison.OrdinalIgnoreCase) ||
+                               t.StartsWith("群昵称:", StringComparison.OrdinalIgnoreCase) ||
+                               t.StartsWith("群昵称：", StringComparison.OrdinalIgnoreCase) ||
                                t.StartsWith("地区:", StringComparison.OrdinalIgnoreCase) ||
                                t.StartsWith("地区：", StringComparison.OrdinalIgnoreCase);
                     });
+
+            bool isShortCardHeadlineAnchor = false;
+            if (anchorLine is null)
+            {
+                // Support short non-friend group member cards (only Avatar + Headline + "朋友圈" + "添加到通讯录")
+                bool looksLikeCompactCard = (w <= 560 && h <= 560) ||
+                    ocr.Lines.Any(l =>
+                    {
+                        string t = l.Text.Replace(" ", "").Trim();
+                        return t.Contains("添加到通讯录", StringComparison.Ordinal) ||
+                               t == "朋友圈" ||
+                               t == "发消息";
+                    });
+                if (looksLikeCompactCard)
+                {
+                    anchorLine = ocr.Lines
+                        .Where(l =>
+                            l.Bounds.Y < h * 0.40 &&
+                            l.Bounds.X >= w * 0.22 &&
+                            !string.IsNullOrWhiteSpace(l.Text))
+                        .OrderBy(l => l.Bounds.Y)
+                        .FirstOrDefault(l =>
+                        {
+                            string t = l.Text.Replace(" ", "").Trim();
+                            return t is not ("朋友圈" or "添加到通讯录" or "发消息" or "更多" or "..." or "···");
+                        });
+                    isShortCardHeadlineAnchor = anchorLine is not null;
+                }
+            }
 
             if (anchorLine is null)
             {
                 return (null, string.Empty);
             }
 
-            // Find ALL aligned header lines directly above anchor (handles multi-line wrapped remark AND multi-line wrapped 昵称:)
-            var headerLinesAbove = ocr.Lines
+            // Find contiguous header lines directly above anchor inside the SAME profile card.
+            // Walk strictly upward from anchorLine and STOP immediately at any vertical gap > 1.8x line height
+            // so full-window screenshots NEVER jump out of the popup card into table rows above!
+            double lineH = Math.Max(14.0, anchorLine.Bounds.Height);
+            double maxGap = Math.Max(22.0, lineH * 1.85);
+            double maxHeaderSpan = Math.Max(96.0, lineH * 4.8);
+            var candidatesAbove = ocr.Lines
                 .Where(l =>
                     l.Bounds.Y < anchorLine.Bounds.Y - 2 &&
-                    l.Bounds.Y >= anchorLine.Bounds.Y - Math.Max(160, anchorLine.Bounds.Height * 8) &&
-                    Math.Abs(l.Bounds.X - anchorLine.Bounds.X) < 64)
-                .OrderBy(l => l.Bounds.Y)
+                    l.Bounds.Y >= anchorLine.Bounds.Y - maxHeaderSpan &&
+                    Math.Abs(l.Bounds.X - anchorLine.Bounds.X) < 56)
+                .OrderByDescending(l => l.Bounds.Y)
                 .ToList();
+
+            var headerLinesAbove = new List<OcrLineResult>();
+            double currentTopY = anchorLine.Bounds.Y;
+            foreach (var cand in candidatesAbove)
+            {
+                double gap = currentTopY - (cand.Bounds.Y + cand.Bounds.Height);
+                if (gap > maxGap)
+                {
+                    break;
+                }
+                headerLinesAbove.Add(cand);
+                currentTopY = Math.Min(currentTopY, cand.Bounds.Y);
+            }
+            headerLinesAbove.Reverse();
 
             var topRef = headerLinesAbove.FirstOrDefault() ?? anchorLine;
             var nickLabelAbove = headerLinesAbove.FirstOrDefault(l =>
                 l.Text.TrimStart().StartsWith("昵称", StringComparison.OrdinalIgnoreCase));
-            // Gender icon sits at the end of the headline lines strictly above 昵称: (or above anchor if no 昵称: row)
+            // Gender icon sits at the end of the headline lines strictly above 昵称: (or next to anchorLine on short non-friend cards!)
             var genderCandidates = headerLinesAbove
                 .Where(l => nickLabelAbove is null || l.Bounds.Y < nickLabelAbove.Bounds.Y - 2)
                 .ToList();
-            int w = source.PixelWidth;
-            int h = source.PixelHeight;
+            if (isShortCardHeadlineAnchor || genderCandidates.Count == 0)
+            {
+                genderCandidates.Add(anchorLine);
+            }
             byte[] pixels = CopyBgraPixels(source);
 
-            // 1. Detect gender icon right next to the headline (checks all wrapped headline lines)
+            // 1. Detect gender icon right next to the headline (checks both right-of-box and inside right tail of box,
+            //    so even when RapidOCR swallows the gender icon into the headline box, we still detect it accurately)
             string gender = string.Empty;
             foreach (var cand in genderCandidates)
             {
@@ -213,26 +415,26 @@ namespace Client.Services
 
                 int colSpan = leftLabelLine is not null
                     ? Math.Clamp((int)Math.Round(rightColX - leftLabelLine.Bounds.X), 55, 160)
-                    : Math.Clamp((int)Math.Round(anchorLine.Bounds.Height * 3.5), 60, 130);
+                    : Math.Clamp((int)Math.Round(anchorLine.Bounds.Height * (isShortCardHeadlineAnchor ? 4.1 : 3.8)), 66, 135);
 
-                // Empirically across WeChat 3.9 / 4.x at all DPIs: avatar side ≈ 0.78 * colSpan, left ≈ leftColX + 0.05 * colSpan
-                int expectedSide = Math.Clamp((int)Math.Round(colSpan * 0.78), 42, 136);
+                // Empirically across WeChat 4.x at all DPIs: avatar side ≈ 0.79 * colSpan, left ≈ leftColX + 0.06 * colSpan
+                int expectedSide = Math.Clamp((int)Math.Round(colSpan * 0.79), 48, 128);
                 int geoLeft = leftLabelLine is not null
-                    ? Math.Clamp((int)Math.Round(leftLabelLine.Bounds.X + colSpan * 0.05), 0, Math.Max(0, w - expectedSide))
-                    : Math.Clamp((int)Math.Floor(rightColX) - Math.Max(10, (int)Math.Round(colSpan * 0.22)) - expectedSide, 0, Math.Max(0, w - expectedSide));
-                int geoTop = Math.Clamp((int)Math.Round(topRef.Bounds.Y) + 1, 0, Math.Max(0, h - expectedSide));
+                    ? Math.Clamp((int)Math.Round(leftLabelLine.Bounds.X + colSpan * 0.06), 0, Math.Max(0, w - expectedSide))
+                    : Math.Clamp((int)Math.Floor(rightColX) - Math.Max(12, (int)Math.Round(colSpan * 0.21)) - expectedSide, 0, Math.Max(0, w - expectedSide));
+                int geoTop = Math.Clamp((int)Math.Round(topRef.Bounds.Y) + 2, 0, Math.Max(0, h - expectedSide));
 
-                int searchRight = Math.Clamp((int)Math.Floor(rightColX) - 5, 0, w - 1);
-                if (searchRight < 32)
+                int searchRight = Math.Clamp((int)Math.Floor(rightColX) - 6, 0, w - 1);
+                if (searchRight < 36)
                 {
                     return (null, gender);
                 }
 
-                int bandTop = Math.Clamp(geoTop - 12, 0, h - 1);
-                int bandBottom = Math.Clamp(geoTop + expectedSide + 18, bandTop + 34, h - 1);
+                int bandTop = Math.Clamp(geoTop - 10, 0, h - 1);
+                int bandBottom = Math.Clamp(geoTop + expectedSide + 14, bandTop + 36, h - 1);
                 // Strictly clamp searchLeft to card interior so we NEVER touch black popup shadow margins!
-                int searchLeft = Math.Max(0, geoLeft - 10);
-                int minColForeground = Math.Max(8, (int)(expectedSide * 0.20));
+                int searchLeft = Math.Max(0, geoLeft - (leftLabelLine is not null ? 6 : 14));
+                int minColForeground = Math.Max(10, (int)(expectedSide * 0.24));
 
                 // 3. Scan strictly right-to-left to isolate ONLY the avatar directly left of the text block
                 int avatarRight = -1;
@@ -355,21 +557,34 @@ namespace Client.Services
                     int bh = avatarBottom - avatarTop + 1;
                     double ratio = bw / (double)bh;
 
-                    // Accept broader DPI/WeChat-version box ratios (0.64..1.35 * expectedSide)
-                    if (bw >= expectedSide * 0.64 && bh >= expectedSide * 0.64 &&
-                        bw <= expectedSide * 1.35 && bh <= expectedSide * 1.35 &&
-                        ratio >= 0.72 && ratio <= 1.38)
+                    // Use exact pixel-fitted box for normal photo/colorful avatars;
+                    // white-background/line-art avatars fall back to the left-label-aligned geometric square above.
+                    if (bw >= expectedSide * 0.76 && bh >= expectedSide * 0.76 &&
+                        bw <= expectedSide * 1.20 && bh <= expectedSide * 1.20 &&
+                        ratio >= 0.78 && ratio <= 1.26)
                     {
-                        int inset = Math.Min(bw, bh) >= 44 ? 1 : 0;
-                        int cx = (avatarLeftFound + avatarRightFound) / 2;
-                        int cy = (avatarTop + avatarBottom) / 2;
-                        // Square-pad using the longer side when one edge of the avatar blended into the white card bg
-                        int side = Math.Max(bw, bh) - inset * 2;
-                        side = Math.Clamp(side, 28, Math.Min(w, h));
-                        finalLeft = Math.Clamp(cx - side / 2, 0, Math.Max(0, w - side));
-                        finalTop = Math.Clamp(cy - side / 2, 0, Math.Max(0, h - side));
-                        finalW = side;
-                        finalH = side;
+                        int inset = Math.Min(bw, bh) >= 40 ? 1 : 0;
+                        finalLeft = avatarLeftFound + inset;
+                        finalTop = avatarTop + inset;
+                        finalW = Math.Max(28, bw - inset * 2);
+                        finalH = Math.Max(28, bh - inset * 2);
+                    }
+                }
+
+                // 1b. Geometric fallback for gender icon: scan the clean header zone strictly to the right of the avatar
+                //     and above "昵称:"/"微信号:"/"地区:" (works even if RapidOCR missed or shifted the top headline!)
+                if (string.IsNullOrEmpty(gender))
+                {
+                    int gx1 = Math.Clamp(finalLeft + finalW + 6, 0, w - 1);
+                    int gx2 = Math.Clamp(finalLeft + finalW + Math.Clamp((int)Math.Round(colSpan * 2.3), 130, 235), gx1, w - 1);
+                    int gy1 = Math.Clamp(finalTop - 6, 0, h - 1);
+                    double headerFloorY = !isShortCardHeadlineAnchor
+                        ? (nickLabelAbove ?? anchorLine).Bounds.Y - 2
+                        : finalTop + finalH * 0.65;
+                    int gy2 = Math.Clamp((int)Math.Floor(headerFloorY), gy1, h - 1);
+                    if (gx2 > gx1 + 12 && gy2 > gy1 + 8)
+                    {
+                        gender = DetectGenderIconInRect(pixels, w, h, gx1, gy1, gx2, gy2);
                     }
                 }
 
@@ -438,10 +653,28 @@ namespace Client.Services
         {
             if (headline is null) return string.Empty;
 
-            int x1 = Math.Clamp((int)Math.Floor(headline.Bounds.X + headline.Bounds.Width) + 2, 0, w - 1);
-            int x2 = Math.Clamp(x1 + Math.Max(34, (int)Math.Ceiling(headline.Bounds.Height * 1.8)), x1, w - 1);
-            int y1 = Math.Clamp((int)Math.Floor(headline.Bounds.Y) - 4, 0, h - 1);
-            int y2 = Math.Clamp((int)Math.Ceiling(headline.Bounds.Y + headline.Bounds.Height) + 4, y1, h - 1);
+            // 1) Scan directly to the right of the headline box (standard case)
+            int x1 = Math.Clamp((int)Math.Floor(headline.Bounds.X + headline.Bounds.Width) - 2, 0, w - 1);
+            int x2 = Math.Clamp(x1 + Math.Max(42, (int)Math.Ceiling(headline.Bounds.Height * 2.2)), x1, w - 1);
+            int y1 = Math.Clamp((int)Math.Floor(headline.Bounds.Y) - 5, 0, h - 1);
+            int y2 = Math.Clamp((int)Math.Ceiling(headline.Bounds.Y + headline.Bounds.Height) + 5, y1, h - 1);
+
+            string hit = DetectGenderIconInRect(pixels, w, h, x1, y1, x2, y2);
+            if (!string.IsNullOrEmpty(hit)) return hit;
+
+            // 2) Fallback: RapidOCR often stretches the headline bounding box over the gender icon itself!
+            //    Scan the right tail inside the headline box (black headline text has near-zero color saturation, so zero false positives).
+            int innerX1 = Math.Clamp((int)Math.Floor(headline.Bounds.X), 0, w - 1);
+            int innerX2 = Math.Clamp((int)Math.Ceiling(headline.Bounds.X + headline.Bounds.Width) + 4, innerX1, w - 1);
+            return DetectGenderIconInRect(pixels, w, h, innerX1, y1, innerX2, y2);
+        }
+
+        private static string DetectGenderIconInRect(byte[] pixels, int w, int h, int x1, int y1, int x2, int y2)
+        {
+            x1 = Math.Clamp(x1, 0, w - 1);
+            x2 = Math.Clamp(x2, x1, w - 1);
+            y1 = Math.Clamp(y1, 0, h - 1);
+            y2 = Math.Clamp(y2, y1, h - 1);
 
             int blueCount = 0;
             int pinkCount = 0;
@@ -456,19 +689,21 @@ namespace Client.Services
                     byte g = pixels[idx + 1];
                     byte r = pixels[idx + 2];
 
-                    if (b >= 175 && b - r >= 65 && g >= 100)
+                    // WeChat male icon: vivid sky blue (~R:45..110, G:155..205, B:230..255)
+                    if (b >= 170 && b - r >= 60 && g >= 95)
                     {
                         blueCount++;
                     }
-                    else if (r >= 190 && r - g >= 55 && r - b >= 20 && b >= 70)
+                    // WeChat female icon: vivid coral pink/red (~R:235..255, G:105..145, B:105..145)
+                    else if (r >= 185 && r - g >= 50 && r - b >= 20 && b >= 55)
                     {
                         pinkCount++;
                     }
                 }
             }
 
-            if (blueCount >= 12 && blueCount > pinkCount * 2) return "男";
-            if (pinkCount >= 12 && pinkCount > blueCount * 2) return "女";
+            if (blueCount >= 10 && blueCount > pinkCount * 2) return "男";
+            if (pinkCount >= 10 && pinkCount > blueCount * 2) return "女";
             return string.Empty;
         }
     }

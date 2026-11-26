@@ -144,8 +144,8 @@ const customerSelectCols = `
 	c.id, c.wechat_remark, c.wechat_name, c.wechat_account,
 	c.gender, c.avatar_url, c.description, c.tags, c.follow_status, c.local_key, c.native_id,
 	c.note, c.region, c.phone, c.signature, c.source, c.added_date,
-	COALESCE((SELECT m.content FROM messages m WHERE m.owner_id = c.owner_id AND m.customer_id = c.id ORDER BY m.id DESC LIMIT 1), ''),
-	COALESCE((SELECT m.sent_at FROM messages m WHERE m.owner_id = c.owner_id AND m.customer_id = c.id ORDER BY m.id DESC LIMIT 1), ''),
+	COALESCE((SELECT CASE WHEN m.content <> '' THEN m.content WHEN m.image_url <> '' THEN '[图片]' ELSE '' END FROM messages m WHERE m.owner_id = c.owner_id AND m.customer_id = c.id ORDER BY m.sent_at DESC, m.id DESC LIMIT 1), ''),
+	COALESCE((SELECT m.sent_at FROM messages m WHERE m.owner_id = c.owner_id AND m.customer_id = c.id ORDER BY m.sent_at DESC, m.id DESC LIMIT 1), ''),
 	c.created_at, c.updated_at`
 
 func scanCustomer(scanner rowScanner) (Customer, error) {

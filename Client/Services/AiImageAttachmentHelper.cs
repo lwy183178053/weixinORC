@@ -22,7 +22,7 @@ namespace Client.Services
 
         public static async Task<AiImageAttachment?> TryCreateFromClipboardAsync()
         {
-            var (bmp, _) = await AppServices.Ocr.TryLoadImageFromClipboardAsync();
+            var (bmp, _) = await OcrService.TryLoadImageFromClipboardAsync();
             if (bmp is null) return null;
             using (bmp)
             {
@@ -33,7 +33,7 @@ namespace Client.Services
         public static async Task<AiImageAttachment?> TryCreateFromFileAsync(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) return null;
-            using var bmp = await Task.Run(() => AppServices.Ocr.LoadImageFileFromPathAsync(filePath));
+            using var bmp = await Task.Run(() => OcrService.LoadImageFileFromPathAsync(filePath));
             return await EncodeBitmapAsync(bmp, Path.GetFileName(filePath));
         }
 

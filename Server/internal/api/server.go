@@ -31,7 +31,9 @@ func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.
 	r := gin.New()
 	_ = r.SetTrustedProxies(nil)
 	r.Use(gin.Recovery(), func(c *gin.Context) {
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
+		if c.Request.URL.Path != "/api/v1/chat-video" {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
+		}
 		c.Next()
 	})
 
@@ -61,8 +63,15 @@ func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.
 	authed.POST("/customers/:id/avatar", s.uploadCustomerAvatar)
 	authed.DELETE("/customers/:id/avatar", s.deleteCustomerAvatar)
 	authed.GET("/avatars/:filename", s.getAvatar)
+	authed.POST("/chat-images", s.uploadChatImage)
+	authed.GET("/chat-images/:filename", s.getChatImage)
+	authed.POST("/chat-audio", s.uploadChatAudio)
+	authed.GET("/chat-audio/:filename", s.getChatAudio)
+	authed.POST("/chat-video", s.uploadChatVideo)
+	authed.GET("/chat-video/:filename", s.getChatVideo)
 	authed.GET("/customers/:id/messages", s.listMessages)
 	authed.POST("/customers/:id/messages", s.createMessage)
+	authed.PATCH("/customers/:id/messages/:msgId", s.updateMessage)
 
 	// Groups & Members & Group Messages
 	authed.GET("/groups", s.listGroups)
@@ -70,18 +79,29 @@ func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.
 	authed.GET("/groups/:id", s.getGroup)
 	authed.PATCH("/groups/:id", s.updateGroup)
 	authed.DELETE("/groups/:id", s.deleteGroup)
+	authed.POST("/groups/:id/avatar", s.uploadGroupAvatar)
+	authed.DELETE("/groups/:id/avatar", s.deleteGroupAvatar)
 	authed.GET("/groups/:id/members", s.listGroupMembers)
 	authed.POST("/groups/:id/members", s.createGroupMember)
 	authed.PATCH("/groups/:id/members/:memberId", s.updateGroupMember)
+	authed.POST("/groups/:id/members/:memberId/avatar", s.uploadGroupMemberAvatar)
 	authed.DELETE("/groups/:id/members/:memberId", s.deleteGroupMember)
 	authed.GET("/groups/:id/messages", s.listGroupMessages)
 	authed.POST("/groups/:id/messages", s.createGroupMessage)
+	authed.PATCH("/groups/:id/messages/:msgId", s.updateGroupMessage)
 
 	// WeChat Accounts (1 employee <-> personal/enterprise WeChat binding)
 	authed.GET("/wechat-accounts", s.listWeChatAccounts)
 	authed.POST("/wechat-accounts", s.upsertWeChatAccount)
 	authed.PATCH("/wechat-accounts/:id", s.updateWeChatAccount)
 	authed.DELETE("/wechat-accounts/:id", s.deleteWeChatAccount)
+
+	// WeChat 4.x Direct DB Batch Sync (Idempotent Upsert)
+	authed.POST("/wechat-sync/customers", s.syncWeChatCustomers)
+	authed.POST("/wechat-sync/groups", s.syncWeChatGroups)
+	authed.POST("/wechat-sync/customers/:id/messages", s.syncCustomerMessages)
+	authed.POST("/wechat-sync/groups/:id/messages", s.syncGroupMessages)
+	authed.POST("/wechat-sync/existing-ids", s.checkExistingMessageIDs)
 
 	// Audit Logs
 	authed.GET("/audit-logs", s.listAuditLogs)
@@ -91,7 +111,10 @@ func New(db *store.Store, verifier auth.Verifier, sessions *auth.Sessions) *gin.
 	authed.GET("/ai/status", s.getAIStatus)
 	authed.POST("/ai/customer-summary", s.aiCustomerSummary)
 	authed.POST("/ai/customer-chat", s.aiCustomerChat)
+	authed.POST("/ai/group-summary", s.aiGroupSummary)
+	authed.POST("/ai/group-chat", s.aiGroupChat)
 	authed.POST("/ai/agent-chat", s.aiAgentChat)
+	authed.POST("/ai/transcribe", s.aiTranscribeAudio)
 
 	// Server Web Admin Console APIs (AI Model Config + Company Knowledge Base)
 	authed.GET("/admin/ai-config", s.getAdminAIConfig)

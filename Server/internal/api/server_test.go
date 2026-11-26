@@ -305,8 +305,8 @@ func TestExtendedProfileAvatarAccountsMembersAndAuditLogs(t *testing.T) {
 		t.Fatalf("list wechat accounts: got %d %s", listAcc.Code, listAcc.Body.String())
 	}
 
-	// 4. Group & Group Members
-	grpResp := app.request(t, http.MethodPost, "/api/v1/groups", alice, map[string]any{"group_name": "VIP客户群", "member_count": 12})
+	// 4. Group & Group Members (including extended fields + avatar upload)
+	grpResp := app.request(t, http.MethodPost, "/api/v1/groups", alice, map[string]any{"group_name": "VIP客户群", "my_nickname": "客服小王", "member_count": 12})
 	if grpResp.Code != http.StatusCreated {
 		t.Fatalf("create group: got %d %s", grpResp.Code, grpResp.Body.String())
 	}
@@ -314,13 +314,40 @@ func TestExtendedProfileAvatarAccountsMembersAndAuditLogs(t *testing.T) {
 	if err := json.Unmarshal(grpResp.Body.Bytes(), &grp); err != nil {
 		t.Fatal(err)
 	}
+	if grp.MyNickname != "客服小王" {
+		t.Fatalf("expected my_nickname 客服小王, got %q", grp.MyNickname)
+	}
 	memResp := app.request(t, http.MethodPost, fmt.Sprintf("/api/v1/groups/%d/members", grp.ID), alice, map[string]string{
 		"group_nickname": "张总-采购",
 		"wechat_name":    "阿良",
+		"wechat_remark":  "张总",
+		"wechat_account": "wx_zhang",
+		"gender":         "男",
+		"region":         "上海",
+		"phone":          "13800138000",
 		"local_key":      "gm_01",
 	})
 	if memResp.Code != http.StatusCreated {
 		t.Fatalf("create group member: got %d %s", memResp.Code, memResp.Body.String())
+	}
+	var mem store.GroupMember
+	if err := json.Unmarshal(memResp.Body.Bytes(), &mem); err != nil || mem.Region != "上海" || mem.Phone != "13800138000" {
+		t.Fatalf("unexpected group member fields: %+v", mem)
+	}
+	memAvatarResp := app.request(t, http.MethodPost, fmt.Sprintf("/api/v1/groups/%d/members/%d/avatar", grp.ID, mem.ID), alice, map[string]string{
+		"image_base64": tinyPngBase64,
+	})
+	if memAvatarResp.Code != http.StatusOK {
+		t.Fatalf("upload group member avatar: got %d %s", memAvatarResp.Code, memAvatarResp.Body.String())
+	}
+	if err := json.Unmarshal(memAvatarResp.Body.Bytes(), &mem); err != nil || mem.AvatarURL == "" {
+		t.Fatalf("expected non-empty member avatar_url: %s", memAvatarResp.Body.String())
+	}
+	if getOwnMemAv := app.request(t, http.MethodGet, mem.AvatarURL, alice, nil); getOwnMemAv.Code != http.StatusOK {
+		t.Fatalf("alice get member avatar expected 200, got %d", getOwnMemAv.Code)
+	}
+	if getCrossMemAv := app.request(t, http.MethodGet, mem.AvatarURL, bob, nil); getCrossMemAv.Code != http.StatusNotFound {
+		t.Fatalf("bob cross-owner member avatar expected 404, got %d", getCrossMemAv.Code)
 	}
 	if crossMem := app.request(t, http.MethodGet, fmt.Sprintf("/api/v1/groups/%d/members", grp.ID), bob, nil); crossMem.Code != http.StatusNotFound {
 		t.Fatalf("cross-owner list group members expected 404, got %d", crossMem.Code)
@@ -335,5 +362,129 @@ func TestExtendedProfileAvatarAccountsMembersAndAuditLogs(t *testing.T) {
 	logsResp := app.request(t, http.MethodGet, "/api/v1/audit-logs", alice, nil)
 	if logsResp.Code != http.StatusOK || !bytes.Contains(logsResp.Body.Bytes(), []byte("qr_cleanup")) || !bytes.Contains(logsResp.Body.Bytes(), []byte("upload_avatar")) {
 		t.Fatalf("list audit logs: got %d %s", logsResp.Code, logsResp.Body.String())
+	}
+
+	// 6. Chat image upload, owner isolation, image-only message creation & PATCH update
+	imgUpload := app.request(t, http.MethodPost, "/api/v1/chat-images", alice, map[string]string{
+		"image_base64": "data:image/png;base64," + tinyPngBase64,
+	})
+	if imgUpload.Code != http.StatusCreated {
+		t.Fatalf("upload chat image: got %d %s", imgUpload.Code, imgUpload.Body.String())
+	}
+	var uploaded struct {
+		ImageURL string `json:"image_url"`
+	}
+	if err := json.Unmarshal(imgUpload.Body.Bytes(), &uploaded); err != nil || uploaded.ImageURL == "" {
+		t.Fatalf("unexpected upload response: %s", imgUpload.Body.String())
+	}
+	if getOwnImg := app.request(t, http.MethodGet, uploaded.ImageURL, alice, nil); getOwnImg.Code != http.StatusOK {
+		t.Fatalf("alice get own chat image expected 200, got %d", getOwnImg.Code)
+	}
+	if getCrossImg := app.request(t, http.MethodGet, uploaded.ImageURL, bob, nil); getCrossImg.Code != http.StatusNotFound {
+		t.Fatalf("bob cross-owner chat image expected 404, got %d", getCrossImg.Code)
+	}
+
+	// Image-only customer message
+	imgMsgResp := app.request(t, http.MethodPost, fmt.Sprintf("/api/v1/customers/%d/messages", cust.ID), alice, map[string]string{
+		"direction": "outgoing",
+		"content":   "",
+		"image_url": uploaded.ImageURL,
+	})
+	if imgMsgResp.Code != http.StatusCreated {
+		t.Fatalf("create image-only customer message: got %d %s", imgMsgResp.Code, imgMsgResp.Body.String())
+	}
+	var imgMsg store.Message
+	if err := json.Unmarshal(imgMsgResp.Body.Bytes(), &imgMsg); err != nil || imgMsg.ImageURL != uploaded.ImageURL {
+		t.Fatalf("unexpected customer image message: %+v", imgMsg)
+	}
+
+	// PATCH customer message to add text caption
+	patchMsgResp := app.request(t, http.MethodPatch, fmt.Sprintf("/api/v1/customers/%d/messages/%d", cust.ID, imgMsg.ID), alice, map[string]string{
+		"direction": "incoming",
+		"content":   "产品实拍图",
+		"image_url": uploaded.ImageURL,
+	})
+	if patchMsgResp.Code != http.StatusOK {
+		t.Fatalf("patch customer message: got %d %s", patchMsgResp.Code, patchMsgResp.Body.String())
+	}
+
+	// Image-only group message
+	grpImgMsgResp := app.request(t, http.MethodPost, fmt.Sprintf("/api/v1/groups/%d/messages", grp.ID), alice, map[string]string{
+		"sender_name": "张总",
+		"direction":   "incoming",
+		"content":     "",
+		"image_url":   uploaded.ImageURL,
+	})
+	if grpImgMsgResp.Code != http.StatusCreated {
+		t.Fatalf("create image-only group message: got %d %s", grpImgMsgResp.Code, grpImgMsgResp.Body.String())
+	}
+}
+
+func TestChatSearchFTS5TrigramAndTriggers(t *testing.T) {
+	verifier := testVerifier{
+		password: "secret",
+		identities: map[string]auth.Identity{
+			"alice": {EmployeeID: "emp-fts", Account: "alice", DisplayName: "Alice"},
+		},
+	}
+	app := newTestApp(t, verifier)
+	defer app.db.Close()
+	ctx := context.Background()
+
+	cust, err := app.db.CreateCustomer(ctx, "emp-fts", store.CustomerInput{
+		WechatName: "林女士",
+		Tags:       "VIP",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg1, err := app.db.CreateMessage(ctx, "emp-fts", cust.ID, store.MessageInput{
+		Direction: "incoming",
+		Content:   "请问超声炮全脸套餐下周三上午可以预约吗？",
+		SentAt:    time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	grp, err := app.db.CreateGroup(ctx, "emp-fts", store.GroupInput{GroupName: "VIP客服群"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.db.CreateGroupMessage(ctx, "emp-fts", grp.ID, store.GroupMessageInput{
+		SenderName: "陈经理",
+		Direction:  "incoming",
+		Content:    "热玛吉五代和超声炮联合方案已经发群文件了",
+		SentAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3+ rune Chinese query exercises SQLite FTS5 trigram index across both customer & group messages
+	hits, err := app.db.SearchChatMessages(ctx, "emp-fts", "超声炮", "all", "", 0, 0, "", "", 20)
+	if err != nil {
+		t.Fatalf("fts5 search failed: %v", err)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("expected 2 hits for 超声炮, got %d: %+v", len(hits), hits)
+	}
+
+	// 2-rune short query exercises LIKE fallback seamlessly
+	shortHits, err := app.db.SearchChatMessages(ctx, "emp-fts", "预约", "customer", "", 0, 0, "", "", 20)
+	if err != nil || len(shortHits) != 1 {
+		t.Fatalf("short query expected 1 hit, got %d (err=%v)", len(shortHits), err)
+	}
+
+	// UPDATE trigger keeps FTS5 index synchronized
+	if _, err := app.db.UpdateMessage(ctx, "emp-fts", cust.ID, msg1.ID, "incoming", "改约光子嫩肤项目了", ""); err != nil {
+		t.Fatal(err)
+	}
+	afterUpdateOld, err := app.db.SearchChatMessages(ctx, "emp-fts", "超声炮", "customer", "", 0, 0, "", "", 20)
+	if err != nil || len(afterUpdateOld) != 0 {
+		t.Fatalf("expected 0 customer hits after update, got %d (err=%v)", len(afterUpdateOld), err)
+	}
+	afterUpdateNew, err := app.db.SearchChatMessages(ctx, "emp-fts", "光子嫩肤", "customer", "", 0, 0, "", "", 20)
+	if err != nil || len(afterUpdateNew) != 1 {
+		t.Fatalf("expected 1 customer hit for 光子嫩肤 after update, got %d (err=%v)", len(afterUpdateNew), err)
 	}
 }

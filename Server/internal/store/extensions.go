@@ -118,7 +118,14 @@ type GroupMember struct {
 	NativeID      string `json:"native_id"`
 	GroupNickname string `json:"group_nickname"`
 	WechatName    string `json:"wechat_name"`
+	WechatRemark  string `json:"wechat_remark"`
 	WechatAccount string `json:"wechat_account"`
+	Gender        string `json:"gender"`
+	AvatarURL     string `json:"avatar_url"`
+	Region        string `json:"region"`
+	Phone         string `json:"phone"`
+	Signature     string `json:"signature"`
+	Source        string `json:"source"`
 	Role          string `json:"role"`
 	Note          string `json:"note"`
 	CreatedAt     string `json:"created_at"`
@@ -130,7 +137,14 @@ type GroupMemberInput struct {
 	NativeID      string
 	GroupNickname string
 	WechatName    string
+	WechatRemark  string
 	WechatAccount string
+	Gender        string
+	AvatarURL     string
+	Region        string
+	Phone         string
+	Signature     string
+	Source        string
 	Role          string
 	Note          string
 }
@@ -140,18 +154,26 @@ type GroupMemberPatch struct {
 	NativeID      *string
 	GroupNickname *string
 	WechatName    *string
+	WechatRemark  *string
 	WechatAccount *string
+	Gender        *string
+	AvatarURL     *string
+	Region        *string
+	Phone         *string
+	Signature     *string
+	Source        *string
 	Role          *string
 	Note          *string
 }
 
-const groupMemberCols = `id, group_id, local_key, native_id, group_nickname, wechat_name, wechat_account, role, note, created_at, updated_at`
+const groupMemberCols = `id, group_id, local_key, native_id, group_nickname, wechat_name, wechat_remark, wechat_account, gender, avatar_url, region, phone, signature, source, role, note, created_at, updated_at`
 
 func scanGroupMember(sc rowScanner) (GroupMember, error) {
 	var m GroupMember
 	err := sc.Scan(
 		&m.ID, &m.GroupID, &m.LocalKey, &m.NativeID, &m.GroupNickname,
-		&m.WechatName, &m.WechatAccount, &m.Role, &m.Note, &m.CreatedAt, &m.UpdatedAt,
+		&m.WechatName, &m.WechatRemark, &m.WechatAccount, &m.Gender, &m.AvatarURL,
+		&m.Region, &m.Phone, &m.Signature, &m.Source, &m.Role, &m.Note, &m.CreatedAt, &m.UpdatedAt,
 	)
 	return m, err
 }
@@ -178,10 +200,11 @@ func (s *Store) ListGroupMembers(ctx context.Context, ownerID string, groupID, c
 func (s *Store) CreateGroupMember(ctx context.Context, ownerID string, groupID int64, input GroupMemberInput) (GroupMember, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO group_members (owner_id, group_id, local_key, native_id, group_nickname, wechat_name, wechat_account, role, note, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO group_members (owner_id, group_id, local_key, native_id, group_nickname, wechat_name, wechat_remark, wechat_account, gender, avatar_url, region, phone, signature, source, role, note, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ownerID, groupID, input.LocalKey, input.NativeID, input.GroupNickname,
-		input.WechatName, input.WechatAccount, input.Role, input.Note, now, now,
+		input.WechatName, input.WechatRemark, input.WechatAccount, input.Gender, input.AvatarURL,
+		input.Region, input.Phone, input.Signature, input.Source, input.Role, input.Note, now, now,
 	)
 	if err != nil {
 		if isForeignKeyViolation(err) {
@@ -200,7 +223,14 @@ func (s *Store) CreateGroupMember(ctx context.Context, ownerID string, groupID i
 		NativeID:      input.NativeID,
 		GroupNickname: input.GroupNickname,
 		WechatName:    input.WechatName,
+		WechatRemark:  input.WechatRemark,
 		WechatAccount: input.WechatAccount,
+		Gender:        input.Gender,
+		AvatarURL:     input.AvatarURL,
+		Region:        input.Region,
+		Phone:         input.Phone,
+		Signature:     input.Signature,
+		Source:        input.Source,
 		Role:          input.Role,
 		Note:          input.Note,
 		CreatedAt:     now,
@@ -216,18 +246,57 @@ func (s *Store) UpdateGroupMember(ctx context.Context, ownerID string, groupID, 
 		    native_id      = COALESCE(?, native_id),
 		    group_nickname = COALESCE(?, group_nickname),
 		    wechat_name    = COALESCE(?, wechat_name),
+		    wechat_remark  = COALESCE(?, wechat_remark),
 		    wechat_account = COALESCE(?, wechat_account),
+		    gender         = COALESCE(?, gender),
+		    avatar_url     = COALESCE(?, avatar_url),
+		    region         = COALESCE(?, region),
+		    phone          = COALESCE(?, phone),
+		    signature      = COALESCE(?, signature),
+		    source         = COALESCE(?, source),
 		    role           = COALESCE(?, role),
 		    note           = COALESCE(?, note),
 		    updated_at     = ?
 		WHERE owner_id = ? AND group_id = ? AND id = ?
 		RETURNING `+groupMemberCols,
-		patch.LocalKey, patch.NativeID, patch.GroupNickname, patch.WechatName, patch.WechatAccount, patch.Role, patch.Note, now, ownerID, groupID, memberID,
+		patch.LocalKey, patch.NativeID, patch.GroupNickname, patch.WechatName, patch.WechatRemark,
+		patch.WechatAccount, patch.Gender, patch.AvatarURL, patch.Region, patch.Phone,
+		patch.Signature, patch.Source, patch.Role, patch.Note, now, ownerID, groupID, memberID,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return GroupMember{}, ErrNotFound
 	}
 	return m, err
+}
+
+func (s *Store) SetGroupMemberAvatar(ctx context.Context, ownerID string, groupID, memberID int64, newAvatarURL string) (GroupMember, string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return GroupMember{}, "", err
+	}
+	defer tx.Rollback()
+
+	var prevURL string
+	err = tx.QueryRowContext(ctx, `SELECT avatar_url FROM group_members WHERE owner_id = ? AND group_id = ? AND id = ?`, ownerID, groupID, memberID).Scan(&prevURL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return GroupMember{}, "", ErrNotFound
+	}
+	if err != nil {
+		return GroupMember{}, "", err
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	m, err := scanGroupMember(tx.QueryRowContext(ctx,
+		`UPDATE group_members SET avatar_url = ?, updated_at = ? WHERE owner_id = ? AND group_id = ? AND id = ? RETURNING `+groupMemberCols,
+		newAvatarURL, now, ownerID, groupID, memberID,
+	))
+	if err != nil {
+		return GroupMember{}, "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return GroupMember{}, "", err
+	}
+	return m, prevURL, nil
 }
 
 func (s *Store) DeleteGroupMember(ctx context.Context, ownerID string, groupID, memberID int64) error {

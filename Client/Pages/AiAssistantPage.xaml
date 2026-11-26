@@ -489,24 +489,12 @@
                                     MaxWidth="740"
                                     Spacing="5"
                                     Visibility="{x:Bind AssistantVisibility}">
-                                    <!-- Invoked Skills Trace Pill -->
-                                    <Border
-                                        Padding="9,4"
-                                        HorizontalAlignment="Left"
-                                        Background="{StaticResource BrandSoftBgBrush}"
-                                        BorderBrush="{StaticResource BrandSoftBorderBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="8"
-                                        Visibility="{x:Bind ToolTraceVisibility}">
-                                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                            <FontIcon FontSize="11" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE945;" />
-                                            <TextBlock
-                                                FontSize="11"
-                                                Foreground="{StaticResource BrandPrimaryBrush}"
-                                                Text="{x:Bind ToolTraceSummary}"
-                                                TextWrapping="Wrap" />
-                                        </StackPanel>
-                                    </Border>
+                                    <!-- Codex-Style Tool Execution Trace -->
+                                    <controls:CodexToolTraceView
+                                        HorizontalAlignment="Stretch"
+                                        LegacySummary="{x:Bind ToolTraceSummary}"
+                                        TraceItems="{x:Bind ToolTrace}"
+                                        Visibility="{x:Bind ToolTraceVisibility}" />
 
                                     <!-- Live Thinking / Replying Indicator Bubble -->
                                     <Border

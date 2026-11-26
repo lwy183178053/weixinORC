@@ -12,6 +12,14 @@ namespace Client.Services
         public string BackendUrl { get; set; } = "http://127.0.0.1:28765";
         public string WeChatExecutablePath { get; set; } = string.Empty;
         public List<string> CollapsedCustomerTags { get; set; } = [];
+        public string WeChatSyncAccountDir { get; set; } = string.Empty;
+        public List<string> WeChatSyncSelectedTags { get; set; } = [];
+        public bool WeChatSyncIncludeUntagged { get; set; } = false;
+        public bool WeChatAutoSyncEnabled { get; set; } = true;
+        public int WeChatAutoSyncIntervalMinutes { get; set; } = 5;
+        public int WeChatSyncMaxMessagesPerSession { get; set; } = 500;
+        public bool WeChatSyncIncludeImages { get; set; } = true;
+        public bool WeChatSyncIncludeAvatars { get; set; } = true;
     }
 
     public sealed class AppSettingsService
@@ -75,6 +83,8 @@ namespace Client.Services
                 Current.AccentPalette = "violet";
             }
             Current.CollapsedCustomerTags ??= [];
+            Current.WeChatSyncSelectedTags ??= [];
+            if (Current.WeChatAutoSyncIntervalMinutes < 1) Current.WeChatAutoSyncIntervalMinutes = 5;
         }
 
         public void Save()

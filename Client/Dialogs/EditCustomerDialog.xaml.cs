@@ -141,7 +141,7 @@ namespace Client.Dialogs
             if (_isSaving) return;
             try
             {
-                var (bmp, _) = await AppServices.Ocr.TryLoadImageFromClipboardAsync();
+                var (bmp, _) = await OcrService.TryLoadImageFromClipboardAsync();
                 if (bmp is null)
                 {
                     SetStatus("剪贴板中没有图片，请先截图或复制头像。", isError: true);
@@ -167,7 +167,7 @@ namespace Client.Dialogs
 
             try
             {
-                using var bmp = await Task.Run(() => AppServices.Ocr.LoadImageFileFromPathAsync(filePath));
+                using var bmp = await Task.Run(() => OcrService.LoadImageFileFromPathAsync(filePath));
                 byte[] pngBytes = await AvatarImageService.EncodeSquarePngAsync(bmp, 256);
                 await StageAvatarPreviewAsync(pngBytes, "已选择本地新头像，保存后生效");
             }

@@ -162,7 +162,7 @@
                             Click="RailNav_Click"
                             Style="{StaticResource RailButtonStyle}"
                             Tag="ai"
-                            ToolTipService.ToolTip="AI 助手（内置 Agent Skills）">
+                            ToolTipService.ToolTip="AI 智能助手">
                             <StackPanel HorizontalAlignment="Center" Spacing="2">
                                 <FontIcon x:Name="RailAiIcon" FontSize="15" Glyph="&#xE99A;" />
                                 <TextBlock x:Name="RailAiLabel" HorizontalAlignment="Center" FontSize="9.5" Text="AI 助手" />
@@ -174,10 +174,10 @@
                             Click="RailNav_Click"
                             Style="{StaticResource RailButtonStyle}"
                             Tag="ocr"
-                            ToolTipService.ToolTip="微信监控">
+                            ToolTipService.ToolTip="微信自动监听与连接状态">
                             <StackPanel HorizontalAlignment="Center" Spacing="2">
-                                <FontIcon x:Name="RailOcrIcon" FontSize="15" Glyph="&#xE7F4;" />
-                                <TextBlock x:Name="RailOcrLabel" HorizontalAlignment="Center" FontSize="9.5" Text="微信监控" />
+                                <FontIcon x:Name="RailOcrIcon" FontSize="15" Glyph="&#xE895;" />
+                                <TextBlock x:Name="RailOcrLabel" HorizontalAlignment="Center" FontSize="9.5" Text="微信监听" />
                             </StackPanel>
                         </Button>
 
@@ -250,7 +250,7 @@
                         <TextBlock FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="在线" />
                     </StackPanel>
                     <TextBlock x:Name="FooterEmployeeText" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="员工 ID: -" />
-                    <TextBlock x:Name="FooterOcrText" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="识别服务: 就绪" />
+                    <TextBlock x:Name="FooterOcrText" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="微信自动监听: 启动中..." />
                 </StackPanel>
 
                 <TextBlock
@@ -258,7 +258,7 @@
                     VerticalAlignment="Center"
                     FontSize="11.5"
                     Foreground="{StaticResource TextMutedBrush}"
-                    Text="Ctrl+V 快捷导入截图" />
+                    Text="在客户或群组页点「+」导入好友/群聊，系统自动监听新消息变化" />
             </Grid>
         </Border>
     </Grid>

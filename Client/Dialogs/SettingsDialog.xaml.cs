@@ -380,13 +380,15 @@ namespace Client.Dialogs
             try
             {
                 AppServices.Logs.Info("SYS", "开始执行运行环境自检...");
-                if (AppServices.Ocr.RapidEngine.IsAvailable)
+                var procs = Client.Services.WeChat4Db.WeChat4Paths.FindWeixinProcesses();
+                var dirs = Client.Services.WeChat4Db.WeChat4Paths.ListAccountDirs();
+                if (procs.Count > 0 && dirs.Count > 0)
                 {
-                    AppServices.Logs.Success("OCR", "本地识别组件检查通过，状态正常。");
+                    AppServices.Logs.Success("WX", $"电脑微信连接环境正常（已检测到账号目录 {dirs.Count} 个）。");
                 }
                 else
                 {
-                    AppServices.Logs.Error("OCR", AppServices.Ocr.RapidEngine.AvailabilityNote);
+                    AppServices.Logs.Warn("WX", $"电脑微信检测：未发现运行中的微信或本地账号目录（目录数 {dirs.Count}）。");
                 }
                 _ = await AppServices.Backend.CheckHealthAsync();
             }

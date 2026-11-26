@@ -472,8 +472,8 @@
                                         </Grid.ColumnDefinitions>
                                         <Border Grid.Column="0" Width="34" Height="34" VerticalAlignment="Top" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="6">
                                             <Grid>
-                                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind SenderInitial}" Visibility="{x:Bind SenderInitialVisibility}" />
-                                                <Image Source="{x:Bind SenderAvatar}" Stretch="UniformToFill" Visibility="{x:Bind SenderAvatarVisibility}" />
+                                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind SenderInitial}" Visibility="{x:Bind SenderInitialVisibility, Mode=OneWay}" />
+                                                <Image Source="{x:Bind SenderAvatar, Mode=OneWay}" Stretch="UniformToFill" Visibility="{x:Bind SenderAvatarVisibility, Mode=OneWay}" />
                                             </Grid>
                                         </Border>
                                         <StackPanel Grid.Column="1" HorizontalAlignment="Left" MaxWidth="460" Spacing="3">

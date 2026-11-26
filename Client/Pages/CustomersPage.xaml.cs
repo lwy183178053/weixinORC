@@ -304,6 +304,7 @@ namespace Client.Pages
                     if (_selectedCustomer?.Id == c.Id)
                     {
                         ApplyProfileAvatarVisual(c);
+                        ApplyCustomerAvatarToCurrentBubbles(img);
                     }
                 },
                 DispatcherQueue,
@@ -850,6 +851,17 @@ namespace Client.Pages
             }
         }
 
+        private void ApplyCustomerAvatarToCurrentBubbles(ImageSource? avatar)
+        {
+            foreach (var bubble in _currentMessages)
+            {
+                if (!bubble.IsOutgoing)
+                {
+                    bubble.SenderAvatar = avatar;
+                }
+            }
+        }
+
         private async Task EnsureSelectedAvatarLoadedAsync(CustomerDto c)
         {
             try
@@ -864,6 +876,7 @@ namespace Client.Pages
                     if (_selectedCustomer?.Id == c.Id)
                     {
                         ApplyProfileAvatarVisual(c);
+                        ApplyCustomerAvatarToCurrentBubbles(img);
                     }
                 }
             }
@@ -1939,7 +1952,7 @@ namespace Client.Pages
                     if (_selectedCustomer?.Id == target.Id)
                     {
                         ApplyProfileAvatarVisual(target);
-                        await LoadCustomerMessagesAsync(target);
+                        ApplyCustomerAvatarToCurrentBubbles(null);
                     }
                     ShowProfileStatus("已清除客户头像。");
                 }
@@ -1967,7 +1980,7 @@ namespace Client.Pages
                 if (_selectedCustomer?.Id == target.Id)
                 {
                     ApplyProfileAvatarVisual(target);
-                    await LoadCustomerMessagesAsync(target);
+                    ApplyCustomerAvatarToCurrentBubbles(img);
                 }
                 ShowProfileStatus($"✓ {successMsg}");
             }

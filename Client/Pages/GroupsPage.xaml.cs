@@ -844,12 +844,21 @@ namespace Client.Pages
 
         private async Task LoadGroupMembersAsync(GroupDto group)
         {
+            var prevAvatars = _currentMembers
+                .Where(m => m.GroupId == group.Id && m.AvatarImage is not null && !string.IsNullOrWhiteSpace(m.AvatarUrl))
+                .ToDictionary(m => m.Id, m => (m.AvatarUrl, m.AvatarImage!));
+
             var members = await AppServices.Backend.ListAllGroupMembersAsync(group.Id);
             if (_selectedGroup?.Id != group.Id) return;
 
             _currentMembers.Clear();
             foreach (var m in members.AsEnumerable().Reverse())
             {
+                if (prevAvatars.TryGetValue(m.Id, out var cached) &&
+                    string.Equals(cached.AvatarUrl, m.AvatarUrl, StringComparison.Ordinal))
+                {
+                    m.AvatarImage = cached.Item2;
+                }
                 _currentMembers.Add(m);
             }
 

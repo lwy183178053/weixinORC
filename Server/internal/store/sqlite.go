@@ -88,19 +88,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS messages_owner_customer_ext_uidx
 	WHERE external_id <> '';
 
 CREATE TABLE IF NOT EXISTS groups (
-	id           INTEGER PRIMARY KEY AUTOINCREMENT,
-	owner_id     TEXT NOT NULL,
-	owner_wxid   TEXT NOT NULL DEFAULT '',
-	group_name   TEXT NOT NULL DEFAULT '',
-	group_key    TEXT NOT NULL DEFAULT '',
-	my_nickname  TEXT NOT NULL DEFAULT '',
-	avatar_url   TEXT NOT NULL DEFAULT '',
+	id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+	owner_id           TEXT NOT NULL,
+	owner_wxid         TEXT NOT NULL DEFAULT '',
+	group_name         TEXT NOT NULL DEFAULT '',
+	group_key          TEXT NOT NULL DEFAULT '',
+	my_nickname        TEXT NOT NULL DEFAULT '',
+	avatar_url         TEXT NOT NULL DEFAULT '',
 	member_count       INTEGER NOT NULL DEFAULT 0,
 	members_text       TEXT NOT NULL DEFAULT '',
+	announcement       TEXT NOT NULL DEFAULT '',
 	note               TEXT NOT NULL DEFAULT '',
 	auto_reply_enabled INTEGER NOT NULL DEFAULT 0,
+	welcome_enabled    INTEGER NOT NULL DEFAULT 0,
+	welcome_template   TEXT NOT NULL DEFAULT '',
 	created_at         TEXT NOT NULL,
-	updated_at   TEXT NOT NULL,
+	updated_at         TEXT NOT NULL,
 	UNIQUE (id, owner_id)
 );
 
@@ -273,10 +276,50 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("initialize schema: %w", err)
 	}
+	if err := ensureGroupExtraColumns(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("ensure group columns: %w", err)
+	}
 
 	hasFTS5 := initChatFTS5(db)
 
 	return &Store{db: db, dataDir: dataDir, hasFTS5: hasFTS5}, nil
+}
+
+func ensureGroupExtraColumns(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(groups)`)
+	if err != nil {
+		return err
+	}
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err == nil {
+			existing[strings.ToLower(name)] = true
+		}
+	}
+	rows.Close()
+
+	additions := []struct {
+		name string
+		ddl  string
+	}{
+		{"announcement", `ALTER TABLE groups ADD COLUMN announcement TEXT NOT NULL DEFAULT ''`},
+		{"welcome_enabled", `ALTER TABLE groups ADD COLUMN welcome_enabled INTEGER NOT NULL DEFAULT 0`},
+		{"welcome_template", `ALTER TABLE groups ADD COLUMN welcome_template TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, col := range additions {
+		if !existing[col.name] {
+			if _, err := db.Exec(col.ddl); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // initChatFTS5 creates trigram FTS5 virtual tables and sync triggers for messages and group_messages

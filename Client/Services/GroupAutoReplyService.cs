@@ -17,6 +17,9 @@ namespace Client.Services
     /// </summary>
     public sealed class GroupAutoReplyService
     {
+        public const string DefaultWelcomeTemplate =
+            "欢迎 {新人昵称} 加入 {群名}！有任何关于智美产品、项目或服务的问题，都可以随时在群里 @我 咨询哦～";
+
         private static readonly JsonSerializerOptions JsonOpts = new()
         {
             WriteIndented = true,
@@ -26,10 +29,21 @@ namespace Client.Services
         private static readonly char[] NameSeparators = [',', '，', ';', '；', '/', '|', '\n', '\r'];
         private static readonly char[] MentionBoundaries = [' ', '\t', '\u2005', '\u00A0', '\r', '\n', ',', '，', '.', '。', ':', '：', '?', '？', '!', '！', '、'];
 
+        private sealed class PendingWelcomeBatch
+        {
+            public long GroupId { get; init; }
+            public string GroupKey { get; init; } = string.Empty;
+            public string GroupName { get; init; } = string.Empty;
+            public string Template { get; init; } = string.Empty;
+            public List<string> NewMemberNames { get; } = [];
+            public CancellationTokenSource? TimerCts { get; set; }
+        }
+
         private sealed class QueuedAutoReplyItem
         {
             public long SeqId { get; init; }
             public long GroupId { get; init; }
+            public string GroupKey { get; init; } = string.Empty;
             public string GroupName { get; init; } = string.Empty;
             public string SenderName { get; init; } = string.Empty;
             public string CooldownKey { get; init; } = string.Empty;
@@ -37,6 +51,10 @@ namespace Client.Services
             public string CleanedQuestion { get; init; } = string.Empty;
             public string MatchedBy { get; init; } = string.Empty;
             public bool IsManualTest { get; init; }
+            public bool IsWelcome { get; init; }
+            public string? FixedReplyText { get; init; }
+            public WeChat4Message? TriggerMessageObj { get; init; }
+            public IReadOnlyList<WeChat4Message> RecentSessionMessages { get; init; } = [];
             public bool? OverrideAutoSend { get; init; }
             public bool PrefixMention { get; init; }
             public Stopwatch TotalStopwatch { get; } = Stopwatch.StartNew();
@@ -62,6 +80,7 @@ namespace Client.Services
         private readonly HashSet<string> _processedExternalIds = new(StringComparer.Ordinal);
         private readonly Queue<string> _processedOrder = new();
         private readonly Dictionary<string, DateTimeOffset> _lastReplyAtByGroupSender = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<long, PendingWelcomeBatch> _pendingWelcomeByGroup = [];
         private readonly LinkedList<AutoReplyExecutionRecord> _recentRecords = new();
 
         private readonly List<QueuedAutoReplyItem> _queue = [];
@@ -121,6 +140,11 @@ namespace Client.Services
                 _processedExternalIds.Clear();
                 _processedOrder.Clear();
                 _lastReplyAtByGroupSender.Clear();
+                foreach (var wb in _pendingWelcomeByGroup.Values)
+                {
+                    try { wb.TimerCts?.Cancel(); wb.TimerCts?.Dispose(); } catch { }
+                }
+                _pendingWelcomeByGroup.Clear();
                 _listeningStartedUtc = DateTimeOffset.UtcNow;
             }
 
@@ -231,6 +255,17 @@ namespace Client.Services
             StateChanged?.Invoke();
         }
 
+        public void NotifyGroupWelcomeChanged(GroupDto updatedGroup)
+        {
+            lock (_stateLock)
+            {
+                _groupsById[updatedGroup.Id] = updatedGroup;
+            }
+            AppServices.Logs.Info("REPLY",
+                $"群「{updatedGroup.DisplayName}」(#{updatedGroup.Id}) 新人自动欢迎已设为：{(updatedGroup.WelcomeEnabled ? "开启" : "关闭")}");
+            StateChanged?.Invoke();
+        }
+
         public int GetEnabledGroupCount()
         {
             string activeWxid = AppServices.WeChat4Sync.ActiveOwnerWxid;
@@ -297,7 +332,7 @@ namespace Client.Services
             {
                 _groupsById.TryGetValue(evt.GroupId, out trackedGroup);
             }
-            if (trackedGroup is null || !trackedGroup.AutoReplyEnabled) return;
+            if (trackedGroup is null || (!trackedGroup.AutoReplyEnabled && !trackedGroup.WelcomeEnabled)) return;
             if (!string.IsNullOrWhiteSpace(evt.OwnerWxid) &&
                 !string.IsNullOrWhiteSpace(trackedGroup.OwnerWxid) &&
                 !string.Equals(trackedGroup.OwnerWxid, evt.OwnerWxid, StringComparison.OrdinalIgnoreCase))
@@ -308,16 +343,16 @@ namespace Client.Services
             string groupName = !string.IsNullOrWhiteSpace(trackedGroup.GroupName) ? trackedGroup.GroupName : evt.GroupName;
             var nowUtc = DateTimeOffset.UtcNow;
 
-            // Scan ALL new messages in chronological order so multiple people @mentioning us in a burst
-            // ALL enter the FIFO reply queue and generate AI replies in parallel!
+            // Scan ALL new messages in chronological order:
+            // A) New member join events -> per-group fixed-template auto-welcome (with 6s burst coalescing)
+            // B) Text & Quote @mention messages -> parallel AI multimodal reply pipeline
             int enqueuedInBatch = 0;
             for (int i = 0; i < evt.NewMessages.Count; i++)
             {
                 var m = evt.NewMessages[i];
-                if (m.IsOutgoing || m.Kind != "text" || string.IsNullOrWhiteSpace(m.Content)) continue;
                 if (IsAlreadyProcessed(m.ExternalId)) continue;
 
-                // Freshness guard: never reply to messages from before app startup or older than MaxMessageAgeSeconds
+                // Freshness guard: never reply/welcome to historical messages from before app startup or older than MaxMessageAgeSeconds
                 if (m.SentAtUtc < _listeningStartedUtc.AddSeconds(-10))
                 {
                     MarkProcessed(m.ExternalId);
@@ -330,6 +365,22 @@ namespace Client.Services
                     AppServices.Logs.Info("REPLY", $"跳过超时消息（已过去 {ageSec:F0}s > {Config.MaxMessageAgeSeconds}s）：群「{groupName}」");
                     continue;
                 }
+
+                // A. New member joined the group -> schedule coalesced fixed-template welcome
+                if (m.Kind == "member_join")
+                {
+                    MarkProcessed(m.ExternalId);
+                    if (trackedGroup.WelcomeEnabled)
+                    {
+                        var names = m.JoinedMembers.Count > 0 ? m.JoinedMembers : ["新朋友"];
+                        ScheduleCoalescedWelcome(evt.GroupId, evt.GroupKey, groupName, trackedGroup.WelcomeTemplate, names);
+                    }
+                    continue;
+                }
+
+                // B. @mention AI auto-reply (supports BOTH normal text AND quoted messages including quoted images!)
+                if (!trackedGroup.AutoReplyEnabled) continue;
+                if (m.IsOutgoing || m.IsSystemEvent || m.Kind is not ("text" or "quote") || string.IsNullOrWhiteSpace(m.Content)) continue;
 
                 if (!TryMatchMentionSelf(m, evt, trackedGroup, out string matchedBy)) continue;
 
@@ -411,12 +462,13 @@ namespace Client.Services
                 }
 
                 AppServices.Logs.Info("REPLY",
-                    $"检测到群「{groupName}」被 @（命中方式：{matchedBy}），发言人={senderName}，内容=「{Truncate(m.Content, 80)}」-> 已加入回复队列并启动并行生成");
+                    $"检测到群「{groupName}」被 @（命中方式：{matchedBy}{(m.Kind == "quote" ? " · 引用消息" : "")}），发言人={senderName}，内容=「{Truncate(m.Content, 80)}」-> 已加入回复队列并启动并行生成");
 
                 EnqueueItem(new QueuedAutoReplyItem
                 {
                     SeqId = Interlocked.Increment(ref _nextSeqId),
                     GroupId = evt.GroupId,
+                    GroupKey = evt.GroupKey,
                     GroupName = groupName,
                     SenderName = senderName,
                     CooldownKey = cooldownKey,
@@ -424,6 +476,8 @@ namespace Client.Services
                     CleanedQuestion = cleanedQuestion,
                     MatchedBy = matchedBy,
                     IsManualTest = false,
+                    TriggerMessageObj = m,
+                    RecentSessionMessages = evt.AllRecentSessionMessages,
                     OverrideAutoSend = null,
                     PrefixMention = Config.PrefixMentionSender,
                     CancellationToken = _sessionCts.Token
@@ -436,6 +490,122 @@ namespace Client.Services
                 AppServices.Logs.Info("REPLY",
                     $"本批同步共捕获 {enqueuedInBatch} 条 @消息（群「{groupName}」），已全部入队并行生成回复并将依次发送。");
             }
+        }
+
+        private void ScheduleCoalescedWelcome(
+            long groupId,
+            string groupKey,
+            string groupName,
+            string rawTemplate,
+            IEnumerable<string> memberNames)
+        {
+            PendingWelcomeBatch batch;
+            CancellationTokenSource timerCts;
+            lock (_stateLock)
+            {
+                if (!_pendingWelcomeByGroup.TryGetValue(groupId, out batch!))
+                {
+                    batch = new PendingWelcomeBatch
+                    {
+                        GroupId = groupId,
+                        GroupKey = groupKey,
+                        GroupName = groupName,
+                        Template = string.IsNullOrWhiteSpace(rawTemplate) ? DefaultWelcomeTemplate : rawTemplate.Trim()
+                    };
+                    _pendingWelcomeByGroup[groupId] = batch;
+                }
+
+                foreach (string name in memberNames)
+                {
+                    string clean = (name ?? string.Empty).Trim();
+                    if (!string.IsNullOrEmpty(clean) && !batch.NewMemberNames.Contains(clean, StringComparer.OrdinalIgnoreCase))
+                    {
+                        batch.NewMemberNames.Add(clean);
+                    }
+                }
+
+                try { batch.TimerCts?.Cancel(); batch.TimerCts?.Dispose(); } catch { }
+                timerCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
+                batch.TimerCts = timerCts;
+            }
+
+            AppServices.Logs.Info("REPLY",
+                $"检测到新人进群「{groupName}」：{string.Join("、", memberNames)}，将在 6 秒合批窗口后发送本群自动欢迎语。");
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(6), timerCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
+                List<string> joinedSnapshot;
+                string templateSnapshot;
+                string keySnapshot;
+                string nameSnapshot;
+                lock (_stateLock)
+                {
+                    if (!_pendingWelcomeByGroup.TryGetValue(groupId, out var current) || !ReferenceEquals(current, batch))
+                    {
+                        return;
+                    }
+                    _pendingWelcomeByGroup.Remove(groupId);
+                    joinedSnapshot = [.. batch.NewMemberNames];
+                    templateSnapshot = batch.Template;
+                    keySnapshot = batch.GroupKey;
+                    nameSnapshot = batch.GroupName;
+                    try { batch.TimerCts?.Dispose(); } catch { }
+                    batch.TimerCts = null;
+                }
+
+                if (joinedSnapshot.Count == 0 || !Config.GlobalEnabled) return;
+
+                string formatted = FormatWelcomeMessage(templateSnapshot, nameSnapshot, joinedSnapshot);
+                if (string.IsNullOrWhiteSpace(formatted)) return;
+
+                string joinedDisplay = string.Join("、", joinedSnapshot);
+                EnqueueItem(new QueuedAutoReplyItem
+                {
+                    SeqId = Interlocked.Increment(ref _nextSeqId),
+                    GroupId = groupId,
+                    GroupKey = keySnapshot,
+                    GroupName = nameSnapshot,
+                    SenderName = joinedDisplay,
+                    CooldownKey = string.Empty,
+                    TriggerMessage = $"👋 新人进群：{joinedDisplay}",
+                    CleanedQuestion = joinedDisplay,
+                    MatchedBy = "新人进群",
+                    IsManualTest = false,
+                    IsWelcome = true,
+                    FixedReplyText = formatted,
+                    OverrideAutoSend = null,
+                    PrefixMention = false,
+                    CancellationToken = _sessionCts.Token
+                });
+            });
+        }
+
+        public static string FormatWelcomeMessage(string template, string groupName, IReadOnlyList<string> memberNames)
+        {
+            string tpl = string.IsNullOrWhiteSpace(template) ? DefaultWelcomeTemplate : template.Trim();
+            var names = memberNames.Where(n => !string.IsNullOrWhiteSpace(n)).ToList();
+            if (names.Count == 0) names = ["新朋友"];
+
+            string mentionList = string.Join(" ", names.Select(n => n == "新朋友" ? n : $"@{n}"));
+            string plainList = string.Join("、", names);
+
+            // Avoid double "@@" if user already wrote "@{新人昵称}" in the template
+            string res = tpl
+                .Replace("@{新人昵称}", mentionList, StringComparison.Ordinal)
+                .Replace("{新人昵称}", mentionList, StringComparison.Ordinal)
+                .Replace("{新人}", plainList, StringComparison.Ordinal)
+                .Replace("{群名}", groupName ?? string.Empty, StringComparison.Ordinal);
+
+            return res.Trim();
         }
 
         /// <summary>
@@ -461,6 +631,7 @@ namespace Client.Services
             {
                 SeqId = Interlocked.Increment(ref _nextSeqId),
                 GroupId = targetGroup.Id,
+                GroupKey = targetGroup.GroupKey,
                 GroupName = targetGroup.DisplayName,
                 SenderName = "手动测试",
                 CooldownKey = string.Empty,
@@ -514,11 +685,31 @@ namespace Client.Services
 
         private async Task<(bool Ok, string Reply, string SourceMode, string Error)> GenerateReplyParallelAsync(QueuedAutoReplyItem item)
         {
+            if (!string.IsNullOrWhiteSpace(item.FixedReplyText))
+            {
+                return (true, item.FixedReplyText.Trim(), item.IsWelcome ? "新人欢迎模板" : "固定模板", string.Empty);
+            }
+
             await _aiConcurrencyGate.WaitAsync(item.CancellationToken);
             try
             {
+                List<string>? attachedImages = null;
+                if (item.TriggerMessageObj is not null && !string.IsNullOrWhiteSpace(item.GroupKey))
+                {
+                    var imgs = await AppServices.WeChat4Sync.ResolveGroupAutoReplyImagesAsync(
+                        item.GroupKey,
+                        item.TriggerMessageObj,
+                        item.RecentSessionMessages,
+                        item.CancellationToken);
+                    if (imgs.Count > 0)
+                    {
+                        attachedImages = imgs;
+                        AppServices.Logs.Info("AI", $"群「{item.GroupName}」自动回复已附带 {imgs.Count} 张引用/近期图片进入多模态识别。");
+                    }
+                }
+
                 string senderForAi = item.IsManualTest ? "测试群友" : item.SenderName;
-                return await GenerateReplyTextAsync(item.GroupId, senderForAi, item.CleanedQuestion, item.CancellationToken);
+                return await GenerateReplyTextAsync(item.GroupId, senderForAi, item.CleanedQuestion, attachedImages, item.CancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -742,12 +933,14 @@ namespace Client.Services
                         : null;
                 }
 
+                DateTimeOffset sendWindowStartUtc = DateTimeOffset.UtcNow;
                 var autoRes = await executor.DeliverPreparedReplyAsync(
                     matchingPrepared,
                     item.GroupName,
                     finalReply,
                     Config,
                     overrideAutoSend: item.OverrideAutoSend,
+                    groupKey: item.GroupKey,
                     ct: item.CancellationToken);
 
                 item.TotalStopwatch.Stop();
@@ -767,6 +960,57 @@ namespace Client.Services
                         }
                     }
 
+                    bool deliveryConfirmed = false;
+                    bool verifiedAttempted = false;
+                    string finalDetail = autoRes.Message;
+
+                    if (autoRes.WasSent && !string.IsNullOrWhiteSpace(item.GroupKey))
+                    {
+                        verifiedAttempted = true;
+                        UpdateLiveStatus($"正在落库确权「{item.GroupName}」...");
+                        var (confirmed, confirmDetail) = await AppServices.WeChat4Sync.VerifyGroupOutgoingMessageDeliveredAsync(
+                            item.GroupKey,
+                            finalReply,
+                            sendWindowStartUtc,
+                            item.CancellationToken);
+                        deliveryConfirmed = confirmed;
+                        finalDetail = $"{autoRes.Message} {confirmDetail}";
+                        if (confirmed)
+                        {
+                            AppServices.Logs.Success("REPLY", $"群「{item.GroupName}」发送确权通过：{confirmDetail}");
+                        }
+                        else
+                        {
+                            AppServices.Logs.Warn("REPLY", $"群「{item.GroupName}」发送未确认落库：{confirmDetail}");
+                        }
+                    }
+
+                    string statusLabel;
+                    bool recordSuccess = true;
+                    bool recordSkipped = false;
+                    if (!autoRes.WasSent)
+                    {
+                        statusLabel = "已粘贴待确认";
+                    }
+                    else if (verifiedAttempted && !deliveryConfirmed)
+                    {
+                        statusLabel = "未确认送达";
+                        recordSuccess = false;
+                        recordSkipped = true;
+                    }
+                    else if (item.IsWelcome)
+                    {
+                        statusLabel = deliveryConfirmed ? "欢迎已确权" : "欢迎已发送";
+                    }
+                    else if (item.IsManualTest)
+                    {
+                        statusLabel = deliveryConfirmed ? "测试已确权" : "测试已发送";
+                    }
+                    else
+                    {
+                        statusLabel = deliveryConfirmed ? "已发送·已确权" : "已发送";
+                    }
+
                     var okRec = new AutoReplyExecutionRecord
                     {
                         GroupId = item.GroupId,
@@ -775,11 +1019,10 @@ namespace Client.Services
                         TriggerMessage = item.TriggerMessage,
                         GeneratedReply = finalReply,
                         SourceMode = sourcePrefix + sourceMode,
-                        StatusLabel = item.IsManualTest
-                            ? (autoRes.WasSent ? "测试已发送" : "已粘贴待确认")
-                            : (autoRes.WasSent ? "已发送" : "已粘贴待确认"),
-                        IsSuccess = true,
-                        Detail = autoRes.Message,
+                        StatusLabel = statusLabel,
+                        IsSuccess = recordSuccess,
+                        IsSkipped = recordSkipped,
+                        Detail = finalDetail,
                         ElapsedMs = item.TotalStopwatch.ElapsedMilliseconds
                     };
                     RecordExecution(okRec);
@@ -796,8 +1039,10 @@ namespace Client.Services
                         TriggerMessage = item.TriggerMessage,
                         GeneratedReply = finalReply,
                         SourceMode = sourcePrefix + sourceMode,
-                        StatusLabel = autoRes.WasCancelledByEsc ? "已中止" : (item.IsManualTest ? "测试失败" : "操控失败"),
-                        IsSkipped = autoRes.WasCancelledByEsc,
+                        StatusLabel = autoRes.WasSkippedByDraft
+                            ? "草稿避让"
+                            : (autoRes.WasCancelledByEsc ? "已中止" : (item.IsManualTest ? "测试失败" : "操控失败")),
+                        IsSkipped = autoRes.WasCancelledByEsc || autoRes.WasSkippedByDraft,
                         Detail = autoRes.Message,
                         ElapsedMs = item.TotalStopwatch.ElapsedMilliseconds
                     };
@@ -873,6 +1118,7 @@ namespace Client.Services
             long groupId,
             string senderName,
             string cleanedQuestion,
+            List<string>? attachedImages,
             CancellationToken ct)
         {
             List<AutoReplyExampleItem> enabledExamples;
@@ -883,21 +1129,24 @@ namespace Client.Services
                     .ToList();
             }
 
-            // 1. Check DirectMatch examples first (instant 0ms!)
-            foreach (var ex in enabledExamples.Where(e => e.DirectMatch))
+            // 1. Check DirectMatch examples first (instant 0ms!) — skip direct-match when images are attached so vision AI inspects them
+            if (attachedImages is not { Count: > 0 })
             {
-                var keywords = ex.QuestionPattern
-                    .Split(NameSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .Where(k => k.Length >= 2)
-                    .ToList();
-                if (keywords.Any(k => cleanedQuestion.Contains(k, StringComparison.OrdinalIgnoreCase)))
+                foreach (var ex in enabledExamples.Where(e => e.DirectMatch))
                 {
-                    AppServices.Logs.Info("REPLY", $"命中「关键词直出」示例（分类：{ex.CategoryDisplay}）");
-                    return (true, ex.AnswerExample.Trim(), "关键词直出", string.Empty);
+                    var keywords = ex.QuestionPattern
+                        .Split(NameSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Where(k => k.Length >= 2)
+                        .ToList();
+                    if (keywords.Any(k => cleanedQuestion.Contains(k, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        AppServices.Logs.Info("REPLY", $"命中「关键词直出」示例（分类：{ex.CategoryDisplay}）");
+                        return (true, ex.AnswerExample.Trim(), "关键词直出", string.Empty);
+                    }
                 }
             }
 
-            // 2. Call Server AI endpoint with Q&A few-shot examples + compact group context + knowledge base
+            // 2. Call Server AI endpoint with Q&A few-shot examples + compact group context + knowledge base + optional multimodal images
             var payloads = enabledExamples.Select(e => new AutoReplyExamplePayload
             {
                 Category = e.Category,
@@ -912,6 +1161,7 @@ namespace Client.Services
                 Config.CustomSystemPrompt,
                 Config.MaxReplyChars,
                 payloads,
+                attachedImages,
                 ct);
 
             if (aiRes.IsSuccess && !string.IsNullOrWhiteSpace(aiRes.Data?.Reply))
@@ -921,9 +1171,12 @@ namespace Client.Services
                 {
                     toolInfo = ", tools=" + string.Join(",", traces.Select(t => $"{t.SkillName}({t.Summary})"));
                 }
+                string modeLabel = attachedImages is { Count: > 0 }
+                    ? "多模态 AI 生成"
+                    : (payloads.Count > 0 ? "AI 示例生成" : "AI 生成");
                 AppServices.Logs.Info("AI",
-                    $"群自动回复生成成功：model={aiRes.Data.Model}, latency={aiRes.Data.LatencyMs} ms, chars={aiRes.Data.Reply.Length}{toolInfo}");
-                return (true, aiRes.Data.Reply.Trim(), payloads.Count > 0 ? "AI 示例生成" : "AI 生成", string.Empty);
+                    $"群自动回复生成成功：model={aiRes.Data.Model}, latency={aiRes.Data.LatencyMs} ms, chars={aiRes.Data.Reply.Length}, imgs={attachedImages?.Count ?? 0}{toolInfo}");
+                return (true, aiRes.Data.Reply.Trim(), modeLabel, string.Empty);
             }
 
             // 3. Optional fallback reply

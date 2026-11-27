@@ -212,14 +212,36 @@
 
                                             <Grid Grid.Row="0">
                                                 <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="0" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayTitleWithCount}" TextTrimming="CharacterEllipsis" />
+                                                <FontIcon
+                                                    Grid.Column="0"
+                                                    Margin="0,0,3,0"
+                                                    VerticalAlignment="Center"
+                                                    FontSize="10"
+                                                    Foreground="{StaticResource BrandPrimaryBrush}"
+                                                    Glyph="&#xE718;"
+                                                    ToolTipService.ToolTip="微信置顶群聊"
+                                                    Visibility="{x:Bind PinnedBadgeVisibility, Mode=OneWay}" />
+                                                <TextBlock Grid.Column="1" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayTitleWithCount}" TextTrimming="CharacterEllipsis" />
                                                 <Border
-                                                    Grid.Column="1"
-                                                    Margin="4,0,0,0"
+                                                    Grid.Column="2"
+                                                    Margin="3,0,0,0"
+                                                    Padding="4,1"
+                                                    VerticalAlignment="Center"
+                                                    Background="{StaticResource InfoBgBrush}"
+                                                    CornerRadius="4"
+                                                    ToolTipService.ToolTip="已开启本群新人自动欢迎"
+                                                    Visibility="{x:Bind WelcomeBadgeVisibility, Mode=OneWay}">
+                                                    <TextBlock FontSize="9.5" FontWeight="SemiBold" Foreground="{StaticResource InfoTextBrush}" Text="迎" />
+                                                </Border>
+                                                <Border
+                                                    Grid.Column="3"
+                                                    Margin="3,0,0,0"
                                                     Padding="4,1"
                                                     VerticalAlignment="Center"
                                                     Background="{StaticResource SuccessBgBrush}"
@@ -228,10 +250,34 @@
                                                     Visibility="{x:Bind AutoReplyBadgeVisibility, Mode=OneWay}">
                                                     <TextBlock FontSize="9.5" FontWeight="SemiBold" Foreground="{StaticResource SuccessTextBrush}" Text="AI" />
                                                 </Border>
-                                                <TextBlock Grid.Column="2" Margin="4,0,0,0" VerticalAlignment="Center" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeShort}" />
+                                                <TextBlock Grid.Column="4" Margin="4,0,0,0" VerticalAlignment="Center" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeShort}" />
                                             </Grid>
 
-                                            <TextBlock Grid.Row="1" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" MaxLines="1" Text="{x:Bind PreviewLine}" TextTrimming="CharacterEllipsis" />
+                                            <Grid Grid.Row="1" ColumnSpacing="6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" MaxLines="1" Text="{x:Bind PreviewLine}" TextTrimming="CharacterEllipsis" />
+                                                <Border
+                                                    Grid.Column="1"
+                                                    MinWidth="17"
+                                                    Height="17"
+                                                    Padding="5,0"
+                                                    VerticalAlignment="Center"
+                                                    Background="#E5484D"
+                                                    CornerRadius="9"
+                                                    ToolTipService.ToolTip="微信未读消息数（微信中已读后自动消除）"
+                                                    Visibility="{x:Bind UnreadBadgeVisibility, Mode=OneWay}">
+                                                    <TextBlock
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        FontSize="10"
+                                                        FontWeight="Bold"
+                                                        Foreground="#FFFFFF"
+                                                        Text="{x:Bind UnreadBadgeText, Mode=OneWay}" />
+                                                </Border>
+                                            </Grid>
                                         </Grid>
                                     </Grid>
                                 </Border>
@@ -280,6 +326,20 @@
                     </StackPanel>
 
                     <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                        <Button
+                            x:Name="OpenGroupInWeChatButton"
+                            Height="30"
+                            Padding="10,0"
+                            Click="OpenGroupInWeChatButton_Click"
+                            FontSize="12"
+                            IsEnabled="False"
+                            Style="{StaticResource SecondaryOutlineButtonStyle}"
+                            ToolTipService.ToolTip="一键在电脑版微信中精准定位并打开该群聊窗口">
+                            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                <FontIcon FontSize="12" Foreground="{StaticResource SuccessTextBrush}" Glyph="&#xE8A7;" />
+                                <TextBlock Text="在微信打开" />
+                            </StackPanel>
+                        </Button>
                         <Button
                             x:Name="SearchMessagesButton"
                             Height="30"
@@ -1065,6 +1125,72 @@
                                     </ListView>
                                 </StackPanel>
 
+                                <!-- Synced WeChat Group Announcement Card -->
+                                <Border
+                                    x:Name="ViewAnnouncementCard"
+                                    Padding="12"
+                                    Background="{StaticResource AppCanvasBgBrush}"
+                                    BorderBrush="{StaticResource AppBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Visibility="Collapsed">
+                                    <StackPanel Spacing="6">
+                                        <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                            <FontIcon FontSize="12" Foreground="{StaticResource InfoTextBrush}" Glyph="&#xE789;" />
+                                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="群公告（自动喂给 AI 参考）" />
+                                        </StackPanel>
+                                        <TextBlock
+                                            x:Name="ViewGroupAnnouncementText"
+                                            FontSize="12"
+                                            Foreground="{StaticResource TextSecondaryBrush}"
+                                            IsTextSelectionEnabled="True"
+                                            LineHeight="18"
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Per-Group Auto-Welcome Quick Config Card -->
+                                <Border
+                                    Padding="12"
+                                    Background="{StaticResource AppSurfaceAltBrush}"
+                                    BorderBrush="{StaticResource AppBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10">
+                                    <StackPanel Spacing="7">
+                                        <Grid ColumnSpacing="8">
+                                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                <FontIcon FontSize="12.5" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8FA;" />
+                                                <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="本群新人自动欢迎" />
+                                                <Border
+                                                    x:Name="ViewWelcomeStatusPill"
+                                                    Padding="6,1.5"
+                                                    Background="{StaticResource AppInputBgBrush}"
+                                                    CornerRadius="4">
+                                                    <TextBlock x:Name="ViewWelcomeStatusText" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource TextMutedBrush}" Text="未开启" />
+                                                </Border>
+                                            </StackPanel>
+                                            <Button
+                                                x:Name="ViewConfigureWelcomeButton"
+                                                Height="26"
+                                                Padding="9,0"
+                                                HorizontalAlignment="Right"
+                                                Click="ConfigureGroupWelcomeButton_Click"
+                                                Content="配置欢迎语"
+                                                CornerRadius="6"
+                                                FontSize="11.5"
+                                                Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                                        </Grid>
+                                        <TextBlock
+                                            x:Name="ViewWelcomePreviewText"
+                                            FontSize="11.5"
+                                            Foreground="{StaticResource TextMutedBrush}"
+                                            MaxLines="2"
+                                            Text="未开启本群新人自动欢迎，点击「配置欢迎语」弹窗设置。"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+
                                 <!-- Dedicated Bottom Employee Notes Card -->
                                 <Border Padding="13" Background="{StaticResource BrandCardTintBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
                                     <StackPanel Spacing="7">
@@ -1095,6 +1221,37 @@
                                     <TextBox x:Name="EditMemberCountBox" Grid.Column="1" Header="成员人数" Style="{StaticResource SoftTextBoxStyle}" />
                                 </Grid>
                                 <TextBox x:Name="EditMembersTextBox" Header="群成员名单文本" Height="88" AcceptsReturn="True" Style="{StaticResource SoftTextBoxStyle}" TextWrapping="Wrap" />
+
+                                <!-- Per-Group Auto-Welcome Configuration Popup Entry (Right Before Employee Notes) -->
+                                <Border Margin="0,4,0,0" Padding="12" Background="{StaticResource AppSurfaceAltBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
+                                    <StackPanel Spacing="7">
+                                        <Grid ColumnSpacing="8">
+                                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                <FontIcon FontSize="12.5" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8FA;" />
+                                                <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="本群新人自动欢迎" />
+                                                <TextBlock x:Name="EditWelcomeStatusText" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextMutedBrush}" Text="（未开启）" />
+                                            </StackPanel>
+                                            <Button
+                                                x:Name="EditConfigureWelcomeButton"
+                                                Height="28"
+                                                Padding="10,0"
+                                                HorizontalAlignment="Right"
+                                                Click="ConfigureGroupWelcomeButton_Click"
+                                                Content="配置自动欢迎..."
+                                                CornerRadius="6"
+                                                FontSize="11.5"
+                                                Style="{StaticResource PrimaryVioletButtonStyle}" />
+                                        </Grid>
+                                        <TextBlock
+                                            x:Name="EditWelcomePreviewText"
+                                            FontSize="11.5"
+                                            Foreground="{StaticResource TextSecondaryBrush}"
+                                            MaxLines="2"
+                                            Text="点击右侧按钮在弹窗中配置是否开启本群新人自动欢迎及固定欢迎语内容。"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
 
                                 <Border Margin="0,4,0,0" Padding="12" Background="{StaticResource BrandCardTintBrush}" BorderBrush="{StaticResource BrandSoftBorderBrush}" BorderThickness="1" CornerRadius="10">
                                     <StackPanel Spacing="6">

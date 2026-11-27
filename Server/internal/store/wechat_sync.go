@@ -22,6 +22,7 @@ type WeChatSyncCustomerItem struct {
 	Phone         string `json:"phone"`
 	Signature     string `json:"signature"`
 	Source        string `json:"source"`
+	AddedDate     string `json:"added_date"`
 }
 
 type WeChatSyncCustomerResult struct {
@@ -45,13 +46,14 @@ type WeChatSyncGroupMemberItem struct {
 }
 
 type WeChatSyncGroupItem struct {
-	OwnerWxid   string                      `json:"owner_wxid"`
-	GroupKey    string                      `json:"group_key"`
-	GroupName   string                      `json:"group_name"`
-	MyNickname  string                      `json:"my_nickname"`
-	MemberCount int                         `json:"member_count"`
-	MembersText string                      `json:"members_text"`
-	Members     []WeChatSyncGroupMemberItem `json:"members"`
+	OwnerWxid    string                      `json:"owner_wxid"`
+	GroupKey     string                      `json:"group_key"`
+	GroupName    string                      `json:"group_name"`
+	MyNickname   string                      `json:"my_nickname"`
+	MemberCount  int                         `json:"member_count"`
+	MembersText  string                      `json:"members_text"`
+	Announcement string                      `json:"announcement"`
+	Members      []WeChatSyncGroupMemberItem `json:"members"`
 }
 
 type WeChatSyncGroupMemberResult struct {
@@ -106,18 +108,18 @@ func (s *Store) SyncWeChatCustomers(ctx context.Context, ownerID string, items [
 
 	for _, item := range items {
 		var existingID int64
-		var curOwnerWxid, curRemark, curName, curAccount, curGender, curAvatar, curDesc, curTags, curLocalKey, curNativeID, curRegion, curPhone, curSig, curSource string
+		var curOwnerWxid, curRemark, curName, curAccount, curGender, curAvatar, curDesc, curTags, curLocalKey, curNativeID, curRegion, curPhone, curSig, curSource, curAddedDate string
 		found := false
 
 		queryCustomer := func(where string, args ...any) (bool, error) {
 			err := tx.QueryRowContext(ctx, `
 				SELECT id, owner_wxid, wechat_remark, wechat_name, wechat_account, gender, avatar_url,
-				       description, tags, local_key, native_id, region, phone, signature, source
+				       description, tags, local_key, native_id, region, phone, signature, source, added_date
 				FROM customers
 				WHERE `+where+`
 				LIMIT 1`, args...,
 			).Scan(&existingID, &curOwnerWxid, &curRemark, &curName, &curAccount, &curGender, &curAvatar,
-				&curDesc, &curTags, &curLocalKey, &curNativeID, &curRegion, &curPhone, &curSig, &curSource)
+				&curDesc, &curTags, &curLocalKey, &curNativeID, &curRegion, &curPhone, &curSig, &curSource, &curAddedDate)
 			if err == nil {
 				return true, nil
 			}
@@ -187,6 +189,7 @@ func (s *Store) SyncWeChatCustomers(ctx context.Context, ownerID string, items [
 				    phone          = ?,
 				    signature      = ?,
 				    source         = ?,
+				    added_date     = ?,
 				    updated_at     = ?
 				WHERE owner_id = ? AND id = ?`,
 				nonEmptyOr(item.OwnerWxid, curOwnerWxid),
@@ -202,6 +205,7 @@ func (s *Store) SyncWeChatCustomers(ctx context.Context, ownerID string, items [
 				nonEmptyOr(item.Phone, curPhone),
 				nonEmptyOr(item.Signature, curSig),
 				nonEmptyOr(item.Source, curSource),
+				nonEmptyOr(item.AddedDate, curAddedDate),
 				now, ownerID, existingID,
 			)
 			if err != nil {
@@ -223,10 +227,10 @@ func (s *Store) SyncWeChatCustomers(ctx context.Context, ownerID string, items [
 				gender, avatar_url, description, tags, follow_status, local_key, native_id,
 				note, region, phone, signature, source, added_date,
 				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, '', ?, ?, '', ?, ?, ?, ?, '', ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, '', ?, ?, '', ?, ?, ?, ?, ?, ?, ?)`,
 			ownerID, item.OwnerWxid, item.WechatRemark, item.WechatName, item.WechatAccount,
 			item.Gender, item.Description, item.Tags, item.LocalKey, item.NativeID,
-			item.Region, item.Phone, item.Signature, item.Source,
+			item.Region, item.Phone, item.Signature, item.Source, item.AddedDate,
 			now, now,
 		)
 		if err != nil {
@@ -265,17 +269,17 @@ func (s *Store) SyncWeChatGroups(ctx context.Context, ownerID string, items []We
 
 	for _, item := range items {
 		var groupID int64
-		var curOwnerWxid, curName, curMyNick, curAvatar, curMembersText string
+		var curOwnerWxid, curName, curMyNick, curAvatar, curMembersText, curAnnouncement string
 		var curMemberCount int
 		found := false
 
 		queryGroup := func(where string, args ...any) (bool, error) {
 			err := tx.QueryRowContext(ctx, `
-				SELECT id, owner_wxid, group_name, my_nickname, avatar_url, member_count, members_text
+				SELECT id, owner_wxid, group_name, my_nickname, avatar_url, member_count, members_text, announcement
 				FROM groups
 				WHERE `+where+`
 				LIMIT 1`, args...,
-			).Scan(&groupID, &curOwnerWxid, &curName, &curMyNick, &curAvatar, &curMemberCount, &curMembersText)
+			).Scan(&groupID, &curOwnerWxid, &curName, &curMyNick, &curAvatar, &curMemberCount, &curMembersText, &curAnnouncement)
 			if err == nil {
 				return true, nil
 			}
@@ -318,6 +322,7 @@ func (s *Store) SyncWeChatGroups(ctx context.Context, ownerID string, items []We
 				    my_nickname  = ?,
 				    member_count = ?,
 				    members_text = ?,
+				    announcement = ?,
 				    updated_at   = ?
 				WHERE owner_id = ? AND id = ?`,
 				nonEmptyOr(item.OwnerWxid, curOwnerWxid),
@@ -325,6 +330,7 @@ func (s *Store) SyncWeChatGroups(ctx context.Context, ownerID string, items []We
 				nonEmptyOr(item.MyNickname, curMyNick),
 				memberCount,
 				nonEmptyOr(item.MembersText, curMembersText),
+				nonEmptyOr(item.Announcement, curAnnouncement),
 				now, ownerID, groupID,
 			)
 			if err != nil {
@@ -333,9 +339,9 @@ func (s *Store) SyncWeChatGroups(ctx context.Context, ownerID string, items []We
 			updatedCount++
 		} else {
 			res, err := tx.ExecContext(ctx, `
-				INSERT INTO groups (owner_id, owner_wxid, group_name, group_key, my_nickname, member_count, members_text, note, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
-				ownerID, item.OwnerWxid, item.GroupName, item.GroupKey, item.MyNickname, item.MemberCount, item.MembersText, now, now,
+				INSERT INTO groups (owner_id, owner_wxid, group_name, group_key, my_nickname, member_count, members_text, announcement, note, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
+				ownerID, item.OwnerWxid, item.GroupName, item.GroupKey, item.MyNickname, item.MemberCount, item.MembersText, item.Announcement, now, now,
 			)
 			if err != nil {
 				return nil, 0, 0, err

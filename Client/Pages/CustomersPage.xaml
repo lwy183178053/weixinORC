@@ -282,14 +282,48 @@
 
                                                 <Grid Grid.Row="0">
                                                     <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="Auto" />
                                                     </Grid.ColumnDefinitions>
-                                                    <TextBlock Grid.Column="0" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayName}" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Grid.Column="1" Margin="4,0,0,0" VerticalAlignment="Center" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeShort}" />
+                                                    <FontIcon
+                                                        Grid.Column="0"
+                                                        Margin="0,0,3,0"
+                                                        VerticalAlignment="Center"
+                                                        FontSize="10"
+                                                        Foreground="{StaticResource BrandPrimaryBrush}"
+                                                        Glyph="&#xE718;"
+                                                        ToolTipService.ToolTip="微信置顶联系人"
+                                                        Visibility="{x:Bind PinnedBadgeVisibility, Mode=OneWay}" />
+                                                    <TextBlock Grid.Column="1" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayName}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Grid.Column="2" Margin="4,0,0,0" VerticalAlignment="Center" FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind TimeShort}" />
                                                 </Grid>
 
-                                                <TextBlock Grid.Row="1" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" MaxLines="1" Text="{x:Bind PreviewLine}" TextTrimming="CharacterEllipsis" />
+                                                <Grid Grid.Row="1" ColumnSpacing="6">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" MaxLines="1" Text="{x:Bind PreviewLine}" TextTrimming="CharacterEllipsis" />
+                                                    <Border
+                                                        Grid.Column="1"
+                                                        MinWidth="17"
+                                                        Height="17"
+                                                        Padding="5,0"
+                                                        VerticalAlignment="Center"
+                                                        Background="#E5484D"
+                                                        CornerRadius="9"
+                                                        ToolTipService.ToolTip="微信未读消息数（微信中已读后自动消除）"
+                                                        Visibility="{x:Bind UnreadBadgeVisibility, Mode=OneWay}">
+                                                        <TextBlock
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center"
+                                                            FontSize="10"
+                                                            FontWeight="Bold"
+                                                            Foreground="#FFFFFF"
+                                                            Text="{x:Bind UnreadBadgeText, Mode=OneWay}" />
+                                                    </Border>
+                                                </Grid>
                                             </Grid>
                                         </Grid>
                                     </Border>
@@ -345,6 +379,20 @@
                     </StackPanel>
 
                     <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                        <Button
+                            x:Name="OpenCustomerInWeChatButton"
+                            Height="30"
+                            Padding="10,0"
+                            Click="OpenCustomerInWeChatButton_Click"
+                            FontSize="12"
+                            IsEnabled="False"
+                            Style="{StaticResource SecondaryOutlineButtonStyle}"
+                            ToolTipService.ToolTip="一键在电脑版微信中通过微信号/备注精准定位并打开该客户窗口">
+                            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                <FontIcon FontSize="12" Foreground="{StaticResource SuccessTextBrush}" Glyph="&#xE8A7;" />
+                                <TextBlock Text="在微信打开" />
+                            </StackPanel>
+                        </Button>
                         <Button
                             x:Name="SearchMessagesButton"
                             Height="30"

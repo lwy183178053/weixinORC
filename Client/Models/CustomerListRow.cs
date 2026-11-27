@@ -119,12 +119,22 @@ namespace Client.Models
         public ImageSource? AvatarImage => Customer?.AvatarImage;
         public Visibility AvatarImageVisibility => Customer?.AvatarImage is not null ? Visibility.Visible : Visibility.Collapsed;
         public Visibility AvatarInitialVisibility => Customer?.AvatarImage is null ? Visibility.Visible : Visibility.Collapsed;
+        public string UnreadBadgeText => Customer?.UnreadBadgeText ?? string.Empty;
+        public Visibility UnreadBadgeVisibility => Customer?.UnreadBadgeVisibility ?? Visibility.Collapsed;
+        public Visibility PinnedBadgeVisibility => Customer?.PinnedBadgeVisibility ?? Visibility.Collapsed;
 
         public void NotifyAvatarChanged()
         {
             OnPropertyChanged(nameof(AvatarImage));
             OnPropertyChanged(nameof(AvatarImageVisibility));
             OnPropertyChanged(nameof(AvatarInitialVisibility));
+        }
+
+        public void NotifySessionStateChanged()
+        {
+            OnPropertyChanged(nameof(UnreadBadgeText));
+            OnPropertyChanged(nameof(UnreadBadgeVisibility));
+            OnPropertyChanged(nameof(PinnedBadgeVisibility));
         }
 
         private void OnPropertyChanged([CallerMemberName] string? name = null) =>

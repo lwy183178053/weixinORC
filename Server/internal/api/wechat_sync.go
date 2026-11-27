@@ -85,6 +85,7 @@ func (s *server) syncWeChatCustomers(c *gin.Context) {
 			Phone:         truncateRunes(it.Phone, 64),
 			Signature:     truncateRunes(it.Signature, 500),
 			Source:        truncateRunes(it.Source, 128),
+			AddedDate:     truncateRunes(it.AddedDate, 64),
 		}
 		if item.NativeID == "" && item.WechatAccount == "" && item.WechatName == "" && item.WechatRemark == "" {
 			continue
@@ -157,13 +158,14 @@ func (s *server) syncWeChatGroups(c *gin.Context) {
 			members = append(members, mem)
 		}
 		sanitized = append(sanitized, store.WeChatSyncGroupItem{
-			OwnerWxid:   groupOwnerWxid,
-			GroupKey:    groupKey,
-			GroupName:   groupName,
-			MyNickname:  truncateRunes(g.MyNickname, 128),
-			MemberCount: memberCount,
-			MembersText: truncateRunes(g.MembersText, 4000),
-			Members:     members,
+			OwnerWxid:    groupOwnerWxid,
+			GroupKey:     groupKey,
+			GroupName:    groupName,
+			MyNickname:   truncateRunes(g.MyNickname, 128),
+			MemberCount:  memberCount,
+			MembersText:  truncateRunes(g.MembersText, 4000),
+			Announcement: truncateRunes(g.Announcement, 4000),
+			Members:      members,
 		})
 	}
 

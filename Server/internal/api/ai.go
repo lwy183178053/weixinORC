@@ -380,6 +380,7 @@ type groupAutoReplyRequest struct {
 	CustomPrompt   string                `json:"custom_prompt,omitempty"`
 	MaxReplyChars  int                   `json:"max_reply_chars,omitempty"`
 	Examples       []ai.AutoReplyExample `json:"examples,omitempty"`
+	Images         []string              `json:"images,omitempty"`
 }
 
 func (s *server) aiGroupAutoReply(c *gin.Context) {
@@ -399,6 +400,7 @@ func (s *server) aiGroupAutoReply(c *gin.Context) {
 		CustomPrompt:   req.CustomPrompt,
 		MaxReplyChars:  req.MaxReplyChars,
 		Examples:       req.Examples,
+		Images:         req.Images,
 	})
 	if err != nil {
 		writeAIError(c, err)

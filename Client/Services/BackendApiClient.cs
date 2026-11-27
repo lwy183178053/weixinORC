@@ -379,6 +379,10 @@ namespace Client.Services
         public Task<ApiResult<GroupDto>> SetGroupAutoReplyAsync(long groupId, bool enabled, CancellationToken ct = default) =>
             SendAuthedAsync<GroupDto>(HttpMethod.Patch, $"/api/v1/groups/{groupId}", new { auto_reply_enabled = enabled }, ct);
 
+        public Task<ApiResult<GroupDto>> SetGroupWelcomeAsync(long groupId, bool enabled, string template, CancellationToken ct = default) =>
+            SendAuthedAsync<GroupDto>(HttpMethod.Patch, $"/api/v1/groups/{groupId}",
+                new { welcome_enabled = enabled, welcome_template = template?.Trim() ?? string.Empty }, ct);
+
         public Task<ApiResult<bool>> DeleteGroupAsync(long groupId, CancellationToken ct = default) =>
             SendAuthedNoContentAsync(HttpMethod.Delete, $"/api/v1/groups/{groupId}", ct);
 
@@ -478,6 +482,7 @@ namespace Client.Services
             string customPrompt,
             int maxReplyChars,
             IEnumerable<AutoReplyExamplePayload> examples,
+            IEnumerable<string>? images = null,
             CancellationToken ct = default) =>
             SendAuthedLongRunningAsync<AiChatResponse>(HttpMethod.Post, "/api/v1/ai/group-auto-reply",
                 new
@@ -487,7 +492,8 @@ namespace Client.Services
                     trigger_message = triggerMessage?.Trim() ?? string.Empty,
                     custom_prompt = customPrompt?.Trim() ?? string.Empty,
                     max_reply_chars = maxReplyChars,
-                    examples = examples.ToList()
+                    examples = examples.ToList(),
+                    images = images?.ToList() ?? []
                 }, ct);
 
         public Task<ApiResult<AiChatResponse>> AgentAiChatAsync(

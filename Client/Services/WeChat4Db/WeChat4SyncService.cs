@@ -37,6 +37,7 @@ namespace Client.Services.WeChat4Db
         private long _syncRevision;
         private int _resyncPendingAfterCurrent;
         private readonly HashSet<string> _uploadedSelfAvatarWxids = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, WeChatSessionState> _liveSessionStates = new(StringComparer.OrdinalIgnoreCase);
         private List<WeChatAccountDto> _knownAccounts = [];
 
         public WeChat4Reader? ActiveReader => _activeReader;
@@ -72,7 +73,196 @@ namespace Client.Services.WeChat4Db
         public event Action<string>? AutoSyncStatusChanged;
         public event Action<string>? ActivityLogged;
         public event Action? AccountsUpdated;
+        public event Action? SessionStatesUpdated;
         public event Action<WeChat4GroupNewMessagesEvent>? GroupNewMessagesSynced;
+
+        /// <summary>
+        /// Gets the latest real-time WeChat SessionTable state (unread_count, pinned, hidden, draft) for a customer or group.
+        /// Automatically clears to 0 within ~1.2s when the user reads the conversation in WeChat.
+        /// </summary>
+        public WeChatSessionState? GetSessionState(string? ownerWxid, string? sessionKey)
+        {
+            if (string.IsNullOrWhiteSpace(sessionKey)) return null;
+            string key = sessionKey.Trim();
+            string owner = !string.IsNullOrWhiteSpace(ownerWxid) ? ownerWxid.Trim() : ActiveOwnerWxid;
+            if (!string.IsNullOrWhiteSpace(owner) && _liveSessionStates.TryGetValue($"{owner}|{key}", out var scoped))
+            {
+                return scoped;
+            }
+            return _liveSessionStates.TryGetValue(key, out var fallback) ? fallback : null;
+        }
+
+        public string GetSessionDraft(string? ownerWxid, string? sessionKey) =>
+            GetSessionState(ownerWxid, sessionKey)?.Draft ?? string.Empty;
+
+        private void PublishLiveSessionStates(WeChat4Reader reader)
+        {
+            string owner = reader.SelfWxid ?? string.Empty;
+            var currentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in reader.SessionStates)
+            {
+                if (!string.IsNullOrWhiteSpace(owner))
+                {
+                    string scopedKey = $"{owner}|{kv.Key}";
+                    _liveSessionStates[scopedKey] = kv.Value;
+                    currentKeys.Add(scopedKey);
+                }
+                _liveSessionStates[kv.Key] = kv.Value;
+                currentKeys.Add(kv.Key);
+            }
+
+            // Clear stale unread badges for sessions belonging to this owner that disappeared from SessionTable
+            if (!string.IsNullOrWhiteSpace(owner))
+            {
+                string prefix = owner + "|";
+                foreach (var existingKey in _liveSessionStates.Keys)
+                {
+                    if (existingKey.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && !currentKeys.Contains(existingKey))
+                    {
+                        _liveSessionStates.TryRemove(existingKey, out _);
+                    }
+                }
+            }
+            SessionStatesUpdated?.Invoke();
+        }
+
+        /// <summary>
+        /// Post-send WAL verification: polls WeChat's local message shards for up to ~3 seconds to confirm
+        /// that an outgoing reply actually persisted into the target group's Msg_&lt;md5&gt; table.
+        /// </summary>
+        public async Task<(bool Confirmed, string Detail)> VerifyGroupOutgoingMessageDeliveredAsync(
+            string groupKey,
+            string expectedReplyText,
+            DateTimeOffset sentWindowStartUtc,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(groupKey) || string.IsNullOrWhiteSpace(expectedReplyText))
+            {
+                return (false, "缺少群标识或发送正文，无法进行落库确权");
+            }
+
+            long minUnix = Math.Max(0, sentWindowStartUtc.ToUnixTimeSeconds() - 15);
+            int[] delaysMs = [650, 1000, 1350];
+
+            for (int attempt = 0; attempt < delaysMs.Length; attempt++)
+            {
+                try
+                {
+                    await Task.Delay(delaysMs[attempt], ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    return (false, "落库确权已取消");
+                }
+
+                bool acquired = false;
+                try
+                {
+                    acquired = await _syncGate.WaitAsync(TimeSpan.FromSeconds(3), ct);
+                    if (!acquired) continue;
+
+                    var account = ResolveTargetAccount(AppServices.Settings.Current.WeChatSyncAccountDir);
+                    if (account is null) continue;
+
+                    var loaded = await LoadSnapshotUnlockedAsync(account, null, null, ct);
+                    if (!loaded.Success || _activeReader is null) continue;
+
+                    if (_activeReader.HasRecentOutgoingMessageMatching(groupKey, expectedReplyText, minUnix))
+                    {
+                        return (true, $"已通过微信本地 WAL 落库确权（第 {attempt + 1} 次核验命中）");
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    return (false, "落库确权已取消");
+                }
+                catch (Exception ex)
+                {
+                    AppServices.Logs.Warn("AUTO", $"发送落库确权第 {attempt + 1} 次检查异常：{ex.Message}");
+                }
+                finally
+                {
+                    if (acquired) _syncGate.Release();
+                }
+            }
+
+            return (false, "3 秒内未在微信本地 WAL 检测到已发出记录（可能卡在输入框或尚未送达，请留意微信窗口）");
+        }
+
+        /// <summary>
+        /// Resolves up to 2 multimodal data-URI images for a group @mention trigger:
+        /// 1. The exact image referenced by &lt;refermsg&gt;&lt;svrid&gt; (for quote + @me)
+        /// 2. Images sent by the same group member within 60 seconds prior to the @me text.
+        /// </summary>
+        public async Task<List<string>> ResolveGroupAutoReplyImagesAsync(
+            string groupKey,
+            WeChat4Message triggerMsg,
+            IReadOnlyList<WeChat4Message> recentMsgs,
+            CancellationToken ct = default)
+        {
+            var result = new List<string>(2);
+            var reader = _activeReader;
+            if (reader is null || string.IsNullOrWhiteSpace(groupKey)) return result;
+
+            var candidateMsgs = new List<WeChat4Message>(3);
+            var seenExt = new HashSet<string>(StringComparer.Ordinal);
+
+            // 1. Referenced message image (quote + @me)
+            if (!string.IsNullOrWhiteSpace(triggerMsg.ReferencedServerId))
+            {
+                WeChat4Message? refMsg = recentMsgs.FirstOrDefault(m =>
+                    string.Equals(m.ServerId, triggerMsg.ReferencedServerId, StringComparison.Ordinal));
+                refMsg ??= await Task.Run(() => reader.FindMessageByServerId(groupKey, triggerMsg.ReferencedServerId), ct);
+
+                if (refMsg is not null && refMsg.Kind is "image" or "emoji" && seenExt.Add(refMsg.ExternalId))
+                {
+                    candidateMsgs.Add(refMsg);
+                }
+            }
+
+            // 2. Recent images sent by the same member within 60 seconds before the @me text
+            if (!string.IsNullOrWhiteSpace(triggerMsg.SenderWxid) && triggerMsg.CreateTime > 0 && candidateMsgs.Count < 2)
+            {
+                var recentOwnImages = recentMsgs
+                    .Where(m =>
+                        !m.IsOutgoing &&
+                        m.Kind == "image" &&
+                        string.Equals(m.SenderWxid, triggerMsg.SenderWxid, StringComparison.OrdinalIgnoreCase) &&
+                        m.CreateTime > 0 &&
+                        m.CreateTime <= triggerMsg.CreateTime &&
+                        triggerMsg.CreateTime - m.CreateTime <= 60)
+                    .OrderByDescending(m => m.CreateTime)
+                    .Take(2);
+
+                foreach (var imgMsg in recentOwnImages)
+                {
+                    if (candidateMsgs.Count >= 2) break;
+                    if (seenExt.Add(imgMsg.ExternalId))
+                    {
+                        candidateMsgs.Add(imgMsg);
+                    }
+                }
+            }
+
+            foreach (var c in candidateMsgs)
+            {
+                if (result.Count >= 2) break;
+                try
+                {
+                    byte[]? raw = await reader.TryResolveMessageImageBytesAsync(groupKey, c, ct);
+                    if (raw is not { Length: > 0 }) continue;
+                    byte[] compressed = await ChatImageHelper.CompressForStorageAsync(raw, maxEdge: 1024, jpegQuality: 0.78f);
+                    if (compressed.Length is > 0 and <= 2 * 1024 * 1024)
+                    {
+                        string mime = ChatImageHelper.DetectMimeType(compressed);
+                        result.Add($"data:{mime};base64,{Convert.ToBase64String(compressed)}");
+                    }
+                }
+                catch { }
+            }
+
+            return result;
+        }
 
         public string ResolveAccountDisplayName(string? ownerWxid)
         {
@@ -96,6 +286,7 @@ namespace Client.Services.WeChat4Db
             StopAutoSyncTimer();
             _knownAccounts = [];
             _uploadedSelfAvatarWxids.Clear();
+            _liveSessionStates.Clear();
             _lastSyncedSessionTime.Clear();
             _lastSelfProfileSyncUtc = DateTimeOffset.MinValue;
             _lastSelfProfileSyncWxid = string.Empty;
@@ -660,7 +851,8 @@ namespace Client.Services.WeChat4Db
                         Region = f.Region,
                         Phone = f.Phone,
                         Signature = f.Signature,
-                        Source = string.Empty
+                        Source = f.Source,
+                        AddedDate = f.AddedDate
                     }).ToList();
 
                     var res = await AppServices.Backend.SyncWeChatCustomersAsync(payload, ownerWxid, ct);
@@ -706,6 +898,7 @@ namespace Client.Services.WeChat4Db
                         MyNickname = g.MyNickname,
                         MemberCount = g.MemberCount,
                         MembersText = string.Join("、", g.Members.Take(60).Select(m => m.DisplayName).Where(n => !string.IsNullOrWhiteSpace(n))),
+                        Announcement = g.Announcement,
                         Members = g.Members.Select(m => new WeChatSyncGroupMemberPayload
                         {
                             NativeId = m.Username,
@@ -780,10 +973,13 @@ namespace Client.Services.WeChat4Db
                                 GroupKey = g.Username,
                                 GroupName = g.GroupName,
                                 MyNickname = g.MyNickname,
+                                GroupAnnouncement = g.Announcement,
+                                SessionDraft = g.Draft,
                                 SelfNickname = reader.SelfContact?.NickName ?? string.Empty,
                                 SelfAlias = reader.SelfContact?.Alias ?? string.Empty,
                                 IsBackgroundAuto = isBackgroundAuto,
-                                NewMessages = newlyUploaded
+                                NewMessages = newlyUploaded,
+                                AllRecentSessionMessages = msgs
                             });
                         }
                         catch (Exception ex)
@@ -829,6 +1025,45 @@ namespace Client.Services.WeChat4Db
                     await UploadAndSyncMessagesBatchAsync(
                         reader, f.Username, msgs, isGroup: false, targetId: custId,
                         syncImages: options.SyncChatImages, report: report, ct: ct);
+
+                    // Backfill customer AddedDate / Source from friend_added or friend_request events when missing
+                    if (string.IsNullOrWhiteSpace(f.AddedDate) || string.IsNullOrWhiteSpace(f.Source))
+                    {
+                        var addedEvent = msgs.FirstOrDefault(m => m.Kind is "friend_added" or "friend_request");
+                        if (addedEvent is not null)
+                        {
+                            string detectedDate = addedEvent.CreateTime > 0
+                                ? addedEvent.SentAtUtc.ToLocalTime().ToString("yyyy-MM-dd")
+                                : string.Empty;
+                            string detectedSource = string.Empty;
+                            int srcIdx = addedEvent.Content.IndexOf("来源:", StringComparison.Ordinal);
+                            if (srcIdx >= 0)
+                            {
+                                string tail = addedEvent.Content[(srcIdx + 3)..];
+                                int dot = tail.IndexOf(" · ", StringComparison.Ordinal);
+                                detectedSource = (dot > 0 ? tail[..dot] : tail).Trim();
+                            }
+                            if ((!string.IsNullOrWhiteSpace(detectedDate) && string.IsNullOrWhiteSpace(f.AddedDate)) ||
+                                (!string.IsNullOrWhiteSpace(detectedSource) && string.IsNullOrWhiteSpace(f.Source)))
+                            {
+                                if (string.IsNullOrWhiteSpace(f.AddedDate)) f.AddedDate = detectedDate;
+                                if (string.IsNullOrWhiteSpace(f.Source)) f.Source = detectedSource;
+                                _ = AppServices.Backend.SyncWeChatCustomersAsync([
+                                    new WeChatSyncCustomerPayload
+                                    {
+                                        OwnerWxid = ownerWxid,
+                                        NativeId = f.Username,
+                                        LocalKey = f.Username,
+                                        WechatRemark = f.Remark,
+                                        WechatName = f.NickName,
+                                        WechatAccount = f.Alias,
+                                        Source = f.Source,
+                                        AddedDate = f.AddedDate
+                                    }
+                                ], ownerWxid, ct);
+                            }
+                        }
+                    }
 
                     if (f.LastMessageTime > 0)
                     {
@@ -1574,6 +1809,8 @@ namespace Client.Services.WeChat4Db
             _activeReader = newReader;
             _activeDecryptedDir = newDir;
             _activeAccount = account;
+
+            PublishLiveSessionStates(newReader);
 
             AppServices.Settings.Current.WeChatSyncAccountDir = account.AccountPath;
             AppServices.Settings.Save();

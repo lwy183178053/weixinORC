@@ -16,8 +16,11 @@ type Group struct {
 	AvatarURL        string `json:"avatar_url"`
 	MemberCount      int    `json:"member_count"`
 	MembersText      string `json:"members_text"`
+	Announcement     string `json:"announcement"`
 	Note             string `json:"note"`
 	AutoReplyEnabled bool   `json:"auto_reply_enabled"`
+	WelcomeEnabled   bool   `json:"welcome_enabled"`
+	WelcomeTemplate  string `json:"welcome_template"`
 	LastMessage      string `json:"last_message"`
 	LastMessageAt    string `json:"last_message_at"`
 	CreatedAt        string `json:"created_at"`
@@ -31,8 +34,11 @@ type GroupInput struct {
 	MyNickname       string
 	MemberCount      int
 	MembersText      string
+	Announcement     string
 	Note             string
 	AutoReplyEnabled bool
+	WelcomeEnabled   bool
+	WelcomeTemplate  string
 }
 
 type GroupPatch struct {
@@ -42,8 +48,11 @@ type GroupPatch struct {
 	MyNickname       *string
 	MemberCount      *int
 	MembersText      *string
+	Announcement     *string
 	Note             *string
 	AutoReplyEnabled *bool
+	WelcomeEnabled   *bool
+	WelcomeTemplate  *string
 }
 
 type GroupMessage struct {
@@ -73,10 +82,14 @@ func (s *Store) CreateGroup(ctx context.Context, ownerID string, input GroupInpu
 	if input.AutoReplyEnabled {
 		autoReplyInt = 1
 	}
+	welcomeInt := 0
+	if input.WelcomeEnabled {
+		welcomeInt = 1
+	}
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO groups (owner_id, owner_wxid, group_name, group_key, my_nickname, member_count, members_text, note, auto_reply_enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ownerID, input.OwnerWxid, input.GroupName, input.GroupKey, input.MyNickname, input.MemberCount, input.MembersText, input.Note, autoReplyInt, now, now,
+		INSERT INTO groups (owner_id, owner_wxid, group_name, group_key, my_nickname, member_count, members_text, announcement, note, auto_reply_enabled, welcome_enabled, welcome_template, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ownerID, input.OwnerWxid, input.GroupName, input.GroupKey, input.MyNickname, input.MemberCount, input.MembersText, input.Announcement, input.Note, autoReplyInt, welcomeInt, input.WelcomeTemplate, now, now,
 	)
 	if err != nil {
 		return Group{}, err
@@ -95,15 +108,18 @@ func (s *Store) CreateGroup(ctx context.Context, ownerID string, input GroupInpu
 		MyNickname:       input.MyNickname,
 		MemberCount:      input.MemberCount,
 		MembersText:      input.MembersText,
+		Announcement:     input.Announcement,
 		Note:             input.Note,
 		AutoReplyEnabled: input.AutoReplyEnabled,
+		WelcomeEnabled:   input.WelcomeEnabled,
+		WelcomeTemplate:  input.WelcomeTemplate,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}, nil
 }
 
 const groupSelectCols = `
-	g.id, g.owner_wxid, g.group_name, g.group_key, g.my_nickname, g.avatar_url, g.member_count, g.members_text, g.note, g.auto_reply_enabled,
+	g.id, g.owner_wxid, g.group_name, g.group_key, g.my_nickname, g.avatar_url, g.member_count, g.members_text, g.announcement, g.note, g.auto_reply_enabled, g.welcome_enabled, g.welcome_template,
 	COALESCE((SELECT CASE WHEN m.content <> '' THEN m.content WHEN m.image_url <> '' THEN '[图片]' ELSE '' END FROM group_messages m WHERE m.owner_id = g.owner_id AND m.group_id = g.id ORDER BY m.sent_at DESC, m.id DESC LIMIT 1), ''),
 	COALESCE((SELECT m.sent_at FROM group_messages m WHERE m.owner_id = g.owner_id AND m.group_id = g.id ORDER BY m.sent_at DESC, m.id DESC LIMIT 1), ''),
 	g.created_at, g.updated_at`
@@ -111,11 +127,13 @@ const groupSelectCols = `
 func scanGroup(scanner rowScanner) (Group, error) {
 	var g Group
 	var autoReplyInt int
+	var welcomeInt int
 	err := scanner.Scan(
-		&g.ID, &g.OwnerWxid, &g.GroupName, &g.GroupKey, &g.MyNickname, &g.AvatarURL, &g.MemberCount, &g.MembersText, &g.Note, &autoReplyInt,
+		&g.ID, &g.OwnerWxid, &g.GroupName, &g.GroupKey, &g.MyNickname, &g.AvatarURL, &g.MemberCount, &g.MembersText, &g.Announcement, &g.Note, &autoReplyInt, &welcomeInt, &g.WelcomeTemplate,
 		&g.LastMessage, &g.LastMessageAt, &g.CreatedAt, &g.UpdatedAt,
 	)
 	g.AutoReplyEnabled = autoReplyInt != 0
+	g.WelcomeEnabled = welcomeInt != 0
 	return g, err
 }
 
@@ -147,6 +165,14 @@ func (s *Store) UpdateGroup(ctx context.Context, ownerID string, id int64, patch
 			autoReplyArg = 0
 		}
 	}
+	var welcomeArg any
+	if patch.WelcomeEnabled != nil {
+		if *patch.WelcomeEnabled {
+			welcomeArg = 1
+		} else {
+			welcomeArg = 0
+		}
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE groups
 		SET owner_wxid         = COALESCE(?, owner_wxid),
@@ -155,11 +181,14 @@ func (s *Store) UpdateGroup(ctx context.Context, ownerID string, id int64, patch
 		    my_nickname        = COALESCE(?, my_nickname),
 		    member_count       = COALESCE(?, member_count),
 		    members_text       = COALESCE(?, members_text),
+		    announcement       = COALESCE(?, announcement),
 		    note               = COALESCE(?, note),
 		    auto_reply_enabled = COALESCE(?, auto_reply_enabled),
+		    welcome_enabled    = COALESCE(?, welcome_enabled),
+		    welcome_template   = COALESCE(?, welcome_template),
 		    updated_at         = ?
 		WHERE owner_id = ? AND id = ?`,
-		patch.OwnerWxid, patch.GroupName, patch.GroupKey, patch.MyNickname, patch.MemberCount, patch.MembersText, patch.Note, autoReplyArg, now, ownerID, id,
+		patch.OwnerWxid, patch.GroupName, patch.GroupKey, patch.MyNickname, patch.MemberCount, patch.MembersText, patch.Announcement, patch.Note, autoReplyArg, welcomeArg, patch.WelcomeTemplate, now, ownerID, id,
 	)
 	if err != nil {
 		return Group{}, err

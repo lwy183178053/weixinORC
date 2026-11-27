@@ -73,6 +73,9 @@ namespace Client.Models
     public sealed class CustomerDto : INotifyPropertyChanged
     {
         private ImageSource? _avatarImage;
+        private int _unreadCount;
+        private bool _isPinned;
+        private bool _isHidden;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -163,6 +166,61 @@ namespace Client.Models
 
         [JsonIgnore]
         public Visibility AvatarInitialVisibility => _avatarImage is null ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public int UnreadCount
+        {
+            get => _unreadCount;
+            set
+            {
+                int clean = Math.Max(0, value);
+                if (_unreadCount != clean)
+                {
+                    _unreadCount = clean;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(UnreadBadgeText));
+                    OnPropertyChanged(nameof(UnreadBadgeVisibility));
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public string UnreadBadgeText => _unreadCount > 99 ? "99+" : _unreadCount.ToString();
+
+        [JsonIgnore]
+        public Visibility UnreadBadgeVisibility => _unreadCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public bool IsPinned
+        {
+            get => _isPinned;
+            set
+            {
+                if (_isPinned != value)
+                {
+                    _isPinned = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(PinnedBadgeVisibility));
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public Visibility PinnedBadgeVisibility => _isPinned ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public bool IsHidden
+        {
+            get => _isHidden;
+            set
+            {
+                if (_isHidden != value)
+                {
+                    _isHidden = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
 
         public string DisplayName => !string.IsNullOrWhiteSpace(WechatRemark)
             ? WechatRemark.Replace("\r", " ").Replace("\n", " ").Trim()
@@ -341,6 +399,10 @@ namespace Client.Models
         private bool _isChecked;
         private bool _isSelectedRow;
         private bool _autoReplyEnabled;
+        private bool _welcomeEnabled;
+        private int _unreadCount;
+        private bool _isPinned;
+        private bool _isHidden;
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -368,6 +430,9 @@ namespace Client.Models
         [JsonPropertyName("members_text")]
         public string MembersText { get; set; } = string.Empty;
 
+        [JsonPropertyName("announcement")]
+        public string Announcement { get; set; } = string.Empty;
+
         [JsonPropertyName("note")]
         public string Note { get; set; } = string.Empty;
 
@@ -388,6 +453,82 @@ namespace Client.Models
 
         [JsonIgnore]
         public Visibility AutoReplyBadgeVisibility => _autoReplyEnabled ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonPropertyName("welcome_enabled")]
+        public bool WelcomeEnabled
+        {
+            get => _welcomeEnabled;
+            set
+            {
+                if (_welcomeEnabled != value)
+                {
+                    _welcomeEnabled = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(WelcomeBadgeVisibility));
+                }
+            }
+        }
+
+        [JsonPropertyName("welcome_template")]
+        public string WelcomeTemplate { get; set; } = string.Empty;
+
+        [JsonIgnore]
+        public Visibility WelcomeBadgeVisibility => _welcomeEnabled ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public int UnreadCount
+        {
+            get => _unreadCount;
+            set
+            {
+                int clean = Math.Max(0, value);
+                if (_unreadCount != clean)
+                {
+                    _unreadCount = clean;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(UnreadBadgeText));
+                    OnPropertyChanged(nameof(UnreadBadgeVisibility));
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public string UnreadBadgeText => _unreadCount > 99 ? "99+" : _unreadCount.ToString();
+
+        [JsonIgnore]
+        public Visibility UnreadBadgeVisibility => _unreadCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public bool IsPinned
+        {
+            get => _isPinned;
+            set
+            {
+                if (_isPinned != value)
+                {
+                    _isPinned = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(PinnedBadgeVisibility));
+                }
+            }
+        }
+
+        [JsonIgnore]
+        public Visibility PinnedBadgeVisibility => _isPinned ? Visibility.Visible : Visibility.Collapsed;
+
+        [JsonIgnore]
+        public bool IsHidden
+        {
+            get => _isHidden;
+            set
+            {
+                if (_isHidden != value)
+                {
+                    _isHidden = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
 
         [JsonPropertyName("last_message")]
         public string LastMessage { get; set; } = string.Empty;
@@ -534,8 +675,20 @@ namespace Client.Models
         [JsonPropertyName("members_text")]
         public string MembersText { get; set; } = string.Empty;
 
+        [JsonPropertyName("announcement")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Announcement { get; set; }
+
         [JsonPropertyName("note")]
         public string Note { get; set; } = string.Empty;
+
+        [JsonPropertyName("welcome_enabled")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? WelcomeEnabled { get; set; }
+
+        [JsonPropertyName("welcome_template")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? WelcomeTemplate { get; set; }
     }
 
     public sealed class GroupMemberDto : INotifyPropertyChanged
@@ -948,6 +1101,9 @@ namespace Client.Models
 
         [JsonPropertyName("source")]
         public string Source { get; set; } = string.Empty;
+
+        [JsonPropertyName("added_date")]
+        public string AddedDate { get; set; } = string.Empty;
     }
 
     public sealed class WeChatSyncCustomerResultDto
@@ -1029,6 +1185,9 @@ namespace Client.Models
 
         [JsonPropertyName("members_text")]
         public string MembersText { get; set; } = string.Empty;
+
+        [JsonPropertyName("announcement")]
+        public string Announcement { get; set; } = string.Empty;
 
         [JsonPropertyName("members")]
         public List<WeChatSyncGroupMemberPayload> Members { get; set; } = [];

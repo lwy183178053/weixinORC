@@ -122,11 +122,14 @@ namespace Client.Pages
             AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted -= OnWeChatSyncCompleted;
             AppServices.WeChat4Sync.AccountsUpdated -= OnWeChatAccountsUpdated;
+            AppServices.WeChat4Sync.SessionStatesUpdated -= OnWeChatSessionStatesUpdated;
             AppServices.Settings.ThemeChanged += OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted += OnWeChatSyncCompleted;
             AppServices.WeChat4Sync.AccountsUpdated += OnWeChatAccountsUpdated;
+            AppServices.WeChat4Sync.SessionStatesUpdated += OnWeChatSessionStatesUpdated;
             UpdateRightTabVisuals();
             UpdateDirectionToggleVisuals();
+            ApplyLiveSessionStatesToCustomers();
             if (AppServices.WeChat4Sync.KnownAccounts.Count == 0 && AppServices.Backend.IsAuthenticated)
             {
                 _ = AppServices.WeChat4Sync.RefreshMonitoredCountsAsync();
@@ -139,12 +142,63 @@ namespace Client.Pages
             AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted -= OnWeChatSyncCompleted;
             AppServices.WeChat4Sync.AccountsUpdated -= OnWeChatAccountsUpdated;
+            AppServices.WeChat4Sync.SessionStatesUpdated -= OnWeChatSessionStatesUpdated;
             _avatarHydrationCts?.Cancel();
             _avatarHydrationCts?.Dispose();
             _avatarHydrationCts = null;
             _chatImageHydrationCts?.Cancel();
             _chatImageHydrationCts?.Dispose();
             _chatImageHydrationCts = null;
+        }
+
+        private void OnWeChatSessionStatesUpdated()
+        {
+            DispatcherQueue.TryEnqueue(ApplyLiveSessionStatesToCustomers);
+        }
+
+        private void ApplyLiveSessionStatesToCustomers()
+        {
+            foreach (var c in _allCustomers)
+            {
+                var st = AppServices.WeChat4Sync.GetSessionState(c.OwnerWxid, c.NativeId);
+                c.UnreadCount = st?.UnreadCount ?? 0;
+                c.IsPinned = st?.IsPinned ?? false;
+                c.IsHidden = st?.IsHidden ?? false;
+            }
+
+            foreach (var row in _customerRows)
+            {
+                if (!row.IsGroupHeader)
+                {
+                    row.NotifySessionStateChanged();
+                }
+            }
+        }
+
+        private async void OpenCustomerInWeChatButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedCustomer is null) return;
+            var target = _selectedCustomer;
+            OpenCustomerInWeChatButton.IsEnabled = false;
+            try
+            {
+                // Prefer unique WeChat alias (微信号) to avoid homonym / emoji collisions in WeChat search
+                string searchKey = !string.IsNullOrWhiteSpace(target.WechatAccount)
+                    ? target.WechatAccount.Trim()
+                    : target.DisplayName;
+                ShowProfileStatus($"正在电脑微信中定位并打开「{target.DisplayName}」...");
+                var executor = new WeChatAutoReplyExecutor();
+                var (ok, msg) = await executor.OpenChatSessionInWeChatAsync(searchKey, target.DisplayName, isGroup: false);
+                ShowProfileStatus(ok ? $"✓ {msg}" : msg, isError: !ok);
+            }
+            catch (Exception ex)
+            {
+                ShowProfileStatus($"打开微信窗口失败：{ex.Message}", isError: true);
+            }
+            finally
+            {
+                OpenCustomerInWeChatButton.IsEnabled = _selectedCustomer is not null;
+            }
         }
 
         private void OnWeChatAccountsUpdated()
@@ -218,6 +272,7 @@ namespace Client.Pages
         {
             UpdateRightTabVisuals();
             UpdateDirectionToggleVisuals();
+            ApplyLiveSessionStatesToCustomers();
         }
 
         protected override async void OnNavigatedTo(NavigationEventArgs e)
@@ -272,6 +327,7 @@ namespace Client.Pages
                 }
 
                 _allCustomers = items;
+                ApplyLiveSessionStatesToCustomers();
                 var validIds = _allCustomers.Select(c => c.Id).ToHashSet();
                 _selectedCustomerIds.RemoveWhere(id => !validIds.Contains(id));
                 ApplyFilter(selectId, forceReloadDetail: !preserveCurrentDetail);
@@ -416,7 +472,10 @@ namespace Client.Pages
             foreach (var group in groups)
             {
                 string tagName = group.Key;
-                var members = group.ToList();
+                var members = group
+                    .OrderByDescending(c => c.IsPinned)
+                    .ThenByDescending(c => c.UnreadCount > 0)
+                    .ToList();
                 bool collapsed = !expandAllForSearch && _collapsedTags.Contains(tagName);
                 bool allInGroupSelected = members.Count > 0 && members.All(m => _selectedCustomerIds.Contains(m.Id));
 
@@ -730,6 +789,7 @@ namespace Client.Pages
 
             SendMessageButton.IsEnabled = hasCustomer;
             UploadChatImageButton.IsEnabled = hasCustomer;
+            OpenCustomerInWeChatButton.IsEnabled = hasCustomer;
             SearchMessagesButton.IsEnabled = hasCustomer;
             EditProfileButton.IsEnabled = hasCustomer;
             DeleteCustomerButton.IsEnabled = hasCustomer;

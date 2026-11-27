@@ -23,8 +23,11 @@ type createGroupRequest struct {
 	MyNickname       string `json:"my_nickname"`
 	MemberCount      int    `json:"member_count"`
 	MembersText      string `json:"members_text"`
+	Announcement     string `json:"announcement"`
 	Note             string `json:"note"`
 	AutoReplyEnabled bool   `json:"auto_reply_enabled"`
+	WelcomeEnabled   bool   `json:"welcome_enabled"`
+	WelcomeTemplate  string `json:"welcome_template"`
 }
 
 type patchGroupRequest struct {
@@ -34,8 +37,11 @@ type patchGroupRequest struct {
 	MyNickname       *string `json:"my_nickname"`
 	MemberCount      *int    `json:"member_count"`
 	MembersText      *string `json:"members_text"`
+	Announcement     *string `json:"announcement"`
 	Note             *string `json:"note"`
 	AutoReplyEnabled *bool   `json:"auto_reply_enabled"`
+	WelcomeEnabled   *bool   `json:"welcome_enabled"`
+	WelcomeTemplate  *string `json:"welcome_template"`
 }
 
 type createGroupMessageRequest struct {
@@ -84,7 +90,7 @@ func (s *server) createGroup(c *gin.Context) {
 		req.MemberCount = 0
 	}
 	if !validText(req.OwnerWxid, 128) || !validText(req.GroupName, 128) || !validText(req.GroupKey, 128) || !validText(req.MyNickname, 128) ||
-		!validText(req.MembersText, 4000) || !validText(req.Note, 2000) {
+		!validText(req.MembersText, 4000) || !validText(req.Announcement, 4000) || !validText(req.Note, 2000) || !validText(req.WelcomeTemplate, 1000) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "field_too_long"})
 		return
 	}
@@ -97,8 +103,11 @@ func (s *server) createGroup(c *gin.Context) {
 		MyNickname:       req.MyNickname,
 		MemberCount:      req.MemberCount,
 		MembersText:      req.MembersText,
+		Announcement:     req.Announcement,
 		Note:             req.Note,
 		AutoReplyEnabled: req.AutoReplyEnabled,
+		WelcomeEnabled:   req.WelcomeEnabled,
+		WelcomeTemplate:  req.WelcomeTemplate,
 	})
 	if err != nil {
 		writeStoreErr(c, err)
@@ -130,13 +139,15 @@ func (s *server) updateGroup(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	if req.OwnerWxid == nil && req.GroupName == nil && req.GroupKey == nil && req.MyNickname == nil && req.MemberCount == nil && req.MembersText == nil && req.Note == nil && req.AutoReplyEnabled == nil {
+	if req.OwnerWxid == nil && req.GroupName == nil && req.GroupKey == nil && req.MyNickname == nil && req.MemberCount == nil && req.MembersText == nil && req.Announcement == nil && req.Note == nil && req.AutoReplyEnabled == nil && req.WelcomeEnabled == nil && req.WelcomeTemplate == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "empty_patch"})
 		return
 	}
 	if !trimAndCheck(&req.OwnerWxid, 128) || !trimAndCheck(&req.GroupName, 128) || !trimAndCheck(&req.GroupKey, 128) || !trimAndCheck(&req.MyNickname, 128) ||
 		(req.MembersText != nil && !validText(*req.MembersText, 4000)) ||
-		(req.Note != nil && !validText(*req.Note, 2000)) {
+		(req.Announcement != nil && !validText(*req.Announcement, 4000)) ||
+		(req.Note != nil && !validText(*req.Note, 2000)) ||
+		(req.WelcomeTemplate != nil && !validText(*req.WelcomeTemplate, 1000)) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "field_too_long"})
 		return
 	}
@@ -157,8 +168,11 @@ func (s *server) updateGroup(c *gin.Context) {
 		MyNickname:       req.MyNickname,
 		MemberCount:      req.MemberCount,
 		MembersText:      req.MembersText,
+		Announcement:     req.Announcement,
 		Note:             req.Note,
 		AutoReplyEnabled: req.AutoReplyEnabled,
+		WelcomeEnabled:   req.WelcomeEnabled,
+		WelcomeTemplate:  req.WelcomeTemplate,
 	})
 	if err != nil {
 		writeStoreErr(c, err)

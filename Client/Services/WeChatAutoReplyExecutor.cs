@@ -9,6 +9,7 @@ namespace Client.Services
         public bool Success { get; init; }
         public bool WasSent { get; init; }
         public bool WasCancelledByEsc { get; init; }
+        public bool WasSkippedByDraft { get; init; }
         public string Message { get; init; } = string.Empty;
         public long ElapsedMs { get; init; }
         public PreparedGroupSession? Session { get; init; }
@@ -388,6 +389,7 @@ namespace Client.Services
             string replyText,
             AutoReplyConfigData config,
             bool? overrideAutoSend = null,
+            string? groupKey = null,
             CancellationToken ct = default)
         {
             var sw = Stopwatch.StartNew();
@@ -404,6 +406,27 @@ namespace Client.Services
             }
 
             bool autoSend = overrideAutoSend ?? config.AutoSendAfterPaste;
+
+            // Draft collision guard: if the employee currently has an unsent draft in WeChat's SessionTable
+            // for this target group, never overwrite or accidentally send their half-typed text!
+            if (!string.IsNullOrWhiteSpace(groupKey))
+            {
+                string liveDraft = AppServices.WeChat4Sync.GetSessionDraft(null, groupKey);
+                if (!string.IsNullOrWhiteSpace(liveDraft))
+                {
+                    sw.Stop();
+                    string msg = $"检测到你在微信群「{cleanGroup}」输入框中存在未发送草稿，为防覆盖/误发已安全跳过本次自动写入。";
+                    AppServices.Logs.Warn("AUTO", msg);
+                    return new AutoReplyAutomationResult
+                    {
+                        Success = false,
+                        WasSent = false,
+                        WasSkippedByDraft = true,
+                        Message = msg,
+                        ElapsedMs = sw.ElapsedMilliseconds
+                    };
+                }
+            }
             int slowPad = config.SlowStableMode ? 260 : 0;
             bool prevOverlayEnabled = ClickVisualOverlay.IsEnabled;
             ClickVisualOverlay.IsEnabled = config.ShowClickOverlay;
@@ -604,8 +627,245 @@ namespace Client.Services
             string replyText,
             AutoReplyConfigData config,
             bool? overrideAutoSend = null,
+            string? groupKey = null,
             CancellationToken ct = default) =>
-            DeliverPreparedReplyAsync(null, groupName, replyText, config, overrideAutoSend, ct);
+            DeliverPreparedReplyAsync(null, groupName, replyText, config, overrideAutoSend, groupKey, ct);
+
+        /// <summary>
+        /// Opens a specific customer (private chat) or group chat directly inside the running desktop WeChat window.
+        /// For private chats, prefers searching by unique WeChat alias (微信号) to avoid homonym/emoji collisions,
+        /// then clicks the matching result in the "联系人" section; for groups, reuses the battle-tested group switcher.
+        /// </summary>
+        public async Task<(bool Success, string Message)> OpenChatSessionInWeChatAsync(
+            string searchKey,
+            string expectedDisplayName,
+            bool isGroup,
+            CancellationToken ct = default)
+        {
+            var cfg = AppServices.GroupAutoReply.Config;
+            string cleanKey = (searchKey ?? string.Empty).Trim();
+            string cleanTitle = string.IsNullOrWhiteSpace(expectedDisplayName) ? cleanKey : expectedDisplayName.Trim();
+            if (string.IsNullOrWhiteSpace(cleanKey))
+            {
+                return (false, "缺少可用于定位的微信号或名称。");
+            }
+
+            if (isGroup)
+            {
+                var prep = await PrepareGroupChatAsync(cleanTitle, cfg, ct);
+                return (prep.Success, prep.Message);
+            }
+
+            if (!AppServices.Ocr.RapidEngine.IsAvailable)
+            {
+                return (false, $"本地图文识别组件不可用：{AppServices.Ocr.RapidEngine.AvailabilityNote}");
+            }
+
+            int slowPad = cfg.SlowStableMode ? 240 : 0;
+            bool prevOverlay = ClickVisualOverlay.IsEnabled;
+            ClickVisualOverlay.IsEnabled = cfg.ShowClickOverlay;
+            string? savedClipboard = cfg.RestoreClipboardAfterSend
+                ? Win32WindowHelper.TryGetClipboardUnicodeText()
+                : null;
+            bool touchedClipboard = false;
+
+            try
+            {
+                var (readyOk, hwnd, rawRect, scale, readyErr) = await EnsureWeChatWindowReadyAsync(slowPad, ct);
+                if (!readyOk) return (false, readyErr);
+
+                var topCapture = await CaptureTopBarRoiAsync(hwnd, rawRect, "跳转私聊顶部快检", ct);
+                if (topCapture is null) return (false, "截取微信顶部栏失败，请确认微信窗口未最小化。");
+
+                var (topOcr, topRect) = topCapture.Value;
+                var (alreadyOpen, detectedHeader) = VerifyOpenedChatTitle(topOcr, cleanTitle);
+                bool searchIdle = HasIdleSearchPlaceholder(topOcr);
+                if (alreadyOpen && searchIdle)
+                {
+                    return (true, $"微信已处于「{detectedHeader}」聊天窗口。");
+                }
+
+                if (!searchIdle)
+                {
+                    Win32WindowHelper.SendVirtualKey(Win32WindowHelper.VK_ESCAPE);
+                    await Task.Delay(170 + slowPad, ct);
+                    var cleanTop = await CaptureTopBarRoiAsync(hwnd, rawRect, "清理搜索框后定位", ct);
+                    if (cleanTop is not null) (topOcr, topRect) = cleanTop.Value;
+                }
+
+                var (searchX, searchY, searchBottomY) = LocateSearchBarInTopBar(topOcr, topRect, rawRect, scale);
+
+                // Try precise alias first, then fall back to display title if different
+                var keysToTry = new List<string>(2) { cleanKey };
+                if (!cleanTitle.Equals(cleanKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    keysToTry.Add(cleanTitle);
+                }
+
+                foreach (string query in keysToTry)
+                {
+                    if (Win32WindowHelper.IsEscapePressed()) return (false, "已按 ESC 取消跳转。");
+
+                    AppServices.Logs.Info("AUTO", $"正在微信中精准定位好友：搜索「{query}」（目标显示名=「{cleanTitle}」）");
+                    Win32WindowHelper.LeftClickAt(searchX, searchY, hwnd, "点击微信搜索栏(跳转好友)");
+                    await Task.Delay(120 + slowPad, ct);
+
+                    touchedClipboard = true;
+                    await InputSearchKeywordAsync(query, ct);
+
+                    var (dropOcr, dropRect, matched) = await WaitForContactInDropdownAsync(
+                        hwnd, rawRect, query, cleanTitle, searchBottomY, slowPad, ct);
+
+                    if (dropOcr is null || matched is null)
+                    {
+                        Win32WindowHelper.SendVirtualKey(Win32WindowHelper.VK_ESCAPE);
+                        await Task.Delay(200 + slowPad, ct);
+                        continue;
+                    }
+
+                    double cx = matched.Bounds.X + matched.Bounds.Width * 0.5;
+                    double cy = matched.Bounds.Y + matched.Bounds.Height * 0.5;
+                    var (clickX, clickY) = ImageToScreen(dropRect, dropOcr, cx, cy);
+                    Win32WindowHelper.LeftClickAt(clickX, clickY, hwnd, $"点击联系人「{cleanTitle}」", skipReactivate: true);
+                    await Task.Delay(280 + slowPad, ct);
+
+                    var verify = await CaptureTopBarRoiAsync(hwnd, rawRect, "核验打开好友窗口", ct);
+                    if (verify is not null)
+                    {
+                        var (okTitle, header) = VerifyOpenedChatTitle(verify.Value.Ocr, cleanTitle);
+                        if (okTitle || HasIdleSearchPlaceholder(verify.Value.Ocr))
+                        {
+                            AppServices.Logs.Success("AUTO", $"已在微信中打开「{cleanTitle}」（搜索键=「{query}」，窗口标题=「{header}」）。");
+                            return (true, $"已在微信中打开「{(okTitle ? header : cleanTitle)}」。");
+                        }
+                    }
+
+                    // One Enter fallback if dropdown remained selected
+                    Win32WindowHelper.SendVirtualKey(Win32WindowHelper.VK_RETURN);
+                    await Task.Delay(260 + slowPad, ct);
+                    return (true, $"已尝试在微信中切换至「{cleanTitle}」。");
+                }
+
+                Win32WindowHelper.SendVirtualKey(Win32WindowHelper.VK_ESCAPE);
+                return (false, $"未在微信联系人搜索结果中找到「{cleanTitle}」（请确认该好友在当前登录的微信账号通讯录中）。");
+            }
+            catch (OperationCanceledException)
+            {
+                return (false, "已取消打开微信窗口。");
+            }
+            catch (Exception ex)
+            {
+                return (false, $"打开微信聊天窗口异常：{ex.Message}");
+            }
+            finally
+            {
+                ClickVisualOverlay.IsEnabled = prevOverlay;
+                if (touchedClipboard && cfg.RestoreClipboardAfterSend && savedClipboard is not null)
+                {
+                    try { _ = Win32WindowHelper.SetClipboardUnicodeText(savedClipboard); } catch { }
+                }
+            }
+        }
+
+        private static async Task<(OcrRecognitionResult? Ocr, Win32WindowHelper.RECT CropRect, MatchedDropdownLine? Match)> WaitForContactInDropdownAsync(
+            nint hwnd,
+            Win32WindowHelper.RECT rawRect,
+            string searchKey,
+            string expectedTitle,
+            int searchBottomScreenY,
+            int slowPad,
+            CancellationToken ct)
+        {
+            int[] pollDelaysMs = [220, 260, 320, 420];
+            for (int poll = 0; poll < pollDelaysMs.Length; poll++)
+            {
+                await Task.Delay(pollDelaysMs[poll] + slowPad, ct);
+                if (Win32WindowHelper.IsEscapePressed()) return (null, default, null);
+
+                var cap = await CaptureLeftDropdownRoiAsync(hwnd, rawRect, $"定位联系人下拉框({poll + 1}/{pollDelaysMs.Length})", ct);
+                if (cap is null) continue;
+
+                var (ocr, cropRect) = cap.Value;
+                var match = LocateContactInSearchDropdown(ocr, cropRect, searchKey, expectedTitle, searchBottomScreenY);
+                if (match is not null && match.ConfirmedDropdownVisible)
+                {
+                    return (ocr, cropRect, match);
+                }
+            }
+            return (null, default, null);
+        }
+
+        private static MatchedDropdownLine? LocateContactInSearchDropdown(
+            OcrRecognitionResult leftOcr,
+            Win32WindowHelper.RECT cropRect,
+            string searchKey,
+            string expectedTitle,
+            int searchBottomScreenY)
+        {
+            double syRatio = leftOcr.ImageHeight > 0 ? (double)cropRect.Height / leftOcr.ImageHeight : 1.0;
+            double searchBottomLocalY = Math.Max(0, (searchBottomScreenY - cropRect.Top) / syRatio);
+            double minX = leftOcr.ImageWidth * 0.06;
+
+            var dropdownLines = leftOcr.Lines
+                .Where(l => l.Bounds.X >= minX && l.Bounds.Y >= searchBottomLocalY - 2)
+                .OrderBy(l => l.Bounds.Y)
+                .ToList();
+
+            var contactHeader = dropdownLines.FirstOrDefault(l =>
+            {
+                string t = l.Text.Trim();
+                return t == "联系人" || (t.StartsWith("联系人", StringComparison.Ordinal) && t.Length <= 5);
+            });
+
+            string[] stopHeaders = ["群聊", "聊天记录", "搜索网络结果", "公众号", "服务号", "视频号", "功能", "文章", "搜一搜", "小程序", "朋友圈"];
+            var otherHeaders = dropdownLines
+                .Where(l => stopHeaders.Any(h => l.Text.Trim().StartsWith(h, StringComparison.Ordinal)))
+                .OrderBy(l => l.Bounds.Y)
+                .ToList();
+
+            bool dropdownVisible = contactHeader is not null || otherHeaders.Count > 0;
+            if (!dropdownVisible) return null;
+
+            double bandTop;
+            double bandBottom;
+            if (contactHeader is not null)
+            {
+                bandTop = contactHeader.Bounds.Y + contactHeader.Bounds.Height * 0.6;
+                var nextHeader = otherHeaders.FirstOrDefault(h => h.Bounds.Y > contactHeader.Bounds.Y + 6);
+                bandBottom = nextHeader is not null ? nextHeader.Bounds.Y - 4 : leftOcr.ImageHeight * 0.90;
+            }
+            else
+            {
+                bandTop = searchBottomLocalY + 4;
+                var firstBad = otherHeaders.FirstOrDefault();
+                bandBottom = firstBad is not null ? firstBad.Bounds.Y - 4 : leftOcr.ImageHeight * 0.65;
+            }
+
+            string titleNorm = NormalizeGroupTitle(expectedTitle);
+            string keyNorm = NormalizeGroupTitle(searchKey);
+            var scored = new List<MatchedDropdownLine>();
+
+            foreach (var line in dropdownLines)
+            {
+                double cy = line.Bounds.Y + line.Bounds.Height * 0.5;
+                if (cy < bandTop || cy > bandBottom) continue;
+
+                string txt = line.Text.Trim();
+                if (string.IsNullOrWhiteSpace(txt) || txt == "联系人" || txt == "最常使用") continue;
+                if (stopHeaders.Any(h => txt.StartsWith(h, StringComparison.Ordinal))) continue;
+
+                string norm = NormalizeGroupTitle(txt.Replace("微信号:", "").Replace("微信号：", "").Replace("昵称:", "").Replace("昵称：", ""));
+                double s1 = ComputeGroupNameSimilarity(titleNorm, norm);
+                double s2 = ComputeGroupNameSimilarity(keyNorm, norm);
+                double best = Math.Max(s1, s2);
+                if (best >= 0.52)
+                {
+                    scored.Add(new MatchedDropdownLine(txt, line.Bounds, best, ConfirmedDropdownVisible: true, InsideGroupSection: contactHeader is not null));
+                }
+            }
+
+            return scored.OrderByDescending(x => x.Score).ThenBy(x => x.Bounds.Y).FirstOrDefault();
+        }
 
         private static async Task<(bool Ok, nint Hwnd, Win32WindowHelper.RECT Rect, double Scale, string Error)> EnsureWeChatWindowReadyAsync(
             int slowPad,

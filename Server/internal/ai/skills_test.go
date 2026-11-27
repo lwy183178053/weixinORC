@@ -174,3 +174,108 @@ func TestChatLookupSkills(t *testing.T) {
 		t.Fatalf("web_search failed: ok=%v raw=%s", ok, raw)
 	}
 }
+
+func TestGroupAutoReplyAnnouncementAndMultimodalFallback(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "multimodal.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	owner := "emp-mm"
+
+	// 1. Sync group with announcement and update welcome settings
+	grpRes, _, _, err := st.SyncWeChatGroups(ctx, owner, []store.WeChatSyncGroupItem{
+		{
+			GroupKey:     "mm999@chatroom",
+			GroupName:    "智美VIP答疑群",
+			MemberCount:  12,
+			Announcement: "本群服务时间每日9:00-21:00，本月超光子体验价680元。",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grpID := grpRes[0].ID
+
+	welcomeOn := true
+	welcomeTpl := "欢迎 {新人昵称} 加入 {群名}！"
+	updatedGrp, err := st.UpdateGroup(ctx, owner, grpID, store.GroupPatch{
+		WelcomeEnabled:  &welcomeOn,
+		WelcomeTemplate: &welcomeTpl,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updatedGrp.WelcomeEnabled || updatedGrp.WelcomeTemplate != welcomeTpl || !strings.Contains(updatedGrp.Announcement, "680元") {
+		t.Fatalf("unexpected updated group: %+v", updatedGrp)
+	}
+
+	// 2. Mock OpenAI server that rejects image_url on first attempt (simulating text-only model)
+	//    and verifies announcement injection + text-only fallback retry.
+	var calls int
+	var sawImageURL bool
+	var sawAnnouncement bool
+	mockAI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var req struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		for _, m := range req.Messages {
+			raw := string(m.Content)
+			if strings.Contains(raw, "本月超光子体验价680元") {
+				sawAnnouncement = true
+			}
+			if strings.Contains(raw, `"image_url"`) {
+				sawImageURL = true
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"message":"This model does not support image_url input"}}`))
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"您好，本月超光子体验价是680元，服务时间为每日9:00-21:00。"}}]}`))
+	}))
+	defer mockAI.Close()
+
+	_, err = st.SaveAISettings(ctx, store.AISettingsUpdate{
+		Enabled: true,
+		BaseURL: mockAI.URL,
+		APIKey:  "sk-test",
+		Model:   "text-only-mock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewService(st)
+	res, err := svc.GroupAutoReply(ctx, owner, GroupAutoReplyInput{
+		GroupID:        grpID,
+		SenderName:     "王小姐",
+		TriggerMessage: "请问这张图里的项目多少钱？",
+		Images:         []string{"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA=="},
+	})
+	if err != nil {
+		t.Fatalf("expected graceful fallback to text-only, got err: %v", err)
+	}
+	if !sawImageURL {
+		t.Fatalf("expected initial request to include multimodal image_url")
+	}
+	if !sawAnnouncement {
+		t.Fatalf("expected group announcement to be injected into system prompt")
+	}
+	if calls != 2 {
+		t.Fatalf("expected 2 calls (multimodal attempt + text-only fallback), got %d", calls)
+	}
+	if !strings.Contains(res.Reply, "680元") {
+		t.Fatalf("unexpected reply: %q", res.Reply)
+	}
+}

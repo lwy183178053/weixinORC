@@ -102,13 +102,16 @@ namespace Client.Pages
             AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted -= OnWeChatSyncCompleted;
             AppServices.WeChat4Sync.AccountsUpdated -= OnWeChatAccountsUpdated;
+            AppServices.WeChat4Sync.SessionStatesUpdated -= OnWeChatSessionStatesUpdated;
             AppServices.GroupAutoReply.GroupAutoReplyToggled -= OnExternalGroupAutoReplyToggled;
             AppServices.Settings.ThemeChanged += OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted += OnWeChatSyncCompleted;
             AppServices.WeChat4Sync.AccountsUpdated += OnWeChatAccountsUpdated;
+            AppServices.WeChat4Sync.SessionStatesUpdated += OnWeChatSessionStatesUpdated;
             AppServices.GroupAutoReply.GroupAutoReplyToggled += OnExternalGroupAutoReplyToggled;
             UpdateRightTabVisuals();
             UpdateDirectionToggleVisuals();
+            ApplyLiveSessionStatesToGroups();
             if (AppServices.WeChat4Sync.KnownAccounts.Count == 0 && AppServices.Backend.IsAuthenticated)
             {
                 _ = AppServices.WeChat4Sync.RefreshMonitoredCountsAsync();
@@ -121,6 +124,7 @@ namespace Client.Pages
             AppServices.Settings.ThemeChanged -= OnSettingsThemeChanged;
             AppServices.WeChat4Sync.SyncCompleted -= OnWeChatSyncCompleted;
             AppServices.WeChat4Sync.AccountsUpdated -= OnWeChatAccountsUpdated;
+            AppServices.WeChat4Sync.SessionStatesUpdated -= OnWeChatSessionStatesUpdated;
             AppServices.GroupAutoReply.GroupAutoReplyToggled -= OnExternalGroupAutoReplyToggled;
             _chatImageHydrationCts?.Cancel();
             _chatImageHydrationCts?.Dispose();
@@ -148,6 +152,44 @@ namespace Client.Pages
                     UpdateAutoReplyToggleVisual(_selectedGroup.AutoReplyEnabled);
                 }
             });
+        }
+
+        private void OnWeChatSessionStatesUpdated()
+        {
+            DispatcherQueue.TryEnqueue(ApplyLiveSessionStatesToGroups);
+        }
+
+        private void ApplyLiveSessionStatesToGroups()
+        {
+            foreach (var g in _allGroups)
+            {
+                var st = AppServices.WeChat4Sync.GetSessionState(g.OwnerWxid, g.GroupKey);
+                g.UnreadCount = st?.UnreadCount ?? 0;
+                g.IsPinned = st?.IsPinned ?? false;
+                g.IsHidden = st?.IsHidden ?? false;
+            }
+        }
+
+        private async void OpenGroupInWeChatButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedGroup is null) return;
+            var target = _selectedGroup;
+            OpenGroupInWeChatButton.IsEnabled = false;
+            try
+            {
+                ShowDetailStatus($"正在电脑微信中定位并打开群聊「{target.DisplayName}」...");
+                var executor = new WeChatAutoReplyExecutor();
+                var (ok, msg) = await executor.OpenChatSessionInWeChatAsync(target.DisplayName, target.DisplayName, isGroup: true);
+                ShowDetailStatus(ok ? $"✓ {msg}" : msg, isError: !ok);
+            }
+            catch (Exception ex)
+            {
+                ShowDetailStatus($"打开微信群聊失败：{ex.Message}", isError: true);
+            }
+            finally
+            {
+                OpenGroupInWeChatButton.IsEnabled = _selectedGroup is not null;
+            }
         }
 
         private void OnWeChatAccountsUpdated()
@@ -223,6 +265,8 @@ namespace Client.Pages
             UpdateRightTabVisuals();
             UpdateDirectionToggleVisuals();
             UpdateAutoReplyToggleVisual(_selectedGroup?.AutoReplyEnabled == true);
+            ApplyLiveSessionStatesToGroups();
+            if (_selectedGroup is not null) UpdateGroupWelcomeSummaryUi(_selectedGroup);
             foreach (var g in _filteredGroups) g.NotifyRowVisualsChanged();
         }
 
@@ -278,6 +322,7 @@ namespace Client.Pages
                 }
 
                 _allGroups = items;
+                ApplyLiveSessionStatesToGroups();
                 AppServices.GroupAutoReply.SyncGroupsSnapshot(_allGroups);
                 var validIds = _allGroups.Select(g => g.Id).ToHashSet();
                 _selectedGroupIds.RemoveWhere(id => !validIds.Contains(id));
@@ -344,12 +389,16 @@ namespace Client.Pages
                     string.Equals(g.OwnerWxid, activeWxid, StringComparison.OrdinalIgnoreCase));
 
             string q = SearchBox.Text.Trim();
-            _filteredGroups = string.IsNullOrEmpty(q)
-                ? baseList.ToList()
+            IEnumerable<GroupDto> filtered = string.IsNullOrEmpty(q)
+                ? baseList
                 : baseList.Where(g =>
                     g.GroupName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                     g.MembersText.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                    g.Note.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+                    g.Note.Contains(q, StringComparison.OrdinalIgnoreCase));
+
+            _filteredGroups = filtered
+                .OrderByDescending(g => g.IsPinned)
+                .ToList();
 
             GroupDto? nextSelected = null;
             if (_filteredGroups.Count > 0)
@@ -532,6 +581,7 @@ namespace Client.Pages
 
             SendMessageButton.IsEnabled = hasGroup;
             UploadChatImageButton.IsEnabled = hasGroup;
+            OpenGroupInWeChatButton.IsEnabled = hasGroup;
             SearchMessagesButton.IsEnabled = hasGroup;
             AutoReplyToggleButton.IsEnabled = hasGroup;
             EditGroupButton.IsEnabled = hasGroup;
@@ -576,6 +626,18 @@ namespace Client.Pages
                 DetailHeaderOwnerWeChatText.Visibility = Visibility.Collapsed;
             }
             ViewMembersText.Text = string.IsNullOrWhiteSpace(g.MembersText) ? "暂无已建档成员，点击顶部「刷新同步」即可拉取群成员。" : g.MembersText;
+
+            if (!string.IsNullOrWhiteSpace(g.Announcement))
+            {
+                ViewGroupAnnouncementText.Text = g.Announcement;
+                ViewAnnouncementCard.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                ViewAnnouncementCard.Visibility = Visibility.Collapsed;
+            }
+
+            UpdateGroupWelcomeSummaryUi(g);
 
             if (string.IsNullOrWhiteSpace(g.Note))
             {
@@ -642,6 +704,221 @@ namespace Client.Pages
             finally
             {
                 AutoReplyToggleButton.IsEnabled = _selectedGroup is not null;
+            }
+        }
+
+        private void UpdateGroupWelcomeSummaryUi(GroupDto g)
+        {
+            string effectiveTpl = string.IsNullOrWhiteSpace(g.WelcomeTemplate)
+                ? GroupAutoReplyService.DefaultWelcomeTemplate
+                : g.WelcomeTemplate.Trim();
+
+            if (g.WelcomeEnabled)
+            {
+                ViewWelcomeStatusText.Text = "已开启";
+                ViewWelcomeStatusText.Foreground = (Brush)Application.Current.Resources["SuccessTextBrush"];
+                ViewWelcomeStatusPill.Background = (Brush)Application.Current.Resources["SuccessBgBrush"];
+                ViewWelcomePreviewText.Text = effectiveTpl;
+                ViewWelcomePreviewText.Foreground = (Brush)Application.Current.Resources["TextSecondaryBrush"];
+
+                EditWelcomeStatusText.Text = "（已开启）";
+                EditWelcomeStatusText.Foreground = (Brush)Application.Current.Resources["SuccessTextBrush"];
+                EditWelcomePreviewText.Text = $"模板：{effectiveTpl}";
+            }
+            else
+            {
+                ViewWelcomeStatusText.Text = "未开启";
+                ViewWelcomeStatusText.Foreground = (Brush)Application.Current.Resources["TextMutedBrush"];
+                ViewWelcomeStatusPill.Background = (Brush)Application.Current.Resources["AppInputBgBrush"];
+                ViewWelcomePreviewText.Text = string.IsNullOrWhiteSpace(g.WelcomeTemplate)
+                    ? "未开启本群新人自动欢迎，点击「配置欢迎语」弹窗设置。"
+                    : $"未开启（已存模板：{g.WelcomeTemplate.Trim()}）";
+                ViewWelcomePreviewText.Foreground = (Brush)Application.Current.Resources["TextMutedBrush"];
+
+                EditWelcomeStatusText.Text = "（未开启）";
+                EditWelcomeStatusText.Foreground = (Brush)Application.Current.Resources["TextMutedBrush"];
+                EditWelcomePreviewText.Text = string.IsNullOrWhiteSpace(g.WelcomeTemplate)
+                    ? "点击右侧按钮在弹窗中配置是否开启本群新人自动欢迎及固定欢迎语内容。"
+                    : $"未开启（已存模板：{g.WelcomeTemplate.Trim()}）";
+            }
+        }
+
+        private async void ConfigureGroupWelcomeButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedGroup is null || !AppServices.TryBeginModalDialog()) return;
+            var target = _selectedGroup;
+
+            try
+            {
+                var enabledToggle = new ToggleSwitch
+                {
+                    Header = "开启本群新人进群自动欢迎",
+                    OnContent = "已开启（检测到新成员进群自动发送）",
+                    OffContent = "未开启",
+                    IsOn = target.WelcomeEnabled
+                };
+
+                var templateBox = new TextBox
+                {
+                    Header = "欢迎语固定模板内容",
+                    PlaceholderText = GroupAutoReplyService.DefaultWelcomeTemplate,
+                    Text = string.IsNullOrWhiteSpace(target.WelcomeTemplate)
+                        ? GroupAutoReplyService.DefaultWelcomeTemplate
+                        : target.WelcomeTemplate,
+                    AcceptsReturn = true,
+                    TextWrapping = TextWrapping.Wrap,
+                    MinHeight = 110,
+                    MaxHeight = 200,
+                    MaxLength = 1000
+                };
+
+                var previewText = new TextBlock
+                {
+                    FontSize = 12,
+                    Foreground = (Brush)Application.Current.Resources["TextSecondaryBrush"],
+                    TextWrapping = TextWrapping.Wrap,
+                    LineHeight = 18
+                };
+
+                void RefreshPreview()
+                {
+                    previewText.Text = GroupAutoReplyService.FormatWelcomeMessage(
+                        templateBox.Text,
+                        target.DisplayName,
+                        new[] { "王小姐" });
+                }
+                templateBox.TextChanged += (_, _) => RefreshPreview();
+                RefreshPreview();
+
+                var insertNickBtn = new Button
+                {
+                    Content = "+ 插入 {新人昵称}",
+                    Height = 26,
+                    Padding = new Thickness(9, 0, 9, 0),
+                    FontSize = 11.5,
+                    Style = (Style)Application.Current.Resources["SecondaryOutlineButtonStyle"]
+                };
+                insertNickBtn.Click += (_, _) =>
+                {
+                    int pos = Math.Clamp(templateBox.SelectionStart, 0, templateBox.Text.Length);
+                    templateBox.Text = templateBox.Text.Insert(pos, "{新人昵称}");
+                    templateBox.SelectionStart = pos + "{新人昵称}".Length;
+                    templateBox.Focus(FocusState.Programmatic);
+                };
+
+                var insertGroupBtn = new Button
+                {
+                    Content = "+ 插入 {群名}",
+                    Height = 26,
+                    Padding = new Thickness(9, 0, 9, 0),
+                    FontSize = 11.5,
+                    Style = (Style)Application.Current.Resources["SecondaryOutlineButtonStyle"]
+                };
+                insertGroupBtn.Click += (_, _) =>
+                {
+                    int pos = Math.Clamp(templateBox.SelectionStart, 0, templateBox.Text.Length);
+                    templateBox.Text = templateBox.Text.Insert(pos, "{群名}");
+                    templateBox.SelectionStart = pos + "{群名}".Length;
+                    templateBox.Focus(FocusState.Programmatic);
+                };
+
+                var resetDefaultBtn = new Button
+                {
+                    Content = "恢复默认模板",
+                    Height = 26,
+                    Padding = new Thickness(9, 0, 9, 0),
+                    FontSize = 11.5,
+                    Style = (Style)Application.Current.Resources["SecondaryOutlineButtonStyle"]
+                };
+                resetDefaultBtn.Click += (_, _) => templateBox.Text = GroupAutoReplyService.DefaultWelcomeTemplate;
+
+                var varBar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+                varBar.Children.Add(insertNickBtn);
+                varBar.Children.Add(insertGroupBtn);
+                varBar.Children.Add(resetDefaultBtn);
+
+                var previewCard = new Border
+                {
+                    Padding = new Thickness(11, 9, 11, 9),
+                    Background = (Brush)Application.Current.Resources["AppCanvasBgBrush"],
+                    BorderBrush = (Brush)Application.Current.Resources["AppBorderBrush"],
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(8),
+                    Child = new StackPanel
+                    {
+                        Spacing = 4,
+                        Children =
+                        {
+                            new TextBlock
+                            {
+                                Text = "发送效果预览（示例：王小姐 刚加入本群）",
+                                FontSize = 11,
+                                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                                Foreground = (Brush)Application.Current.Resources["TextMutedBrush"]
+                            },
+                            previewText
+                        }
+                    }
+                };
+
+                var tipText = new TextBlock
+                {
+                    Text = "说明：仅对应用启动后新加入本群的成员生效；6 秒内连续进群的多位新人会自动合并为一条消息防刷屏，发送受「自动回复」全局总开关与草稿防撞车保护。",
+                    FontSize = 11.5,
+                    Foreground = (Brush)Application.Current.Resources["TextMutedBrush"],
+                    TextWrapping = TextWrapping.Wrap
+                };
+
+                var body = new StackPanel { Spacing = 10, MinWidth = 440 };
+                body.Children.Add(enabledToggle);
+                body.Children.Add(templateBox);
+                body.Children.Add(varBar);
+                body.Children.Add(previewCard);
+                body.Children.Add(tipText);
+
+                var dialog = new ContentDialog
+                {
+                    XamlRoot = XamlRoot,
+                    RequestedTheme = AppServices.Settings.CurrentElementTheme,
+                    Title = $"配置本群新人自动欢迎 · {target.DisplayName}",
+                    Content = body,
+                    PrimaryButtonText = "保存配置",
+                    CloseButtonText = "取消",
+                    DefaultButton = ContentDialogButton.Primary,
+                    PrimaryButtonStyle = (Style)Application.Current.Resources["PrimaryVioletButtonStyle"]
+                };
+
+                var result = await dialog.ShowAsync();
+                if (result != ContentDialogResult.Primary) return;
+
+                string savedTpl = templateBox.Text.Trim();
+                if (enabledToggle.IsOn && string.IsNullOrWhiteSpace(savedTpl))
+                {
+                    savedTpl = GroupAutoReplyService.DefaultWelcomeTemplate;
+                }
+
+                var res = await AppServices.Backend.SetGroupWelcomeAsync(target.Id, enabledToggle.IsOn, savedTpl);
+                if (!res.IsSuccess || res.Data is null)
+                {
+                    ShowDetailStatus($"保存自动欢迎配置失败：{res.ErrorMessage}", isError: true);
+                    return;
+                }
+
+                target.WelcomeEnabled = res.Data.WelcomeEnabled;
+                target.WelcomeTemplate = res.Data.WelcomeTemplate;
+                UpdateGroupWelcomeSummaryUi(target);
+                AppServices.GroupAutoReply.NotifyGroupWelcomeChanged(target);
+                ShowDetailStatus(target.WelcomeEnabled
+                    ? "✓ 已开启并保存本群新人自动欢迎配置。"
+                    : "✓ 已保存本群新人自动欢迎配置（当前关闭）。");
+            }
+            catch (Exception ex)
+            {
+                ShowDetailStatus($"配置本群新人自动欢迎异常：{ex.Message}", isError: true);
+            }
+            finally
+            {
+                AppServices.EndModalDialog();
             }
         }
 

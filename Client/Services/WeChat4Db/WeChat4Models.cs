@@ -25,6 +25,23 @@ namespace Client.Services.WeChat4Db
         public long MemoryKb { get; init; }
     }
 
+    /// <summary>
+    /// Live per-session state from WeChat 4.x session.db (SessionTable):
+    /// unread badge count, pinned/hidden flags, and unsent input draft.
+    /// </summary>
+    public sealed class WeChatSessionState
+    {
+        public string Username { get; init; } = string.Empty;
+        public int UnreadCount { get; init; }
+        public long UnreadFirstMsgSvrId { get; init; }
+        public bool IsHidden { get; init; }
+        public bool IsPinned { get; init; }
+        public string Draft { get; init; } = string.Empty;
+        public string Summary { get; init; } = string.Empty;
+        public long LastTimestamp { get; init; }
+        public long SortTimestamp { get; init; }
+    }
+
     public sealed class WeChat4TagOption : INotifyPropertyChanged
     {
         private bool _isSelected;
@@ -112,6 +129,12 @@ namespace Client.Services.WeChat4Db
         public int EstimatedMessageCount { get; set; }
         public string LastMessageSummary { get; set; } = string.Empty;
         public long LastMessageTime { get; set; }
+        public int UnreadCount { get; set; }
+        public bool IsHidden { get; set; }
+        public bool IsPinned { get; set; }
+        public string Draft { get; set; } = string.Empty;
+        public string Source { get; set; } = string.Empty;
+        public string AddedDate { get; set; } = string.Empty;
 
         public bool IsSelected
         {
@@ -227,6 +250,7 @@ namespace Client.Services.WeChat4Db
         public string Username { get; init; } = string.Empty;
         public string GroupName { get; init; } = string.Empty;
         public string MyNickname { get; init; } = string.Empty;
+        public string Announcement { get; init; } = string.Empty;
         public string AvatarUrl { get; init; } = string.Empty;
         public int MemberCount { get; init; }
         public List<WeChat4GroupMember> Members { get; init; } = [];
@@ -234,6 +258,10 @@ namespace Client.Services.WeChat4Db
         public int EstimatedMessageCount { get; set; }
         public string LastMessageSummary { get; set; } = string.Empty;
         public long LastMessageTime { get; set; }
+        public int UnreadCount { get; set; }
+        public bool IsHidden { get; set; }
+        public bool IsPinned { get; set; }
+        public string Draft { get; set; } = string.Empty;
 
         public bool IsSelected
         {
@@ -318,6 +346,10 @@ namespace Client.Services.WeChat4Db
         public bool IsOutgoing { get; init; }
         public bool MentionedSelf { get; init; }
         public bool MentionedAll { get; init; }
+        public bool IsSystemEvent { get; init; }
+        public string ReferencedServerId { get; init; } = string.Empty;
+        public int ReferencedMsgType { get; init; }
+        public List<string> JoinedMembers { get; init; } = [];
         public string Content { get; init; } = string.Empty;
         public List<string> MediaHints { get; init; } = [];
         public long CreateTime { get; init; }
@@ -333,10 +365,13 @@ namespace Client.Services.WeChat4Db
         public string GroupKey { get; init; } = string.Empty;
         public string GroupName { get; init; } = string.Empty;
         public string MyNickname { get; init; } = string.Empty;
+        public string GroupAnnouncement { get; init; } = string.Empty;
+        public string SessionDraft { get; init; } = string.Empty;
         public string SelfNickname { get; init; } = string.Empty;
         public string SelfAlias { get; init; } = string.Empty;
         public bool IsBackgroundAuto { get; init; }
         public IReadOnlyList<WeChat4Message> NewMessages { get; init; } = [];
+        public IReadOnlyList<WeChat4Message> AllRecentSessionMessages { get; init; } = [];
     }
 
     public sealed class WeChat4SyncOptions

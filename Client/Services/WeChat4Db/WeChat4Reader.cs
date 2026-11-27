@@ -72,6 +72,7 @@ namespace Client.Services.WeChat4Db
         public List<WeChat4Contact> Friends { get; } = [];
         public List<WeChat4Group> Groups { get; } = [];
         public Dictionary<string, string> LabelNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, WeChatSessionState> SessionStates { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         private readonly Dictionary<string, WeChat4Contact> _allContactsByUsername = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, WeChat4Contact> _allContactsByRowId = new(StringComparer.Ordinal);
@@ -363,7 +364,31 @@ namespace Client.Services.WeChat4Db
 
             if (tables.Contains("chat_room"))
             {
-                var roomById = new Dictionary<string, (string Username, string Owner, string DisplayName, Dictionary<string, string> MemberNicks)>();
+                // Pre-load group announcements from chat_room_info_detail (if present in this WeChat 4.x build)
+                var announcementByRoom = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var detailTable in tables.Where(t =>
+                    t.Equals("chat_room_info_detail", StringComparison.OrdinalIgnoreCase) ||
+                    t.Equals("chatroom_info_detail", StringComparison.OrdinalIgnoreCase)))
+                {
+                    try
+                    {
+                        using var dCmd = conn.CreateCommand();
+                        dCmd.CommandText = $"SELECT * FROM \"{detailTable.Replace("\"", "\"\"")}\"";
+                        using var dr = dCmd.ExecuteReader();
+                        while (dr.Read())
+                        {
+                            string u = GetColString(dr, "username", "room_username", "chat_room_name", "room_name", "user_name");
+                            string ann = GetColString(dr, "announcement_", "announcement", "notice", "chatroom_notice");
+                            if (!string.IsNullOrWhiteSpace(u) && !string.IsNullOrWhiteSpace(ann))
+                            {
+                                announcementByRoom[u.Trim()] = ann.Trim();
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                var roomById = new Dictionary<string, (string Username, string Owner, string DisplayName, string Announcement, Dictionary<string, string> MemberNicks)>();
                 try
                 {
                     using var cmd = conn.CreateCommand();
@@ -380,6 +405,12 @@ namespace Client.Services.WeChat4Db
                         byte[]? extBuf = GetColBytes(r, "ext_buffer");
                         var memberNicks = ParseChatRoomMemberDisplayNames(extBuf);
 
+                        string announcement = GetColString(r, "announcement_", "announcement", "notice", "chatroom_notice");
+                        if (string.IsNullOrWhiteSpace(announcement) && announcementByRoom.TryGetValue(username, out var detailAnn))
+                        {
+                            announcement = detailAnn;
+                        }
+
                         string name = string.Empty;
                         if (_allContactsByUsername.TryGetValue(username, out var roomContact))
                         {
@@ -394,7 +425,7 @@ namespace Client.Services.WeChat4Db
 
                         if (!string.IsNullOrEmpty(id))
                         {
-                            roomById[id] = (username, owner, name, memberNicks);
+                            roomById[id] = (username, owner, name, announcement, memberNicks);
                         }
                     }
                 }
@@ -477,6 +508,7 @@ namespace Client.Services.WeChat4Db
                         Username = kv.Username,
                         GroupName = groupName,
                         MyNickname = myNick,
+                        Announcement = kv.Announcement,
                         AvatarUrl = roomContactForAvatar?.AvatarUrl ?? string.Empty,
                         MemberCount = members.Count,
                         Members = members
@@ -494,6 +526,7 @@ namespace Client.Services.WeChat4Db
 
             var friendMap = Friends.ToDictionary(f => f.Username, StringComparer.OrdinalIgnoreCase);
             var groupMap = Groups.ToDictionary(g => g.Username, StringComparer.OrdinalIgnoreCase);
+            const long Year2100Unix = 4_102_444_800L;
 
             try
             {
@@ -504,19 +537,58 @@ namespace Client.Services.WeChat4Db
                 {
                     string username = GetColString(r, "username");
                     if (string.IsNullOrWhiteSpace(username)) continue;
+
                     string summary = WeChat4EmojiMap.FormatWeChatFaces(DecodeValueToText(GetRawColumn(r, "summary")));
                     if (summary.Length > 100) summary = summary[..100];
-                    long lastTime = GetColLong(r, "sort_timestamp", "last_timestamp");
+
+                    string draft = DecodeValueToText(GetRawColumn(r, "draft")).Trim();
+                    int unreadCount = Math.Max(0, GetColInt(r, "unread_count"));
+                    long unreadFirstSvrId = GetColLong(r, "unread_first_msg_srv_id");
+                    bool isHidden = GetColInt(r, "is_hidden") != 0;
+                    long lastTs = GetColLong(r, "last_timestamp");
+                    long sortTs = GetColLong(r, "sort_timestamp");
+                    int isTopCol = GetColInt(r, "is_top", "is_pinned", "is_sticky");
+
+                    // WeChat often encodes pinned sessions via an explicit is_top flag OR an inflated sort_timestamp (> year 2100 or >> last_timestamp).
+                    bool isPinned = isTopCol != 0 ||
+                                    (sortTs >= Year2100Unix) ||
+                                    (sortTs > 0 && lastTs > 0 && sortTs - lastTs > 86400L * 365);
+
+                    long effectiveLastTime = (sortTs > 0 && sortTs < Year2100Unix)
+                        ? Math.Max(sortTs, lastTs)
+                        : lastTs;
+
+                    var state = new WeChatSessionState
+                    {
+                        Username = username,
+                        UnreadCount = unreadCount,
+                        UnreadFirstMsgSvrId = unreadFirstSvrId,
+                        IsHidden = isHidden,
+                        IsPinned = isPinned,
+                        Draft = draft,
+                        Summary = summary,
+                        LastTimestamp = lastTs,
+                        SortTimestamp = sortTs
+                    };
+                    SessionStates[username] = state;
 
                     if (friendMap.TryGetValue(username, out var f))
                     {
                         f.LastMessageSummary = summary;
-                        f.LastMessageTime = Math.Max(f.LastMessageTime, lastTime);
+                        f.LastMessageTime = Math.Max(f.LastMessageTime, effectiveLastTime);
+                        f.UnreadCount = unreadCount;
+                        f.IsHidden = isHidden;
+                        f.IsPinned = isPinned;
+                        f.Draft = draft;
                     }
                     else if (groupMap.TryGetValue(username, out var g))
                     {
                         g.LastMessageSummary = summary;
-                        g.LastMessageTime = Math.Max(g.LastMessageTime, lastTime);
+                        g.LastMessageTime = Math.Max(g.LastMessageTime, effectiveLastTime);
+                        g.UnreadCount = unreadCount;
+                        g.IsHidden = isHidden;
+                        g.IsPinned = isPinned;
+                        g.Draft = draft;
                     }
                 }
             }
@@ -726,7 +798,7 @@ namespace Client.Services.WeChat4Db
                         object? rawSource = r.IsDBNull(9) ? null : r.GetValue(9);
 
                         int baseType = NormalizeLocalType(rawType);
-                        if (skipSystem && baseType is 10000 or 10002 or 51) continue;
+                        if (baseType == 51) continue;
 
                         string body = DecodeContent(rawMsgContent, rawCompress);
                         name2Id.TryGetValue(realSenderId, out string? sender);
@@ -737,8 +809,24 @@ namespace Client.Services.WeChat4Db
                             StripGroupSenderPrefix(sessionUsername, name2Id, ref sender, ref body);
                         }
 
-                        var (kind, text) = DescribeMessage(baseType, rawType, body, packedInfo);
-                        if (skipSystem && kind == "system") continue;
+                        var (kind, text, refSvrId, refMsgType) = DescribeMessage(baseType, rawType, body, packedInfo);
+                        bool isSystemEvent = false;
+                        List<string> joinedMembers = [];
+                        if (baseType is 10000 or 10002 || kind == "system")
+                        {
+                            var (eventKind, eventText, joined) = ClassifyKeySystemEvent(text, isGroup);
+                            if (!string.IsNullOrEmpty(eventKind))
+                            {
+                                kind = eventKind;
+                                text = eventText;
+                                isSystemEvent = true;
+                                joinedMembers = joined;
+                            }
+                            else if (skipSystem)
+                            {
+                                continue;
+                            }
+                        }
                         if (string.IsNullOrWhiteSpace(text)) continue;
 
                         text = WeChat4EmojiMap.FormatWeChatFaces(text);
@@ -748,21 +836,24 @@ namespace Client.Services.WeChat4Db
                             EnrichMediaHintsFromResourceDb(sessionUsername, localId, serverId, hints);
                         }
 
-                        bool isOutgoing = !string.IsNullOrEmpty(sender) &&
+                        bool isOutgoing = !isSystemEvent &&
+                                          !string.IsNullOrEmpty(sender) &&
                                           !string.IsNullOrEmpty(SelfWxid) &&
                                           sender.Equals(SelfWxid, StringComparison.OrdinalIgnoreCase);
 
                         bool mentionedSelf = false;
                         bool mentionedAll = false;
-                        if (isGroup && !isOutgoing && rawSource is not null)
+                        if (isGroup && !isOutgoing && !isSystemEvent && rawSource is not null)
                         {
                             string sourceText = DecodeContent(rawSource, null);
                             ParseAtMentionFlags(sourceText, SelfWxid, out mentionedSelf, out mentionedAll);
                         }
 
-                        string senderName = !string.IsNullOrEmpty(sender)
-                            ? ResolveDisplayName(sender)
-                            : (kind == "system" ? "系统" : "群成员");
+                        string senderName = isSystemEvent
+                            ? "系统"
+                            : (!string.IsNullOrEmpty(sender)
+                                ? ResolveDisplayName(sender)
+                                : (kind == "system" ? "系统" : "群成员"));
 
                         string extId = !string.IsNullOrWhiteSpace(serverId) && serverId != "0"
                             ? $"wx4:s:{serverId}"
@@ -781,6 +872,10 @@ namespace Client.Services.WeChat4Db
                             IsOutgoing = isOutgoing,
                             MentionedSelf = mentionedSelf,
                             MentionedAll = mentionedAll,
+                            IsSystemEvent = isSystemEvent,
+                            ReferencedServerId = refSvrId,
+                            ReferencedMsgType = refMsgType,
+                            JoinedMembers = joinedMembers,
                             Content = text,
                             MediaHints = hints,
                             CreateTime = createTime
@@ -808,6 +903,169 @@ namespace Client.Services.WeChat4Db
                 return all.GetRange(all.Count - maxCount, maxCount);
             }
             return all;
+        }
+
+        /// <summary>
+        /// Looks up a single historical message by its WeChat server_id (e.g. from &lt;refermsg&gt;&lt;svrid&gt;)
+        /// so quoted product images or older messages can be resolved for multimodal AI replies.
+        /// </summary>
+        public WeChat4Message? FindMessageByServerId(string sessionUsername, string serverId)
+        {
+            if (string.IsNullOrWhiteSpace(sessionUsername) || string.IsNullOrWhiteSpace(serverId)) return null;
+            if (!long.TryParse(serverId.Trim(), out long svrId) || svrId == 0) return null;
+
+            string table = MsgTableFor(sessionUsername);
+            bool isGroup = sessionUsername.EndsWith("@chatroom", StringComparison.OrdinalIgnoreCase);
+
+            for (int shard = _msgDbs.Count - 1; shard >= 0; shard--)
+            {
+                var (_, conn, tables, name2Id) = _msgDbs[shard];
+                if (!tables.Contains(table)) continue;
+                try
+                {
+                    var tableCols = ListColumns(conn, table);
+                    if (!tableCols.Contains("server_id")) continue;
+                    string Sel(string col, string fallback) => tableCols.Contains(col) ? $"\"{col}\"" : fallback;
+
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText =
+                        $"SELECT {Sel("local_id", "rowid")}, {Sel("server_id", "0")}, {Sel("local_type", "1")}, " +
+                        $"{Sel("real_sender_id", "0")}, {Sel("create_time", "0")}, " +
+                        $"{Sel("message_content", "NULL")}, {Sel("compress_content", "NULL")}, {Sel("packed_info_data", "NULL")} " +
+                        $"FROM \"{table}\" WHERE server_id = @sid LIMIT 1";
+                    cmd.Parameters.AddWithValue("@sid", svrId);
+                    using var r = cmd.ExecuteReader();
+                    if (!r.Read()) continue;
+
+                    long localId = r.IsDBNull(0) ? 0 : r.GetInt64(0);
+                    long rawType = r.IsDBNull(2) ? 0 : r.GetInt64(2);
+                    long realSenderId = r.IsDBNull(3) ? 0 : r.GetInt64(3);
+                    long createTime = r.IsDBNull(4) ? 0 : r.GetInt64(4);
+                    object? rawMsgContent = r.IsDBNull(5) ? null : r.GetValue(5);
+                    object? rawCompress = r.IsDBNull(6) ? null : r.GetValue(6);
+                    byte[]? packedInfo = r.IsDBNull(7) ? null : r.GetValue(7) as byte[];
+
+                    int baseType = NormalizeLocalType(rawType);
+                    string body = DecodeContent(rawMsgContent, rawCompress);
+                    name2Id.TryGetValue(realSenderId, out string? sender);
+                    sender ??= string.Empty;
+                    if (isGroup)
+                    {
+                        StripGroupSenderPrefix(sessionUsername, name2Id, ref sender, ref body);
+                    }
+
+                    var (kind, text, refSvr, refType) = DescribeMessage(baseType, rawType, body, packedInfo);
+                    var hints = kind is "image" or "emoji" or "video" ? ExtractMediaHints(body, packedInfo) : [];
+                    if (kind is "image" or "emoji" or "video")
+                    {
+                        EnrichMediaHintsFromResourceDb(sessionUsername, localId, serverId, hints);
+                    }
+
+                    return new WeChat4Message
+                    {
+                        ExternalId = $"wx4:s:{svrId}",
+                        LocalId = localId,
+                        ServerId = svrId.ToString(),
+                        Shard = shard,
+                        BaseType = baseType,
+                        Kind = kind,
+                        SenderWxid = sender,
+                        SenderName = !string.IsNullOrEmpty(sender) ? ResolveDisplayName(sender) : "群成员",
+                        IsOutgoing = !string.IsNullOrEmpty(sender) && !string.IsNullOrEmpty(SelfWxid) && sender.Equals(SelfWxid, StringComparison.OrdinalIgnoreCase),
+                        ReferencedServerId = refSvr,
+                        ReferencedMsgType = refType,
+                        Content = WeChat4EmojiMap.FormatWeChatFaces(text),
+                        MediaHints = hints,
+                        CreateTime = createTime
+                    };
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Checks the newest messages of a session across message shards to confirm whether an outgoing
+        /// automated reply with matching text actually persisted into WeChat's SQLite/WAL storage.
+        /// </summary>
+        public bool HasRecentOutgoingMessageMatching(string sessionUsername, string expectedText, long minCreateTimeUnix)
+        {
+            if (string.IsNullOrWhiteSpace(sessionUsername) || string.IsNullOrWhiteSpace(expectedText)) return false;
+            string expectedNorm = NormalizeMessageForDeliveryMatch(expectedText);
+            if (expectedNorm.Length == 0) return false;
+            string probe = expectedNorm.Length > 32 ? expectedNorm[..32] : expectedNorm;
+
+            string table = MsgTableFor(sessionUsername);
+            bool isGroup = sessionUsername.EndsWith("@chatroom", StringComparison.OrdinalIgnoreCase);
+
+            for (int shard = _msgDbs.Count - 1; shard >= 0; shard--)
+            {
+                var (_, conn, tables, name2Id) = _msgDbs[shard];
+                if (!tables.Contains(table)) continue;
+                try
+                {
+                    var tableCols = ListColumns(conn, table);
+                    string Sel(string col, string fallback) => tableCols.Contains(col) ? $"\"{col}\"" : fallback;
+                    string orderBy = tableCols.Contains("sort_seq")
+                        ? "ORDER BY sort_seq DESC, local_id DESC"
+                        : (tableCols.Contains("create_time") ? "ORDER BY create_time DESC, local_id DESC" : "ORDER BY local_id DESC");
+
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText =
+                        $"SELECT {Sel("local_type", "1")}, {Sel("real_sender_id", "0")}, {Sel("create_time", "0")}, " +
+                        $"{Sel("message_content", "NULL")}, {Sel("compress_content", "NULL")} " +
+                        $"FROM \"{table}\" {orderBy} LIMIT 15";
+                    using var r = cmd.ExecuteReader();
+                    while (r.Read())
+                    {
+                        long createTime = r.IsDBNull(2) ? 0 : r.GetInt64(2);
+                        if (createTime > 0 && createTime < minCreateTimeUnix) continue;
+
+                        long rawType = r.IsDBNull(0) ? 0 : r.GetInt64(0);
+                        int baseType = NormalizeLocalType(rawType);
+                        if (baseType != 1) continue;
+
+                        long realSenderId = r.IsDBNull(1) ? 0 : r.GetInt64(1);
+                        name2Id.TryGetValue(realSenderId, out string? sender);
+                        sender ??= string.Empty;
+
+                        string body = DecodeContent(r.IsDBNull(3) ? null : r.GetValue(3), r.IsDBNull(4) ? null : r.GetValue(4));
+                        if (isGroup)
+                        {
+                            StripGroupSenderPrefix(sessionUsername, name2Id, ref sender, ref body);
+                        }
+
+                        bool isOutgoing = !string.IsNullOrEmpty(SelfWxid) &&
+                                          (string.IsNullOrEmpty(sender) || sender.Equals(SelfWxid, StringComparison.OrdinalIgnoreCase));
+                        if (!isOutgoing) continue;
+
+                        string actualNorm = NormalizeMessageForDeliveryMatch(body);
+                        if (actualNorm.Length == 0) continue;
+                        if (actualNorm == expectedNorm ||
+                            actualNorm.Contains(probe, StringComparison.OrdinalIgnoreCase) ||
+                            expectedNorm.Contains(actualNorm, StringComparison.OrdinalIgnoreCase) && actualNorm.Length >= Math.Min(12, expectedNorm.Length))
+                        {
+                            return true;
+                        }
+                    }
+                }
+                catch { }
+            }
+            return false;
+        }
+
+        private static string NormalizeMessageForDeliveryMatch(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            var sb = new StringBuilder(text.Length);
+            foreach (char c in text)
+            {
+                if (!char.IsWhiteSpace(c) && c != '\u2005' && c != '\u200B')
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
         }
 
         private static void ParseAtMentionFlags(string sourceXml, string selfWxid, out bool mentionedSelf, out bool mentionedAll)
@@ -1081,20 +1339,22 @@ namespace Client.Services.WeChat4Db
             return Convert.ToString(value) ?? string.Empty;
         }
 
-        private (string Kind, string Text) DescribeMessage(int mtype, long rawType, string content, byte[]? packedInfo)
+        private (string Kind, string Text, string RefSvrId, int RefMsgType) DescribeMessage(int mtype, long rawType, string content, byte[]? packedInfo)
         {
             switch (mtype)
             {
                 case 1:
-                    return ("text", content);
+                    return ("text", content, string.Empty, 0);
                 case 3:
-                    return ("image", "🖼️ [图片]");
+                    return ("image", "🖼️ [图片]", string.Empty, 0);
+                case 37:
+                    return ("friend_request", DescribeFriendRequestMessage(content), string.Empty, 0);
                 case 43 or 62:
                 {
                     var root = ParseXmlSafe(content);
                     string lenStr = XmlAttrOrText(root, "playlength");
                     string dur = int.TryParse(lenStr, out int sec) && sec > 0 ? $" {sec}\"" : string.Empty;
-                    return ("video", $"🎬 [视频{dur}]");
+                    return ("video", $"🎬 [视频{dur}]", string.Empty, 0);
                 }
                 case 34:
                 {
@@ -1103,22 +1363,22 @@ namespace Client.Services.WeChat4Db
                     string dur = int.TryParse(secStr, out int ms) && ms > 0 ? $" {Math.Max(1, ms / 1000)}\"" : string.Empty;
                     string transcript = ExtractVoiceTranscriptFromPacked(packedInfo);
                     return string.IsNullOrWhiteSpace(transcript)
-                        ? ("voice", $"🎤 [语音{dur}]")
-                        : ("voice", $"🎤 [语音{dur}] {transcript}");
+                        ? ("voice", $"🎤 [语音{dur}]", string.Empty, 0)
+                        : ("voice", $"🎤 [语音{dur}] {transcript}", string.Empty, 0);
                 }
                 case 47 or 11000:
                 {
                     var root = ParseXmlSafe(content);
                     string gameLabel = DescribeGameEmoji(root);
-                    if (!string.IsNullOrEmpty(gameLabel)) return ("emoji", gameLabel);
+                    if (!string.IsNullOrEmpty(gameLabel)) return ("emoji", gameLabel, string.Empty, 0);
                     string desc = XmlAttrOrText(root, "desc");
-                    return ("emoji", string.IsNullOrWhiteSpace(desc) ? "😄 [动画表情]" : $"😄 [动画表情: {desc}]");
+                    return ("emoji", string.IsNullOrWhiteSpace(desc) ? "😄 [动画表情]" : $"😄 [动画表情: {desc}]", string.Empty, 0);
                 }
                 case 42:
                 {
                     var root = ParseXmlSafe(content);
                     string nick = XmlAttrOrText(root, "nickname");
-                    return ("card", string.IsNullOrWhiteSpace(nick) ? "🪪 [名片]" : $"🪪 [名片] {nick}");
+                    return ("card", string.IsNullOrWhiteSpace(nick) ? "🪪 [名片]" : $"🪪 [名片] {nick}", string.Empty, 0);
                 }
                 case 48:
                 {
@@ -1127,12 +1387,12 @@ namespace Client.Services.WeChat4Db
                     string poi = loc?.Attribute("poiname")?.Value ?? string.Empty;
                     string locLabel = loc?.Attribute("label")?.Value ?? string.Empty;
                     string detail = string.Join(" · ", new[] { poi, locLabel }.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct());
-                    return ("location", string.IsNullOrWhiteSpace(detail) ? "📍 [位置]" : $"📍 [位置] {detail}");
+                    return ("location", string.IsNullOrWhiteSpace(detail) ? "📍 [位置]" : $"📍 [位置] {detail}", string.Empty, 0);
                 }
                 case 50:
-                    return ("voip", "📞 [音视频通话]");
+                    return ("voip", DescribeVoipMessage(content), string.Empty, 0);
                 case 10000 or 10002:
-                    return ("system", DescribeSystemMessage(content));
+                    return ("system", DescribeSystemMessage(content), string.Empty, 0);
                 case 49 or 11001 or 11002:
                     return DescribeAppMsg(rawType, content);
                 default:
@@ -1141,7 +1401,174 @@ namespace Client.Services.WeChat4Db
                         return DescribeAppMsg(rawType, content);
                     }
                     string tn = TypeNames.TryGetValue(mtype, out var label) ? label : $"消息({mtype})";
-                    return ("other", $"[{tn}]");
+                    return ("other", $"[{tn}]", string.Empty, 0);
+            }
+        }
+
+        private static string DescribeFriendRequestMessage(string content)
+        {
+            var root = ParseXmlSafe(content);
+            if (root is null) return "🤝 [好友验证请求]";
+            string nick = XmlAttrOrText(root, "fromnickname");
+            string verify = XmlAttrOrText(root, "content");
+            string scene = DescribeAddScene(XmlAttrOrText(root, "scene"));
+            var parts = new List<string>(3);
+            if (!string.IsNullOrWhiteSpace(nick)) parts.Add(nick);
+            if (!string.IsNullOrWhiteSpace(scene)) parts.Add($"来源:{scene}");
+            if (!string.IsNullOrWhiteSpace(verify)) parts.Add($"附言:{verify}");
+            return parts.Count > 0 ? $"🤝 [好友验证] {string.Join(" · ", parts)}" : "🤝 [好友验证请求]";
+        }
+
+        public static string DescribeAddScene(string rawScene)
+        {
+            return rawScene?.Trim() switch
+            {
+                "3" or "1000003" => "搜索微信号",
+                "14" or "1000014" => "通过群聊添加",
+                "15" or "1000015" => "搜索手机号",
+                "17" or "1000017" => "通过名片分享",
+                "30" or "1000030" => "扫一扫二维码",
+                "10" or "13" => "手机通讯录匹配",
+                "6" => "朋友验证",
+                _ => string.Empty
+            };
+        }
+
+        private static string DescribeVoipMessage(string content)
+        {
+            var root = ParseXmlSafe(content);
+            if (root is null)
+            {
+                if (content.Contains("视频", StringComparison.Ordinal)) return "📹 [视频通话]";
+                return "📞 [语音通话]";
+            }
+
+            string roomType = XmlAttrOrText(root, "roomtype");
+            string typeStr = XmlAttrOrText(root, "type");
+            bool isVideo = roomType == "0" || content.Contains("voip_content_video", StringComparison.OrdinalIgnoreCase);
+            string icon = isVideo ? "📹" : "📞";
+            string label = isVideo ? "视频通话" : "语音通话";
+
+            string durationRaw = XmlAttrOrText(root, "duration");
+            if (int.TryParse(durationRaw, out int secs) && secs > 0)
+            {
+                string durText = secs >= 3600
+                    ? $"{secs / 3600}小时{(secs % 3600) / 60}分{secs % 60}秒"
+                    : (secs >= 60 ? $"{secs / 60}分{secs % 60}秒" : $"{secs}秒");
+                return $"{icon} [{label} {durText}]";
+            }
+
+            string statusRaw = XmlAttrOrText(root, "status");
+            string reason = (statusRaw, typeStr) switch
+            {
+                ("4", _) or (_, "4") => "已取消",
+                ("5", _) or (_, "5") => "对方已拒绝",
+                ("6", _) or (_, "6") => "对方无应答",
+                ("7", _) => "已在其他设备接听",
+                _ => string.Empty
+            };
+            if (string.IsNullOrEmpty(reason))
+            {
+                if (content.Contains("cancel", StringComparison.OrdinalIgnoreCase)) reason = "已取消";
+                else if (content.Contains("reject", StringComparison.OrdinalIgnoreCase)) reason = "已拒绝";
+                else if (content.Contains("busy", StringComparison.OrdinalIgnoreCase)) reason = "对方忙线";
+            }
+            return string.IsNullOrEmpty(reason) ? $"{icon} [{label}]" : $"{icon} [{label} · {reason}]";
+        }
+
+        private static (string EventKind, string FormattedText, List<string> JoinedMembers) ClassifyKeySystemEvent(string rawText, bool isGroup)
+        {
+            string text = (rawText ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(text)) return (string.Empty, string.Empty, []);
+
+            // 1. Group member join events
+            if (isGroup && (text.Contains("加入了群聊", StringComparison.Ordinal) ||
+                            text.Contains("加入群聊", StringComparison.Ordinal) ||
+                            text.Contains("joined the group chat", StringComparison.OrdinalIgnoreCase)))
+            {
+                var joined = ExtractJoinedMemberNames(text);
+                return ("member_join", $"👋 {text}", joined);
+            }
+
+            // 2. Message recall events
+            if (text.Contains("撤回了一条消息", StringComparison.Ordinal) ||
+                text.Contains("recalled a message", StringComparison.OrdinalIgnoreCase))
+            {
+                return ("recall", $"↩️ {text}", []);
+            }
+
+            // 3. New friend added events (private chats)
+            if (!isGroup && (text.Contains("你已添加了", StringComparison.Ordinal) ||
+                             text.Contains("已经成为好友", StringComparison.Ordinal) ||
+                             text.Contains("现在可以开始聊天", StringComparison.Ordinal) ||
+                             text.Contains("通过了你的朋友验证", StringComparison.Ordinal) ||
+                             text.Contains("以上是打招呼的内容", StringComparison.Ordinal)))
+            {
+                return ("friend_added", $"🤝 {text}", []);
+            }
+
+            return (string.Empty, string.Empty, []);
+        }
+
+        /// <summary>
+        /// Parses newly joined member names from WeChat Chinese/English group-join system notices, e.g.:
+        /// - "\"张三\"邀请\"李四、王五\"加入了群聊"
+        /// - "你邀请\"李四\"加入了群聊"
+        /// - "\"李四\"通过扫描\"张三\"分享的二维码加入群聊"
+        /// - "张三邀请李四加入了群聊"
+        /// </summary>
+        public static List<string> ExtractJoinedMemberNames(string systemNotice)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrWhiteSpace(systemNotice)) return result;
+
+            string text = systemNotice.Trim();
+
+            // Pattern A: "<inviter>邀请<invitees>加入了群聊"
+            int inviteIdx = text.IndexOf("邀请", StringComparison.Ordinal);
+            int joinIdx = text.IndexOf("加入", StringComparison.Ordinal);
+            if (inviteIdx >= 0 && joinIdx > inviteIdx + 2)
+            {
+                string middle = text[(inviteIdx + 2)..joinIdx].Trim();
+                AddParsedJoinNames(middle, result);
+                if (result.Count > 0) return result;
+            }
+
+            // Pattern B: "<member>通过扫描...加入群聊" or "<member>通过...加入群聊"
+            int viaIdx = text.IndexOf("通过", StringComparison.Ordinal);
+            if (viaIdx > 0 && joinIdx > viaIdx)
+            {
+                string head = text[..viaIdx].Trim();
+                AddParsedJoinNames(head, result);
+                if (result.Count > 0) return result;
+            }
+
+            // Pattern C: English "X invited Y to the group chat" / "Y joined the group chat"
+            int invitedEn = text.IndexOf(" invited ", StringComparison.OrdinalIgnoreCase);
+            int toGrpEn = text.IndexOf(" to the group", StringComparison.OrdinalIgnoreCase);
+            if (invitedEn > 0 && toGrpEn > invitedEn + 9)
+            {
+                AddParsedJoinNames(text[(invitedEn + 9)..toGrpEn], result);
+                if (result.Count > 0) return result;
+            }
+
+            return result;
+        }
+
+        private static void AddParsedJoinNames(string rawSegment, List<string> target)
+        {
+            string clean = rawSegment.Trim().Trim('"', '“', '”', '\'', '「', '」', '《', '》');
+            if (string.IsNullOrWhiteSpace(clean)) return;
+            foreach (string part in clean.Split(['、', ',', '，'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                string name = part.Trim().Trim('"', '“', '”', '\'', '「', '」');
+                if (!string.IsNullOrWhiteSpace(name) &&
+                    !name.Equals("你", StringComparison.Ordinal) &&
+                    !name.Equals("You", StringComparison.OrdinalIgnoreCase) &&
+                    !target.Contains(name, StringComparer.OrdinalIgnoreCase))
+                {
+                    target.Add(name);
+                }
             }
         }
 
@@ -1298,13 +1725,13 @@ namespace Client.Services.WeChat4Db
             catch { }
         }
 
-        private (string Kind, string Text) DescribeAppMsg(long rawType, string content)
+        private (string Kind, string Text, string RefSvrId, int RefMsgType) DescribeAppMsg(long rawType, string content)
         {
             var root = ParseXmlSafe(content);
             if (root is null)
             {
                 bool plain = !string.IsNullOrWhiteSpace(content) && !content.TrimStart().StartsWith('<');
-                return plain ? ("text", content) : ("other", "[应用消息]");
+                return plain ? ("text", content, string.Empty, 0) : ("other", "[应用消息]", string.Empty, 0);
             }
 
             var appmsg = root.Name.LocalName.Equals("appmsg", StringComparison.OrdinalIgnoreCase)
@@ -1325,24 +1752,42 @@ namespace Client.Services.WeChat4Db
 
             if (sub == 1)
             {
-                return ("text", !string.IsNullOrWhiteSpace(title) ? title : (!string.IsNullOrWhiteSpace(desc) ? desc : content));
+                return ("text", !string.IsNullOrWhiteSpace(title) ? title : (!string.IsNullOrWhiteSpace(desc) ? desc : content), string.Empty, 0);
             }
             if (sub == 57)
             {
                 var refer = FindXmlElement(appmsg, "refermsg");
                 string refName = XmlText(refer, "displayname");
                 string refContent = XmlText(refer, "content");
-                if (refContent.TrimStart().StartsWith('<'))
+                string refSvrId = XmlText(refer, "svrid");
+                _ = int.TryParse(XmlText(refer, "type"), out int refMsgType);
+
+                if (refMsgType == 3)
+                {
+                    refContent = "🖼️ [图片]";
+                }
+                else if (refContent.TrimStart().StartsWith('<'))
                 {
                     var refXml = ParseXmlSafe(refContent);
                     refContent = XmlText(refXml, "title");
-                    if (string.IsNullOrWhiteSpace(refContent)) refContent = "[媒体消息]";
+                    if (string.IsNullOrWhiteSpace(refContent))
+                    {
+                        refContent = refMsgType switch
+                        {
+                            3 => "🖼️ [图片]",
+                            34 => "🎤 [语音]",
+                            43 or 62 => "🎬 [视频]",
+                            47 => "😄 [动画表情]",
+                            _ => "[媒体消息]"
+                        };
+                    }
                 }
-                if (refContent.Length > 80) refContent = refContent[..80] + "...";
+                if (refContent.Length > 100) refContent = refContent[..100] + "...";
                 string reply = string.IsNullOrWhiteSpace(title) ? "[引用回复]" : title;
-                return ("quote", string.IsNullOrWhiteSpace(refContent)
+                string formatted = string.IsNullOrWhiteSpace(refContent)
                     ? reply
-                    : $"{reply}\n「引用 {(string.IsNullOrWhiteSpace(refName) ? "" : refName + ": ")}{refContent}」");
+                    : $"{reply}\n「引用 {(string.IsNullOrWhiteSpace(refName) ? "" : refName + ": ")}{refContent}」";
+                return ("quote", formatted, refSvrId, refMsgType);
             }
             if (sub is 19 or 20 or 7 or 14)
             {
@@ -1365,7 +1810,7 @@ namespace Client.Services.WeChat4Db
                     }
                 }
                 string head = $"📋 [合并转发] {(string.IsNullOrWhiteSpace(title) ? "聊天记录" : title)}";
-                return ("chatrecord", previews.Count > 0 ? $"{head}\n" + string.Join("\n", previews.Select(p => "· " + (p.Length > 60 ? p[..60] + "..." : p))) : head);
+                return ("chatrecord", previews.Count > 0 ? $"{head}\n" + string.Join("\n", previews.Select(p => "· " + (p.Length > 60 ? p[..60] + "..." : p))) : head, string.Empty, 0);
             }
             if (sub == 6)
             {
@@ -1374,11 +1819,11 @@ namespace Client.Services.WeChat4Db
                 if (string.IsNullOrWhiteSpace(fname)) fname = title;
                 string sizeStr = XmlText(attach, "totallen");
                 string sizeTag = long.TryParse(sizeStr, out long sz) && sz > 0 ? $" ({FormatBytes(sz)})" : string.Empty;
-                return ("file", $"📎 [文件] {(string.IsNullOrWhiteSpace(fname) ? desc : fname)}{sizeTag}");
+                return ("file", $"📎 [文件] {(string.IsNullOrWhiteSpace(fname) ? desc : fname)}{sizeTag}", string.Empty, 0);
             }
             if (sub == 8)
             {
-                return ("emoji", string.IsNullOrWhiteSpace(title) ? "😄 [动画表情]" : $"😄 [{title}]");
+                return ("emoji", string.IsNullOrWhiteSpace(title) ? "😄 [动画表情]" : $"😄 [{title}]", string.Empty, 0);
             }
             if (sub is 2000 or 2001 or 2003)
             {
@@ -1388,16 +1833,16 @@ namespace Client.Services.WeChat4Db
                 if (sub == 2000 || !string.IsNullOrWhiteSpace(fee))
                 {
                     string extra = string.Join(" · ", new[] { fee, memo }.Where(x => !string.IsNullOrWhiteSpace(x)));
-                    return ("transfer", string.IsNullOrWhiteSpace(extra) ? "💰 [微信转账]" : $"💰 [微信转账] {extra}");
+                    return ("transfer", string.IsNullOrWhiteSpace(extra) ? "💰 [微信转账]" : $"💰 [微信转账] {extra}", string.Empty, 0);
                 }
-                return ("hongbao", $"🧧 [微信红包] {(string.IsNullOrWhiteSpace(title) ? desc : title)}");
+                return ("hongbao", $"🧧 [微信红包] {(string.IsNullOrWhiteSpace(title) ? desc : title)}", string.Empty, 0);
             }
             if (sub is 33 or 36 or 44)
             {
                 string srcName = XmlText(appmsg, "sourcedisplayname");
                 string detail = string.Join(" · ", new[] { srcName, title }.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct());
                 string line = $"🧩 [小程序] {detail}";
-                return ("miniprogram", !string.IsNullOrWhiteSpace(url) && url.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? $"{line}\n{url}" : line);
+                return ("miniprogram", !string.IsNullOrWhiteSpace(url) && url.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? $"{line}\n{url}" : line, string.Empty, 0);
             }
             if (sub == 5)
             {
@@ -1411,12 +1856,12 @@ namespace Client.Services.WeChat4Db
                 {
                     lines.Add(url);
                 }
-                return ("link", string.Join("\n", lines));
+                return ("link", string.Join("\n", lines), string.Empty, 0);
             }
 
             string kindLabel = AppMsgSubTypes.TryGetValue(sub, out var lbl) ? lbl : $"应用消息({sub})";
             string rest = string.Join(" · ", new[] { title, desc, url }.Where(x => !string.IsNullOrWhiteSpace(x)));
-            return ("appmsg", string.IsNullOrWhiteSpace(rest) ? $"[{kindLabel}]" : $"[{kindLabel}] {rest}");
+            return ("appmsg", string.IsNullOrWhiteSpace(rest) ? $"[{kindLabel}]" : $"[{kindLabel}] {rest}", string.Empty, 0);
         }
 
         private string DescribeSystemMessage(string content)

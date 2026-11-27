@@ -1,4 +1,5 @@
 using Client.Services.WeChat4Db;
+using Client.Services.WeComDb;
 
 namespace Client.Services
 {
@@ -12,6 +13,8 @@ namespace Client.Services
         public static BackendApiClient Backend { get; } = new();
         public static WeChatWindowService WeChatWindows { get; } = new();
         public static WeChat4SyncService WeChat4Sync { get; } = new();
+        public static WeComSyncService WeComSync { get; } = new();
+        public static LocalConnectorBridgeService LocalBridge { get; } = new();
         public static GroupAutoReplyService GroupAutoReply { get; } = new();
         public static LocalAiWorkspaceStore AiWorkspace { get; } = new();
         public static OcrService Ocr => LazyOcr.Value;

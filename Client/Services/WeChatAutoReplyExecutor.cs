@@ -632,6 +632,161 @@ namespace Client.Services
             DeliverPreparedReplyAsync(null, groupName, replyText, config, overrideAutoSend, groupKey, ct);
 
         /// <summary>
+        /// Bridge-level outbound RPA delivery for personal WeChat (supports private &amp; group text,
+        /// group @mentions, and image/video/file sending via CF_HDROP paste) with draft guard &amp; WAL confirmation.
+        /// </summary>
+        public async Task<(bool Success, bool VerifiedWal, string Message)> SendBridgeMessageAsync(
+            string searchKey,
+            string expectedDisplayName,
+            bool isGroup,
+            string? text = null,
+            string? filePath = null,
+            IReadOnlyList<string>? atDisplayNames = null,
+            string? verifySessionKey = null,
+            CancellationToken ct = default)
+        {
+            var sw = Stopwatch.StartNew();
+            string cleanText = (text ?? string.Empty).Trim();
+            bool hasFile = !string.IsNullOrWhiteSpace(filePath) && File.Exists(filePath);
+            if (string.IsNullOrWhiteSpace(cleanText) && !hasFile)
+            {
+                return (false, false, "待发送的文本和文件均为空。");
+            }
+
+            var cfg = AppServices.GroupAutoReply.Config;
+            int slowPad = cfg.SlowStableMode ? 240 : 0;
+            bool prevOverlay = ClickVisualOverlay.IsEnabled;
+            ClickVisualOverlay.IsEnabled = cfg.ShowClickOverlay;
+            string? savedClipboard = cfg.RestoreClipboardAfterSend
+                ? Win32WindowHelper.TryGetClipboardUnicodeText()
+                : null;
+            bool touchedClipboard = false;
+
+            try
+            {
+                // Draft collision guard (avoid overwriting employee's unsent draft)
+                if (!string.IsNullOrWhiteSpace(verifySessionKey))
+                {
+                    string draft = AppServices.WeChat4Sync.GetSessionDraft(null, verifySessionKey);
+                    if (!string.IsNullOrWhiteSpace(draft))
+                    {
+                        return (false, false, $"目标会话输入框存在员工未发草稿，已自动避让以防覆盖。");
+                    }
+                }
+
+                // Step 1: Switch WeChat window to target private chat or group
+                var (openOk, openMsg) = await OpenChatSessionInWeChatAsync(searchKey, expectedDisplayName, isGroup, ct);
+                if (!openOk)
+                {
+                    return (false, false, openMsg);
+                }
+
+                var (readyOk, hwnd, rawRect, scale, readyErr) = await EnsureWeChatWindowReadyAsync(slowPad, ct);
+                if (!readyOk) return (false, false, readyErr);
+
+                // Step 2: Locate input box & Send button
+                var (inputX, inputY, sendX, sendY, hasSendBtn) = await LocateInputAndSendBoxAsync(hwnd, rawRect, scale, ct);
+                Win32WindowHelper.LeftClickAt(inputX, inputY, hwnd, "点击微信输入框(桥接发送)", skipReactivate: true);
+                await Task.Delay(120 + slowPad, ct);
+
+                DateTimeOffset sentWindowStartUtc = DateTimeOffset.UtcNow;
+
+                // Step 3A: Send image/video/file via CF_HDROP clipboard paste
+                if (hasFile && filePath is not null)
+                {
+                    touchedClipboard = true;
+                    if (!Win32WindowHelper.SetClipboardFileDropList(filePath))
+                    {
+                        return (false, false, $"将文件写入剪贴板失败：{filePath}");
+                    }
+                    await Task.Delay(60, ct);
+                    Win32WindowHelper.SendKeyCombo(Win32WindowHelper.VK_CONTROL, Win32WindowHelper.VK_V);
+                    await Task.Delay(420 + slowPad, ct);
+
+                    // Confirm file send (WeChat 4.x pastes file/image into input box or send preview; Enter sends)
+                    Win32WindowHelper.SendVirtualKey(Win32WindowHelper.VK_RETURN);
+                    await Task.Delay(250 + slowPad, ct);
+                    if (hasSendBtn)
+                    {
+                        Win32WindowHelper.LeftClickAt(sendX, sendY, hwnd, "点击微信发送按钮(媒体)", skipReactivate: true);
+                        await Task.Delay(180 + slowPad, ct);
+                    }
+                }
+
+                // Step 3B: Send text (with optional @mentions in group)
+                if (!string.IsNullOrWhiteSpace(cleanText))
+                {
+                    if (isGroup && atDisplayNames is { Count: > 0 })
+                    {
+                        foreach (string rawAt in atDisplayNames)
+                        {
+                            string atName = (rawAt ?? string.Empty).Trim();
+                            if (string.IsNullOrWhiteSpace(atName)) continue;
+                            Win32WindowHelper.SendUnicodeText("@");
+                            await Task.Delay(140 + slowPad / 2, ct);
+                            Win32WindowHelper.SendUnicodeText(
+                                atName.Equals("notify@all", StringComparison.OrdinalIgnoreCase) ? "所有人" : atName);
+                            await Task.Delay(220 + slowPad / 2, ct);
+                            Win32WindowHelper.SendVirtualKey(Win32WindowHelper.VK_RETURN);
+                            await Task.Delay(100, ct);
+                        }
+                    }
+
+                    touchedClipboard = true;
+                    if (Win32WindowHelper.SetClipboardUnicodeText(cleanText))
+                    {
+                        await Task.Delay(50, ct);
+                        Win32WindowHelper.SendKeyCombo(Win32WindowHelper.VK_CONTROL, Win32WindowHelper.VK_V);
+                    }
+                    else
+                    {
+                        Win32WindowHelper.SendUnicodeText(cleanText);
+                    }
+                    await Task.Delay(180 + slowPad, ct);
+
+                    if (hasSendBtn)
+                    {
+                        Win32WindowHelper.LeftClickAt(sendX, sendY, hwnd, "点击微信发送按钮(桥接)", skipReactivate: true);
+                    }
+                    else
+                    {
+                        Win32WindowHelper.SendVirtualKey(Win32WindowHelper.VK_RETURN);
+                    }
+                }
+
+                // Step 4: Post-send WAL verification
+                bool walConfirmed = false;
+                if (!string.IsNullOrWhiteSpace(verifySessionKey) && !string.IsNullOrWhiteSpace(cleanText))
+                {
+                    var (okWal, _) = await AppServices.WeChat4Sync.VerifyGroupOutgoingMessageDeliveredAsync(
+                        verifySessionKey, cleanText, sentWindowStartUtc, ct);
+                    walConfirmed = okWal;
+                }
+
+                sw.Stop();
+                AppServices.Logs.Success("BRIDGE-WX",
+                    $"个人微信消息发送完成（目标=「{expectedDisplayName}」，耗时 {sw.ElapsedMilliseconds} ms，WAL确权={(walConfirmed ? "已确认" : "已触发")}）。");
+                return (true, walConfirmed, $"已向「{expectedDisplayName}」发送完成（{sw.ElapsedMilliseconds} ms）。");
+            }
+            catch (OperationCanceledException)
+            {
+                return (false, false, "个人微信发送已取消。");
+            }
+            catch (Exception ex)
+            {
+                return (false, false, $"个人微信发送异常：{ex.Message}");
+            }
+            finally
+            {
+                ClickVisualOverlay.IsEnabled = prevOverlay;
+                if (touchedClipboard && cfg.RestoreClipboardAfterSend && savedClipboard is not null)
+                {
+                    try { _ = Win32WindowHelper.SetClipboardUnicodeText(savedClipboard); } catch { }
+                }
+            }
+        }
+
+        /// <summary>
         /// Opens a specific customer (private chat) or group chat directly inside the running desktop WeChat window.
         /// For private chats, prefers searching by unique WeChat alias (微信号) to avoid homonym/emoji collisions,
         /// then clicks the matching result in the "联系人" section; for groups, reuses the battle-tested group switcher.

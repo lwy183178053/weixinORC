@@ -23,6 +23,12 @@ namespace Client.Services
         public long LastSelectedGroupId { get; set; }
         public string LastGroupRightTab { get; set; } = "profile";
         public string LastAgentSessionId { get; set; } = string.Empty;
+        public bool LocalBridgeEnabled { get; set; } = true;
+        public int WeChatBridgePort { get; set; } = 8990;
+        public string WeChatPushUrl { get; set; } = "http://127.0.0.1:9001";
+        public int WeComBridgePort { get; set; } = 8989;
+        public string WeComPushUrl { get; set; } = "http://127.0.0.1:9000";
+        public string WeComAccountDir { get; set; } = string.Empty;
     }
 
     public sealed class AppSettingsService
@@ -101,6 +107,11 @@ namespace Client.Services
             Current.LastCustomerRightTab = NormalizeRightTab(Current.LastCustomerRightTab);
             Current.LastGroupRightTab = NormalizeRightTab(Current.LastGroupRightTab);
             Current.LastAgentSessionId ??= string.Empty;
+            if (Current.WeChatBridgePort is <= 0 or > 65535) Current.WeChatBridgePort = 8990;
+            if (Current.WeComBridgePort is <= 0 or > 65535) Current.WeComBridgePort = 8989;
+            if (string.IsNullOrWhiteSpace(Current.WeChatPushUrl)) Current.WeChatPushUrl = "http://127.0.0.1:9001";
+            if (string.IsNullOrWhiteSpace(Current.WeComPushUrl)) Current.WeComPushUrl = "http://127.0.0.1:9000";
+            Current.WeComAccountDir ??= string.Empty;
         }
 
         public static string NormalizeWorkbenchSection(string? tag) =>

@@ -34,19 +34,26 @@ namespace Client.Pages
             AppServices.WeChat4Sync.ActivityLogged -= OnActivityLogged;
             AppServices.WeChat4Sync.SyncCompleted -= OnSyncCompleted;
             AppServices.WeChat4Sync.AccountsUpdated -= OnAccountsUpdated;
+            AppServices.LocalBridge.StateChanged -= OnLocalBridgeStateChanged;
+            AppServices.WeComSync.StatusChanged -= OnWeComStatusChanged;
 
             AppServices.Settings.ThemeChanged += OnThemeChanged;
             AppServices.WeChat4Sync.AutoSyncStatusChanged += OnAutoSyncStatusChanged;
             AppServices.WeChat4Sync.ActivityLogged += OnActivityLogged;
             AppServices.WeChat4Sync.SyncCompleted += OnSyncCompleted;
             AppServices.WeChat4Sync.AccountsUpdated += OnAccountsUpdated;
+            AppServices.LocalBridge.StateChanged += OnLocalBridgeStateChanged;
+            AppServices.WeComSync.StatusChanged += OnWeComStatusChanged;
 
             _isInitializingUi = true;
             var cfg = AppServices.Settings.Current;
             AutoWatchToggle.IsOn = cfg.WeChatAutoSyncEnabled;
+            LocalBridgeToggle.IsOn = cfg.LocalBridgeEnabled;
             OptImagesCheck.IsChecked = cfg.WeChatSyncIncludeImages;
             OptAvatarsCheck.IsChecked = cfg.WeChatSyncIncludeAvatars;
             _isInitializingUi = false;
+
+            RefreshLocalBridgeUi();
 
             LoadExistingLogs();
             SyncLinkedAccountsCollection();
@@ -60,6 +67,8 @@ namespace Client.Pages
             AppServices.WeChat4Sync.ActivityLogged -= OnActivityLogged;
             AppServices.WeChat4Sync.SyncCompleted -= OnSyncCompleted;
             AppServices.WeChat4Sync.AccountsUpdated -= OnAccountsUpdated;
+            AppServices.LocalBridge.StateChanged -= OnLocalBridgeStateChanged;
+            AppServices.WeComSync.StatusChanged -= OnWeComStatusChanged;
             _accountAvatarCts?.Cancel();
             _accountAvatarCts?.Dispose();
             _accountAvatarCts = null;
@@ -389,6 +398,49 @@ namespace Client.Pages
             if (_isInitializingUi) return;
             AppServices.WeChat4Sync.ConfigureAutoWatch(AutoWatchToggle.IsOn);
             UpdateKpiCards();
+        }
+
+        private void OnLocalBridgeStateChanged()
+        {
+            DispatcherQueue.TryEnqueue(RefreshLocalBridgeUi);
+        }
+
+        private void OnWeComStatusChanged(string _)
+        {
+            DispatcherQueue.TryEnqueue(RefreshLocalBridgeUi);
+        }
+
+        private void RefreshLocalBridgeUi()
+        {
+            LocalBridgeStatusText.Text = AppServices.LocalBridge.StatusSummary;
+            WeComStatusText.Text = AppServices.WeComSync.StatusText;
+        }
+
+        private void LocalBridgeToggle_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializingUi) return;
+            AppServices.LocalBridge.ConfigureEnabled(LocalBridgeToggle.IsOn);
+            RefreshLocalBridgeUi();
+        }
+
+        private async void RefreshWeComButton_Click(object sender, RoutedEventArgs e)
+        {
+            RefreshWeComButton.IsEnabled = false;
+            try
+            {
+                ShowBanner("正在只读识别本机企业微信账号与本地库...", isError: false);
+                var (ok, msg) = await AppServices.WeComSync.EnsureReadyAsync(forceRefresh: true);
+                ShowBanner(ok ? $"✓ {msg}" : msg, isError: !ok);
+                RefreshLocalBridgeUi();
+            }
+            catch (Exception ex)
+            {
+                ShowBanner($"识别企业微信失败：{ex.Message}", isError: true);
+            }
+            finally
+            {
+                RefreshWeComButton.IsEnabled = true;
+            }
         }
 
         private void OptCheck_Changed(object sender, RoutedEventArgs e)

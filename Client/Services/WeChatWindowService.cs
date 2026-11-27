@@ -317,6 +317,67 @@ namespace Client.Services
         }
 
         /// <summary>
+        /// 确保企业微信主窗口 (WeWorkWindow) 处于桌面可见状态，用于企微 RPA 发送与定位。
+        /// </summary>
+        public async Task<WeChatEnsureWindowResult> EnsureEnterpriseWeChatWindowReadyAsync(CancellationToken ct = default)
+        {
+            var windows = EnumerateWindows(includeAllVisibleWindows: false)
+                .Where(w => w.AccountType == WeChatAccountType.Enterprise)
+                .ToList();
+
+            var mainWin = PickBestMainWindow(windows);
+            if (mainWin is not null)
+            {
+                bool neededRestore = !mainWin.IsVisible || mainWin.IsMinimized || !mainWin.IsForeground;
+                if (neededRestore)
+                {
+                    _ = Win32WindowHelper.ForceBringToForeground(mainWin.Hwnd);
+                    await Task.Delay(260, ct);
+                }
+
+                var refreshed = EnumerateWindows(includeAllVisibleWindows: false)
+                    .FirstOrDefault(w => w.Hwnd == mainWin.Hwnd) ?? mainWin;
+                if (refreshed.DetectedState == WeChatLoginState.LoginPage)
+                {
+                    return new WeChatEnsureWindowResult
+                    {
+                        Success = false,
+                        Window = refreshed,
+                        IsLoginPage = true,
+                        Message = "企业微信当前处于待扫码登录界面，请先扫码登录。"
+                    };
+                }
+
+                return new WeChatEnsureWindowResult
+                {
+                    Success = true,
+                    Window = refreshed,
+                    WasAutoRestored = neededRestore,
+                    Message = neededRestore ? "已自动唤起企业微信主窗口。" : "企业微信主窗口已就绪。"
+                };
+            }
+
+            var loginWin = windows.FirstOrDefault(w => w.DetectedState == WeChatLoginState.LoginPage);
+            if (loginWin is not null)
+            {
+                _ = Win32WindowHelper.ForceBringToForeground(loginWin.Hwnd);
+                return new WeChatEnsureWindowResult
+                {
+                    Success = false,
+                    Window = loginWin,
+                    IsLoginPage = true,
+                    Message = "企业微信当前处于登录窗口，请先完成登录。"
+                };
+            }
+
+            return new WeChatEnsureWindowResult
+            {
+                Success = false,
+                Message = "未检测到可见的企业微信主窗口（如已隐藏到系统托盘，请先点开企业微信主界面）。"
+            };
+        }
+
+        /// <summary>
         /// 确保个人微信主窗口处于桌面可见状态（用于批量导入、窗口 OCR 诊断等场景）：
         /// 1. 若窗口已最小化或隐藏在托盘，自动恢复并置顶；
         /// 2. 若微信未启动且允许自动启动，自动启动并等待主窗口弹出。

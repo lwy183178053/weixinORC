@@ -118,7 +118,9 @@ namespace Client.Services
         internal const ushort VK_F = 0x46;
         internal const ushort VK_V = 0x56;
         private const uint CF_UNICODETEXT = 13;
+        private const uint CF_HDROP = 15;
         private const uint GMEM_MOVEABLE = 0x0002;
+        private const uint GMEM_ZEROINIT = 0x0040;
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOMOVE = 0x0002;
         private const uint SWP_NOACTIVATE = 0x0010;
@@ -1179,6 +1181,64 @@ namespace Client.Services
                         return false;
                     }
                     // Ownership transferred to Windows clipboard; do not free hGlobal
+                    hGlobal = nint.Zero;
+                    return true;
+                }
+                finally
+                {
+                    if (hGlobal != nint.Zero) _ = GlobalFree(hGlobal);
+                    _ = CloseClipboard();
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Thread-safe Win32 CF_HDROP file clipboard writer so WeChat / WeCom chat inputs can paste
+        /// local images, videos, and arbitrary files directly via Ctrl+V.
+        /// </summary>
+        internal static bool SetClipboardFileDropList(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) return false;
+            string fullPath = Path.GetFullPath(filePath);
+            // DROPFILES struct (20 bytes): pFiles=20, pt=(0,0), fNC=0, fWide=1, followed by UTF-16LE path + "\0\0"
+            byte[] pathBytes = Encoding.Unicode.GetBytes(fullPath + "\0\0");
+            int totalBytes = 20 + pathBytes.Length;
+            byte[] payload = new byte[totalBytes];
+            BitConverter.GetBytes(20).CopyTo(payload, 0); // pFiles
+            BitConverter.GetBytes(1).CopyTo(payload, 16); // fWide = TRUE
+            Buffer.BlockCopy(pathBytes, 0, payload, 20, pathBytes.Length);
+
+            for (int attempt = 0; attempt < 6; attempt++)
+            {
+                if (!OpenClipboard(nint.Zero))
+                {
+                    Thread.Sleep(25);
+                    continue;
+                }
+
+                nint hGlobal = nint.Zero;
+                try
+                {
+                    if (!EmptyClipboard()) return false;
+                    hGlobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, (nuint)totalBytes);
+                    if (hGlobal == nint.Zero) return false;
+
+                    nint ptr = GlobalLock(hGlobal);
+                    if (ptr == nint.Zero) return false;
+                    try
+                    {
+                        Marshal.Copy(payload, 0, ptr, payload.Length);
+                    }
+                    finally
+                    {
+                        _ = GlobalUnlock(hGlobal);
+                    }
+
+                    if (SetClipboardData(CF_HDROP, hGlobal) == nint.Zero)
+                    {
+                        return false;
+                    }
                     hGlobal = nint.Zero;
                     return true;
                 }

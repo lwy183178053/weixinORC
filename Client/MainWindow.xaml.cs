@@ -37,9 +37,11 @@ namespace Client
             Closed += (_, _) =>
             {
                 _isClosed = true;
+                try { AppServices.LocalBridge.Dispose(); } catch { }
+                try { AppServices.WeComSync.Dispose(); } catch { }
                 try { VoicePlaybackService.Shared.Dispose(); } catch { }
                 try { AppServices.WeChat4Sync.Dispose(); } catch { }
-                AppServices.Logs.Info("SYS", "客户端窗口关闭，已释放后台监听与媒体资源。");
+                AppServices.Logs.Info("SYS", "客户端窗口关闭，已释放后台监听、本地适配与媒体资源。");
                 AppServices.Logs.Flush();
             };
             RootFrame.ContentTransitions = [];
@@ -47,6 +49,7 @@ namespace Client
             ConfigureTitleBar();
             AppServices.Settings.ApplyTheme(AppServices.Settings.IsDarkMode, save: false);
             AppWindow.Changed += AppWindow_Changed;
+            AppServices.LocalBridge.StartIfEnabled();
 
             AppServices.Logs.Info("SYS", $"客户端启动完成，登录窗口 {LoginLogicalWidth}x{LoginLogicalHeight}，工作台默认 {DefaultLogicalWidth}x{DefaultLogicalHeight}。");
             ShowLoginView();

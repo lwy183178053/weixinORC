@@ -173,6 +173,27 @@ func TestChatLookupSkills(t *testing.T) {
 	if !ok || !strings.Contains(raw, `"source":"bing_rss"`) || !strings.Contains(raw, "智美护肤科普指南") || !strings.Contains(raw, "温和洁面") {
 		t.Fatalf("web_search failed: ok=%v raw=%s", ok, raw)
 	}
+
+	// 9. Baidu Baike fallback when Bing returns empty/error (fast China-friendly fallback without DuckDuckGo hang)
+	mockEmptyBing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer mockEmptyBing.Close()
+	mockBaike := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"title":"黎曼猜想","desc":"数学猜想","abstract":"黎曼猜想是关于黎曼ζ函数非平凡零点分布的著名数学猜想。","url":"https://baike.baidu.com/item/rh"}`))
+	}))
+	defer mockBaike.Close()
+
+	prevBaike := baikeSearchBaseURL
+	bingSearchBaseURL = mockEmptyBing.URL
+	baikeSearchBaseURL = mockBaike.URL
+	defer func() { baikeSearchBaseURL = prevBaike }()
+
+	raw, _, _, ok = svc.executeSkill(ctx, owner, "web_search", `{"query":"黎曼猜想 证明","limit":3}`)
+	if !ok || !strings.Contains(raw, `"source":"baidu_baike"`) || !strings.Contains(raw, "黎曼猜想") {
+		t.Fatalf("baike fallback failed: ok=%v raw=%s", ok, raw)
+	}
 }
 
 func TestGroupAutoReplyAnnouncementAndMultimodalFallback(t *testing.T) {

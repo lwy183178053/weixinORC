@@ -820,11 +820,13 @@ func (svc *Service) GroupAutoReply(ctx context.Context, ownerID string, input Gr
 
 	res, err := svc.runToolCallingChat(ctx, cfg, endpoint, ownerID, sysBuf.String(), nil, userPrompt, cleanImgs, toolChatOptions{
 		Tools:                  buildAutoReplyOpenAITools(),
-		MaxRounds:              3,
-		MaxToolCalls:           5,
+		MaxRounds:              2,
+		MaxToolCalls:           4,
+		MaxWebSearches:         2,
 		LockedGroupID:          group.ID,
 		AllowWorkspaceFallback: false,
 		MaxTokensOverride:      replyMaxTokens,
+		TotalTimeout:           95 * time.Second,
 	})
 	if err != nil {
 		return ChatResult{}, err
@@ -948,9 +950,11 @@ type toolChatOptions struct {
 	Tools                  []openAITool
 	MaxRounds              int
 	MaxToolCalls           int
-	LockedGroupID          int64 // When > 0, runs in strict auto-reply scope (only shared tools + current group history)
+	MaxWebSearches         int           // When > 0, caps repeated web_search retries so slow searches never stall replies
+	LockedGroupID          int64         // When > 0, runs in strict auto-reply scope (only shared tools + current group history)
 	AllowWorkspaceFallback bool
-	MaxTokensOverride      int // When > 0, overrides max_tokens directly (e.g. scaled from frontend max_reply_chars)
+	MaxTokensOverride      int           // When > 0, overrides max_tokens directly (e.g. scaled from frontend max_reply_chars)
+	TotalTimeout           time.Duration // Overall end-to-end budget across all tool rounds + final synthesis
 }
 
 func (svc *Service) AgentChat(ctx context.Context, ownerID string, history []ChatTurn, userMessage string, images []string) (ChatResult, error) {
@@ -1031,20 +1035,42 @@ func (svc *Service) runToolCallingChat(
 
 	trace := make([]ToolTraceItem, 0)
 	started := time.Now()
-	timeout := defaultAITimeout
+	totalBudget := opts.TotalTimeout
+	if totalBudget <= 0 {
+		totalBudget = 110 * time.Second
+	}
+	deadline := started.Add(totalBudget)
+	perRoundCap := defaultAITimeout
+	if perRoundCap > 55*time.Second && totalBudget <= 100*time.Second {
+		perRoundCap = 55 * time.Second
+	}
 	totalCalls := 0
+	webSearchCalls := 0
 
 	userMsgIdx := len(reqMsgs) - 1
 	visionRetriedTextOnly := false
 
 	for round := 0; round < maxRounds; round++ {
+		remaining := time.Until(deadline)
+		if round > 0 && remaining < 28*time.Second {
+			// Reserve remaining time for one clean final synthesis turn without tools so we never hit the client's 130s timeout.
+			break
+		}
+		roundTimeout := perRoundCap
+		if remaining > 0 && remaining < roundTimeout {
+			roundTimeout = remaining
+		}
+		if roundTimeout < 12*time.Second {
+			roundTimeout = 12 * time.Second
+		}
+
 		resp, err := callOpenAI(ctx, endpoint, cfg.APIKey, openAIRequest{
 			Model:      cfg.Model,
 			Messages:   reqMsgs,
 			Tools:      tools,
 			ToolChoice: "auto",
 			MaxTokens:  maxTokens,
-		}, timeout)
+		}, roundTimeout)
 		if err != nil {
 			// Graceful multimodal fallback: if the configured model/gateway is text-only and rejects image_url,
 			// strip attached images and retry seamlessly instead of failing the reply.
@@ -1058,7 +1084,7 @@ func (svc *Service) runToolCallingChat(
 			// Graceful fallback if provider/model does not support function calling tools
 			if round == 0 && looksLikeToolsUnsupported(err) {
 				if opts.AllowWorkspaceFallback {
-					fallbackReply, fbTrace, fbErr := svc.agentFallbackWithoutTools(ctx, cfg, endpoint, ownerID, history, userMsg, cleanImgs, timeout)
+					fallbackReply, fbTrace, fbErr := svc.agentFallbackWithoutTools(ctx, cfg, endpoint, ownerID, history, userMsg, cleanImgs, roundTimeout)
 					if fbErr != nil {
 						return ChatResult{}, err
 					}
@@ -1073,7 +1099,7 @@ func (svc *Service) runToolCallingChat(
 					Model:     cfg.Model,
 					Messages:  reqMsgs,
 					MaxTokens: maxTokens,
-				}, timeout)
+				}, roundTimeout)
 				if directErr != nil {
 					return ChatResult{}, err
 				}
@@ -1111,6 +1137,17 @@ func (svc *Service) runToolCallingChat(
 				})
 				continue
 			}
+			if tc.Function.Name == "web_search" && opts.MaxWebSearches > 0 {
+				webSearchCalls++
+				if webSearchCalls > opts.MaxWebSearches {
+					reqMsgs = append(reqMsgs, openAIMessage{
+						Role:       "tool",
+						ToolCallID: tc.ID,
+						Content:    `{"error":"已达到本轮联网搜索次数上限，请勿继续搜索，直接结合已检索到的内容与自身知识完整作答。"}`,
+					})
+					continue
+				}
+			}
 
 			toolResult, target, summary, ok := svc.executeSkillScoped(ctx, ownerID, tc.Function.Name, tc.Function.Arguments, opts.LockedGroupID)
 			trace = append(trace, ToolTraceItem{
@@ -1128,12 +1165,19 @@ func (svc *Service) runToolCallingChat(
 		}
 	}
 
-	// Final synthesis turn without tools if loop exhausted
+	// Final synthesis turn without tools if loop exhausted or time budget ran low
+	finalTimeout := time.Until(deadline)
+	if finalTimeout < 20*time.Second {
+		finalTimeout = 20 * time.Second
+	}
+	if finalTimeout > 45*time.Second {
+		finalTimeout = 45 * time.Second
+	}
 	finalResp, err := callOpenAI(ctx, endpoint, cfg.APIKey, openAIRequest{
 		Model:     cfg.Model,
 		Messages:  reqMsgs,
 		MaxTokens: maxTokens,
-	}, timeout)
+	}, finalTimeout)
 	if err != nil {
 		return ChatResult{}, err
 	}
@@ -1265,8 +1309,18 @@ func (svc *Service) executeSkillScoped(ctx context.Context, ownerID, name, rawAr
 				"query":   query,
 				"source":  source,
 				"error":   "联网搜索暂时不可用：" + err.Error(),
+				"hint":    "请勿继续重复调用 web_search，直接结合自身专业知识与已有对话内容如实作答。",
 				"results": []WebSearchResult{},
 			}), targetLabel, "联网检索失败", false
+		}
+		if len(results) == 0 {
+			return mustJSON(map[string]any{
+				"query":   query,
+				"source":  source,
+				"count":   0,
+				"hint":    "未命中有效网页结果，请勿反复重试搜索，直接基于已有知识与上下文如实作答。",
+				"results": []WebSearchResult{},
+			}), targetLabel, "未命中结果", true
 		}
 		return mustJSON(map[string]any{
 			"query":   query,

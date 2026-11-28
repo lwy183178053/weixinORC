@@ -15,6 +15,7 @@ namespace Client.Pages
         private readonly ObservableCollection<string> _activityLogs = [];
         private readonly ObservableCollection<WeChatAccountDto> _linkedAccounts = [];
         private readonly ObservableCollection<string> _wecomCorpLines = [];
+        private readonly ObservableCollection<string> _autoAcceptLogs = [];
         private CancellationTokenSource? _accountAvatarCts;
         private bool _isInitializingUi = true;
         private bool _isBusy;
@@ -26,6 +27,7 @@ namespace Client.Pages
             ActivityLogListView.ItemsSource = _activityLogs;
             LinkedAccountsListView.ItemsSource = _linkedAccounts;
             WeComCorpsListView.ItemsSource = _wecomCorpLines;
+            AutoAcceptLogListView.ItemsSource = _autoAcceptLogs;
             Loaded += WeChatSyncPage_Loaded;
             Unloaded += WeChatSyncPage_Unloaded;
         }
@@ -39,6 +41,9 @@ namespace Client.Pages
             AppServices.WeChat4Sync.AccountsUpdated -= OnAccountsUpdated;
             AppServices.WeComSync.StatusChanged -= OnWeComUpdated;
             AppServices.WeComSync.AccountsUpdated -= OnWeComAccountsUpdated;
+            AppServices.WeComSync.ImportedSelectionChanged -= OnWeComAccountsUpdated;
+            AppServices.FriendAutoAccept.StateChanged -= OnFriendAutoAcceptStateChanged;
+            AppServices.FriendAutoAccept.RecordAdded -= OnFriendAutoAcceptRecordAdded;
 
             AppServices.Settings.ThemeChanged += OnThemeChanged;
             AppServices.WeChat4Sync.AutoSyncStatusChanged += OnAutoSyncStatusChanged;
@@ -47,6 +52,9 @@ namespace Client.Pages
             AppServices.WeChat4Sync.AccountsUpdated += OnAccountsUpdated;
             AppServices.WeComSync.StatusChanged += OnWeComUpdated;
             AppServices.WeComSync.AccountsUpdated += OnWeComAccountsUpdated;
+            AppServices.WeComSync.ImportedSelectionChanged += OnWeComAccountsUpdated;
+            AppServices.FriendAutoAccept.StateChanged += OnFriendAutoAcceptStateChanged;
+            AppServices.FriendAutoAccept.RecordAdded += OnFriendAutoAcceptRecordAdded;
 
             _isInitializingUi = true;
             var cfg = AppServices.Settings.Current;
@@ -54,9 +62,28 @@ namespace Client.Pages
             WeComWatchToggle.IsOn = AppServices.WeComSync.IsWatcherRunning;
             OptImagesCheck.IsChecked = cfg.WeChatSyncIncludeImages;
             OptAvatarsCheck.IsChecked = cfg.WeChatSyncIncludeAvatars;
+
+            AutoAcceptFriendToggle.IsOn = cfg.AutoAcceptFriendEnabled;
+            AutoAcceptModeCombo.SelectedIndex = cfg.AutoAcceptTriggerMode switch
+            {
+                "interval_30" => 1,
+                "interval_60" => 2,
+                "interval_120" => 3,
+                _ => 0
+            };
+            AutoAcceptPermissionCombo.SelectedIndex = cfg.AutoAcceptChatOnlyPermission ? 1 : 0;
+            AutoAcceptRemarkBox.Text = cfg.AutoAcceptRemarkPrefix;
+            AutoAcceptTagBox.Text = cfg.AutoAcceptAutoTag;
+            AutoAcceptKeywordBox.Text = cfg.AutoAcceptKeywordFilter;
+            AutoAcceptIdleCheck.IsChecked = cfg.AutoAcceptOnlyWhenIdle;
+            AutoAcceptReturnChatCheck.IsChecked = cfg.AutoAcceptReturnToChatTab;
+            AutoAcceptOverlayCheck.IsChecked = cfg.AutoAcceptShowClickOverlay;
+            AutoAcceptIncludeExpiredCheck.IsChecked = cfg.AutoAcceptIncludeExpired;
             _isInitializingUi = false;
 
             LoadExistingLogs();
+            LoadAutoAcceptLogs();
+            RefreshAutoAcceptCard();
             SyncLinkedAccountsCollection();
             await RefreshAllUiAsync();
 
@@ -77,6 +104,9 @@ namespace Client.Pages
             AppServices.WeChat4Sync.AccountsUpdated -= OnAccountsUpdated;
             AppServices.WeComSync.StatusChanged -= OnWeComUpdated;
             AppServices.WeComSync.AccountsUpdated -= OnWeComAccountsUpdated;
+            AppServices.WeComSync.ImportedSelectionChanged -= OnWeComAccountsUpdated;
+            AppServices.FriendAutoAccept.StateChanged -= OnFriendAutoAcceptStateChanged;
+            AppServices.FriendAutoAccept.RecordAdded -= OnFriendAutoAcceptRecordAdded;
             _accountAvatarCts?.Cancel();
             _accountAvatarCts?.Dispose();
             _accountAvatarCts = null;
@@ -89,6 +119,7 @@ namespace Client.Pages
                 foreach (var acc in _linkedAccounts) acc.NotifyVisualsChanged();
                 RefreshWeChatCard();
                 RefreshWeComCard();
+                RefreshAutoAcceptCard();
                 UpdateOverallHeader();
             });
         }
@@ -354,10 +385,10 @@ namespace Client.Pages
             WeComStatusBadgeText.Foreground = (Brush)Application.Current.Resources[running ? "SuccessTextBrush" : (accounts.Count > 0 ? "BrandPrimaryBrush" : "TextSecondaryBrush")];
             WeComStatusBadgeText.Text = running ? "在线" : (accounts.Count > 0 ? "离线缓存" : "未运行");
 
-            int totalUsers = accounts.Sum(a => a.Reader.Users.Count);
-            int totalGroups = accounts.Sum(a => a.Reader.Groups.Count);
+            int importedContacts = wecom.GetImportedContactKeys().Count;
+            int importedGroups = wecom.GetImportedGroupKeys().Count;
             WeComKpiCorpsText.Text = $"{accounts.Count} 家企业";
-            WeComKpiTotalsText.Text = $"{totalUsers} 联系人 · {totalGroups} 群";
+            WeComKpiTotalsText.Text = $"{importedContacts} 联系人 · {importedGroups} 群";
             WeComWatchSummaryText.Text = wecom.StatusText;
 
             if (accounts.Count > 0)
@@ -450,6 +481,126 @@ namespace Client.Pages
         private void OpenWeChatGroups_Click(object sender, RoutedEventArgs e) => WorkbenchPage.Current?.SwitchSection("groups");
         private void OpenWeComPersonal_Click(object sender, RoutedEventArgs e) => WorkbenchPage.Current?.SwitchSection("wecom_contacts");
         private void OpenWeComGroups_Click(object sender, RoutedEventArgs e) => WorkbenchPage.Current?.SwitchSection("wecom_groups");
+
+        // ---- Auto-Accept WeChat Friend Requests Handlers ----
+
+        private void OnFriendAutoAcceptStateChanged() => DispatcherQueue.TryEnqueue(RefreshAutoAcceptCard);
+
+        private void OnFriendAutoAcceptRecordAdded(FriendAutoAcceptRecord rec)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_autoAcceptLogs.Count == 1 && _autoAcceptLogs[0].StartsWith("暂无自动同意记录", StringComparison.Ordinal))
+                {
+                    _autoAcceptLogs.Clear();
+                }
+                _autoAcceptLogs.Insert(0, rec.FormattedLine);
+                while (_autoAcceptLogs.Count > 60) _autoAcceptLogs.RemoveAt(_autoAcceptLogs.Count - 1);
+                RefreshAutoAcceptCard();
+            });
+        }
+
+        private void LoadAutoAcceptLogs()
+        {
+            _autoAcceptLogs.Clear();
+            foreach (var r in AppServices.FriendAutoAccept.GetRecentRecords())
+            {
+                _autoAcceptLogs.Add(r.FormattedLine);
+            }
+            if (_autoAcceptLogs.Count == 0)
+            {
+                _autoAcceptLogs.Add("暂无自动同意记录。开启上方开关或点击「立即检测并同意」后将显示每次 OCR 识别与同意结果。");
+            }
+        }
+
+        private void RefreshAutoAcceptCard()
+        {
+            var svc = AppServices.FriendAutoAccept;
+            var cfg = AppServices.Settings.Current;
+            bool enabled = cfg.AutoAcceptFriendEnabled;
+            bool runningNow = svc.IsExecuting;
+
+            AutoAcceptStatusDot.Fill = (Brush)Application.Current.Resources[
+                runningNow ? "BrandPrimaryBrush" : (enabled ? "SuccessTextBrush" : "TextMutedBrush")];
+            AutoAcceptStatusBadge.Background = (Brush)Application.Current.Resources[
+                runningNow ? "BrandSoftBgBrush" : (enabled ? "SuccessBgBrush" : "AppInputBgBrush")];
+            AutoAcceptStatusText.Foreground = (Brush)Application.Current.Resources[
+                runningNow ? "BrandPrimaryBrush" : (enabled ? "SuccessTextBrush" : "TextSecondaryBrush")];
+            AutoAcceptStatusText.Text = runningNow ? "OCR 执行中..." : (enabled ? "自动监听中" : "未开启");
+
+            string lastCheck = svc.LastCheckedAt.HasValue ? svc.LastCheckedAt.Value.ToString("HH:mm:ss") : "尚未执行";
+            AutoAcceptStatsText.Text = $"累计已自动同意 {cfg.AutoAcceptTotalAcceptedCount} 位好友 · 上次检测：{lastCheck} · {svc.StatusText}";
+            RunAutoAcceptNowButton.IsEnabled = !runningNow;
+        }
+
+        private void AutoAcceptFriendToggle_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializingUi) return;
+            AppServices.FriendAutoAccept.ConfigureEnabled(AutoAcceptFriendToggle.IsOn);
+            RefreshAutoAcceptCard();
+            ShowBanner(AutoAcceptFriendToggle.IsOn ? "✓ 已开启自动同意微信好友申请" : "已关闭自动同意微信好友申请", isError: false);
+        }
+
+        private void AutoAcceptConfig_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_isInitializingUi) return;
+            SaveAutoAcceptSettingsFromUi();
+        }
+
+        private void AutoAcceptText_Changed(object sender, TextChangedEventArgs e)
+        {
+            if (_isInitializingUi) return;
+            SaveAutoAcceptSettingsFromUi();
+        }
+
+        private void SaveAutoAcceptSettingsFromUi()
+        {
+            var cfg = AppServices.Settings.Current;
+            if (AutoAcceptModeCombo.SelectedItem is ComboBoxItem modeItem && modeItem.Tag is string modeTag)
+            {
+                cfg.AutoAcceptTriggerMode = modeTag;
+            }
+            if (AutoAcceptPermissionCombo.SelectedItem is ComboBoxItem permItem && permItem.Tag is string permTag)
+            {
+                cfg.AutoAcceptChatOnlyPermission = string.Equals(permTag, "chat_only", StringComparison.OrdinalIgnoreCase);
+            }
+            cfg.AutoAcceptRemarkPrefix = AutoAcceptRemarkBox.Text?.Trim() ?? string.Empty;
+            cfg.AutoAcceptAutoTag = AutoAcceptTagBox.Text?.Trim() ?? string.Empty;
+            cfg.AutoAcceptKeywordFilter = AutoAcceptKeywordBox.Text?.Trim() ?? string.Empty;
+            cfg.AutoAcceptOnlyWhenIdle = AutoAcceptIdleCheck.IsChecked == true;
+            cfg.AutoAcceptReturnToChatTab = AutoAcceptReturnChatCheck.IsChecked == true;
+            cfg.AutoAcceptShowClickOverlay = AutoAcceptOverlayCheck.IsChecked == true;
+            cfg.AutoAcceptIncludeExpired = AutoAcceptIncludeExpiredCheck.IsChecked == true;
+            AppServices.Settings.Save();
+            AppServices.FriendAutoAccept.NotifyConfigUpdated();
+            RefreshAutoAcceptCard();
+        }
+
+        private async void RunAutoAcceptNowButton_Click(object sender, RoutedEventArgs e)
+        {
+            RunAutoAcceptNowButton.IsEnabled = false;
+            try
+            {
+                ShowBanner("正在唤起电脑微信并通过 OCR 检查「新的朋友」好友申请（按 ESC 可中止）...", isError: false);
+                var result = await AppServices.FriendAutoAccept.RunOnceNowAsync();
+                RefreshAutoAcceptCard();
+                ShowBanner(result.Success ? $"✓ {result.Message}" : result.Message, isError: !result.Success && !result.CancelledByEsc);
+            }
+            catch (Exception ex)
+            {
+                ShowBanner($"检测好友申请异常：{ex.Message}", isError: true);
+            }
+            finally
+            {
+                RefreshAutoAcceptCard();
+            }
+        }
+
+        private void ClearAutoAcceptLogs_Click(object sender, RoutedEventArgs e)
+        {
+            AppServices.FriendAutoAccept.ClearRecords();
+            LoadAutoAcceptLogs();
+        }
 
         private void RelaunchAdminButton_Click(object sender, RoutedEventArgs e)
         {

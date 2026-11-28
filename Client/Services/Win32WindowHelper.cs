@@ -1402,6 +1402,61 @@ namespace Client.Services
             int y1,
             int rop);
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct LASTINPUTINFO
+        {
+            public uint cbSize;
+            public uint dwTime;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+
+        internal static long GetUserIdleMilliseconds()
+        {
+            var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+            if (!GetLastInputInfo(ref info)) return 0;
+            uint nowTick = unchecked((uint)Environment.TickCount);
+            uint diff = unchecked(nowTick - info.dwTime);
+            return diff;
+        }
+
+        internal static RECT GetVirtualDesktopRect()
+        {
+            int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+            int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+            int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+            int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+            return new RECT { Left = vx, Top = vy, Right = vx + Math.Max(1, vw), Bottom = vy + Math.Max(1, vh) };
+        }
+
+        internal sealed record TopLevelWindowRect(nint Hwnd, RECT Rect, string Title, string ClassName, bool IsForeground);
+
+        internal static List<TopLevelWindowRect> EnumVisibleTopLevelWindowsForPid(int pid, nint excludeHwnd = 0)
+        {
+            var list = new List<TopLevelWindowRect>();
+            if (pid <= 0) return list;
+            nint fg = GetForegroundWindow();
+            EnumWindows((hWnd, lParam) =>
+            {
+                if (hWnd == excludeHwnd || !IsWindowVisible(hWnd) || IsIconic(hWnd)) return true;
+                _ = GetWindowThreadProcessId(hWnd, out uint rawPid);
+                if (unchecked((int)rawPid) != pid) return true;
+                if (!GetWindowRect(hWnd, out var rect) || rect.Width < 120 || rect.Height < 120) return true;
+                list.Add(new TopLevelWindowRect(
+                    hWnd,
+                    rect,
+                    GetWindowTitleText(hWnd),
+                    GetWindowClassName(hWnd),
+                    hWnd == fg));
+                return true;
+            }, nint.Zero);
+            return list
+                .OrderByDescending(w => w.IsForeground)
+                .ThenByDescending(w => w.Rect.Width * w.Rect.Height)
+                .ToList();
+        }
+
         internal static string GetWindowTitleText(nint hWnd)
         {
             int length = GetWindowTextLength(hWnd);

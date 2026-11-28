@@ -44,6 +44,113 @@ namespace Client.Services.WeComDb
         public event Action<WeComEvent>? EventDetected;
         public event Action<string>? StatusChanged;
         public event Action? AccountsUpdated;
+        public event Action? ImportedSelectionChanged;
+
+        public static string MakeContactKey(string? accountId, string? userId) =>
+            $"{(accountId ?? string.Empty).Trim()}|{(userId ?? string.Empty).Trim()}";
+
+        public static string MakeGroupKey(string? accountId, string? conversationId) =>
+            $"{(accountId ?? string.Empty).Trim()}|{(conversationId ?? string.Empty).Trim()}";
+
+        public HashSet<string> GetImportedContactKeys()
+        {
+            lock (_watchLock)
+            {
+                return new HashSet<string>(
+                    AppServices.Settings.Current.ImportedWeComContactKeys.Where(k => !string.IsNullOrWhiteSpace(k)),
+                    StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        public HashSet<string> GetImportedGroupKeys()
+        {
+            lock (_watchLock)
+            {
+                return new HashSet<string>(
+                    AppServices.Settings.Current.ImportedWeComGroupKeys.Where(k => !string.IsNullOrWhiteSpace(k)),
+                    StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        public int AddImportedContactKeys(IEnumerable<string> keys)
+        {
+            int added = 0;
+            lock (_watchLock)
+            {
+                var set = new HashSet<string>(AppServices.Settings.Current.ImportedWeComContactKeys, StringComparer.OrdinalIgnoreCase);
+                foreach (var k in keys)
+                {
+                    if (!string.IsNullOrWhiteSpace(k) && set.Add(k.Trim())) added++;
+                }
+                if (added > 0)
+                {
+                    AppServices.Settings.Current.ImportedWeComContactKeys = set.ToList();
+                    AppServices.Settings.Save();
+                }
+            }
+            if (added > 0) ImportedSelectionChanged?.Invoke();
+            return added;
+        }
+
+        public int RemoveImportedContactKeys(IEnumerable<string> keys)
+        {
+            int removed = 0;
+            lock (_watchLock)
+            {
+                var set = new HashSet<string>(AppServices.Settings.Current.ImportedWeComContactKeys, StringComparer.OrdinalIgnoreCase);
+                foreach (var k in keys)
+                {
+                    if (!string.IsNullOrWhiteSpace(k) && set.Remove(k.Trim())) removed++;
+                }
+                if (removed > 0)
+                {
+                    AppServices.Settings.Current.ImportedWeComContactKeys = set.ToList();
+                    AppServices.Settings.Save();
+                }
+            }
+            if (removed > 0) ImportedSelectionChanged?.Invoke();
+            return removed;
+        }
+
+        public int AddImportedGroupKeys(IEnumerable<string> keys)
+        {
+            int added = 0;
+            lock (_watchLock)
+            {
+                var set = new HashSet<string>(AppServices.Settings.Current.ImportedWeComGroupKeys, StringComparer.OrdinalIgnoreCase);
+                foreach (var k in keys)
+                {
+                    if (!string.IsNullOrWhiteSpace(k) && set.Add(k.Trim())) added++;
+                }
+                if (added > 0)
+                {
+                    AppServices.Settings.Current.ImportedWeComGroupKeys = set.ToList();
+                    AppServices.Settings.Save();
+                }
+            }
+            if (added > 0) ImportedSelectionChanged?.Invoke();
+            return added;
+        }
+
+        public int RemoveImportedGroupKeys(IEnumerable<string> keys)
+        {
+            int removed = 0;
+            lock (_watchLock)
+            {
+                var set = new HashSet<string>(AppServices.Settings.Current.ImportedWeComGroupKeys, StringComparer.OrdinalIgnoreCase);
+                foreach (var k in keys)
+                {
+                    if (!string.IsNullOrWhiteSpace(k) && set.Remove(k.Trim())) removed++;
+                }
+                if (removed > 0)
+                {
+                    AppServices.Settings.Current.ImportedWeComGroupKeys = set.ToList();
+                    AppServices.Settings.Save();
+                }
+            }
+            if (removed > 0) ImportedSelectionChanged?.Invoke();
+            return removed;
+        }
 
         public WeComReader? GetReaderForAccount(string? accountId)
         {

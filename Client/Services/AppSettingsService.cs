@@ -29,6 +29,19 @@ namespace Client.Services
         public int WeComBridgePort { get; set; } = 8989;
         public string WeComPushUrl { get; set; } = "http://127.0.0.1:9000";
         public string WeComAccountDir { get; set; } = string.Empty;
+        public List<string> ImportedWeComContactKeys { get; set; } = [];
+        public List<string> ImportedWeComGroupKeys { get; set; } = [];
+        public bool AutoAcceptFriendEnabled { get; set; } = false;
+        public string AutoAcceptTriggerMode { get; set; } = "smart";
+        public string AutoAcceptRemarkPrefix { get; set; } = string.Empty;
+        public string AutoAcceptAutoTag { get; set; } = string.Empty;
+        public string AutoAcceptKeywordFilter { get; set; } = string.Empty;
+        public bool AutoAcceptChatOnlyPermission { get; set; } = false;
+        public bool AutoAcceptOnlyWhenIdle { get; set; } = true;
+        public bool AutoAcceptReturnToChatTab { get; set; } = true;
+        public bool AutoAcceptShowClickOverlay { get; set; } = true;
+        public bool AutoAcceptIncludeExpired { get; set; } = false;
+        public int AutoAcceptTotalAcceptedCount { get; set; } = 0;
     }
 
     public sealed class AppSettingsService
@@ -112,6 +125,16 @@ namespace Client.Services
             if (string.IsNullOrWhiteSpace(Current.WeChatPushUrl)) Current.WeChatPushUrl = "http://127.0.0.1:9001";
             if (string.IsNullOrWhiteSpace(Current.WeComPushUrl)) Current.WeComPushUrl = "http://127.0.0.1:9000";
             Current.WeComAccountDir ??= string.Empty;
+            Current.ImportedWeComContactKeys ??= [];
+            Current.ImportedWeComGroupKeys ??= [];
+            if (Current.AutoAcceptTriggerMode is not ("smart" or "interval_30" or "interval_60" or "interval_120"))
+            {
+                Current.AutoAcceptTriggerMode = "smart";
+            }
+            Current.AutoAcceptRemarkPrefix ??= string.Empty;
+            Current.AutoAcceptAutoTag ??= string.Empty;
+            Current.AutoAcceptKeywordFilter ??= string.Empty;
+            if (Current.AutoAcceptTotalAcceptedCount < 0) Current.AutoAcceptTotalAcceptedCount = 0;
         }
 
         public static string NormalizeWorkbenchSection(string? tag) =>

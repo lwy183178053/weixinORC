@@ -259,7 +259,7 @@
                                     </Border>
                                     <Border Grid.Column="1" Padding="10,8" Background="{StaticResource AppSurfaceAltBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="8">
                                         <StackPanel Spacing="2">
-                                            <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="合计联系人与群聊" />
+                                            <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="已导入托管" />
                                             <TextBlock x:Name="WeComKpiTotalsText" FontSize="13.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="0 联系人 · 0 群" />
                                         </StackPanel>
                                     </Border>
@@ -427,7 +427,173 @@
                         </Border>
                     </Grid>
 
-                    <!-- Row 3: Sync Preferences + Live Activity Log -->
+                    <!-- Row 3: Auto-Accept WeChat Friend Requests (OCR + Win32 RPA) -->
+                    <Border
+                        Padding="18,15"
+                        Background="{StaticResource AppSurfaceBrush}"
+                        BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12">
+                        <StackPanel Spacing="12">
+                            <!-- Header -->
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                    <Border Width="30" Height="30" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8">
+                                        <FontIcon FontSize="14" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE8FA;" />
+                                    </Border>
+                                    <StackPanel Spacing="2">
+                                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <TextBlock FontSize="14.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="自动同意微信好友申请（OCR 自动点击）" />
+                                            <Border x:Name="AutoAcceptStatusBadge" Padding="7,2" Background="{StaticResource AppInputBgBrush}" CornerRadius="9">
+                                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                                    <Ellipse x:Name="AutoAcceptStatusDot" Width="6" Height="6" Fill="{StaticResource TextMutedBrush}" />
+                                                    <TextBlock x:Name="AutoAcceptStatusText" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="未开启" />
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
+                                        <TextBlock
+                                            FontSize="11.5"
+                                            Foreground="{StaticResource TextMutedBrush}"
+                                            Text="自动切入微信「通讯录 → 新的朋友」，通过 OCR 识别待验证申请并在「通过朋友验证」弹窗自动点击确定（操作期间按 ESC 随时中止）"
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                    <Button
+                                        x:Name="RunAutoAcceptNowButton"
+                                        Height="30"
+                                        Padding="12,0"
+                                        Click="RunAutoAcceptNowButton_Click"
+                                        FontSize="12"
+                                        Style="{StaticResource SecondaryOutlineButtonStyle}"
+                                        ToolTipService.ToolTip="立即唤起电脑微信，通过 OCR 检查「新的朋友」并自动同意申请">
+                                        <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                                            <FontIcon FontSize="11.5" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE768;" />
+                                            <TextBlock Text="立即检测并同意" />
+                                        </StackPanel>
+                                    </Button>
+                                    <ToggleSwitch
+                                        x:Name="AutoAcceptFriendToggle"
+                                        MinWidth="0"
+                                        VerticalAlignment="Center"
+                                        OffContent="关闭"
+                                        OnContent="开启"
+                                        Toggled="AutoAcceptFriendToggle_Toggled" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Border Height="1" Background="{StaticResource AppBorderSubtleBrush}" />
+
+                            <!-- Settings Grid -->
+                            <Grid ColumnSpacing="14" RowSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <ComboBox
+                                    x:Name="AutoAcceptModeCombo"
+                                    Grid.Row="0"
+                                    Grid.Column="0"
+                                    HorizontalAlignment="Stretch"
+                                    Header="触发方式"
+                                    SelectionChanged="AutoAcceptConfig_Changed">
+                                    <ComboBoxItem Content="智能免打扰（仅在微信有新动态时检测，推荐）" Tag="smart" />
+                                    <ComboBoxItem Content="定时巡检（每 30 秒检查一次）" Tag="interval_30" />
+                                    <ComboBoxItem Content="定时巡检（每 60 秒检查一次）" Tag="interval_60" />
+                                    <ComboBoxItem Content="定时巡检（每 120 秒检查一次）" Tag="interval_120" />
+                                </ComboBox>
+
+                                <ComboBox
+                                    x:Name="AutoAcceptPermissionCombo"
+                                    Grid.Row="0"
+                                    Grid.Column="1"
+                                    HorizontalAlignment="Stretch"
+                                    Header="通过后的朋友权限"
+                                    SelectionChanged="AutoAcceptConfig_Changed">
+                                    <ComboBoxItem Content="聊天、朋友圈、微信运动等（默认）" Tag="full" />
+                                    <ComboBoxItem Content="仅聊天" Tag="chat_only" />
+                                </ComboBox>
+
+                                <TextBox
+                                    x:Name="AutoAcceptRemarkBox"
+                                    Grid.Row="1"
+                                    Grid.Column="0"
+                                    Header="自动备注前缀（可选）"
+                                    PlaceholderText="留空保持默认昵称，例如：新客-"
+                                    Style="{StaticResource SoftTextBoxStyle}"
+                                    TextChanged="AutoAcceptText_Changed" />
+
+                                <TextBox
+                                    x:Name="AutoAcceptTagBox"
+                                    Grid.Row="1"
+                                    Grid.Column="1"
+                                    Header="自动打标签（可选）"
+                                    PlaceholderText="留空不设标签，例如：微信新好友"
+                                    Style="{StaticResource SoftTextBoxStyle}"
+                                    TextChanged="AutoAcceptText_Changed" />
+
+                                <TextBox
+                                    x:Name="AutoAcceptKeywordBox"
+                                    Grid.Row="2"
+                                    Grid.ColumnSpan="2"
+                                    Header="验证消息关键词过滤（可选）"
+                                    PlaceholderText="留空自动同意全部新好友申请；填写关键词则仅同意验证消息命中的申请（逗号分隔，如：咨询,合作,进群）"
+                                    Style="{StaticResource SoftTextBoxStyle}"
+                                    TextChanged="AutoAcceptText_Changed" />
+                            </Grid>
+
+                            <!-- Behavior Checkboxes -->
+                            <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                                <CheckBox x:Name="AutoAcceptIdleCheck" Content="仅在键鼠空闲时自动执行" IsChecked="True" Checked="AutoAcceptConfig_Changed" Unchecked="AutoAcceptConfig_Changed" />
+                                <CheckBox x:Name="AutoAcceptReturnChatCheck" Content="完成后切回「聊天」页签" IsChecked="True" Checked="AutoAcceptConfig_Changed" Unchecked="AutoAcceptConfig_Changed" />
+                                <CheckBox x:Name="AutoAcceptOverlayCheck" Content="显示点击位置指示" IsChecked="True" Checked="AutoAcceptConfig_Changed" Unchecked="AutoAcceptConfig_Changed" />
+                                <CheckBox x:Name="AutoAcceptIncludeExpiredCheck" Content="同时处理「已过期」申请（前往验证）" IsChecked="False" Checked="AutoAcceptConfig_Changed" Unchecked="AutoAcceptConfig_Changed" />
+                            </StackPanel>
+
+                            <!-- Execution Summary & Records -->
+                            <Border
+                                Padding="12,8"
+                                Background="{StaticResource AppSurfaceAltBrush}"
+                                BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                                <StackPanel Spacing="6">
+                                    <Grid>
+                                        <TextBlock x:Name="AutoAcceptStatsText" VerticalAlignment="Center" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="累计已自动同意 0 位好友 · 上次检测：尚未执行" />
+                                        <Button Height="24" Padding="8,0" HorizontalAlignment="Right" Click="ClearAutoAcceptLogs_Click" Content="清空记录" FontSize="11" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                                    </Grid>
+                                    <ListView x:Name="AutoAcceptLogListView" MaxHeight="125" SelectionMode="None">
+                                        <ListView.ItemContainerStyle>
+                                            <Style TargetType="ListViewItem">
+                                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                <Setter Property="Padding" Value="0,2" />
+                                                <Setter Property="MinHeight" Value="0" />
+                                            </Style>
+                                        </ListView.ItemContainerStyle>
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="x:String">
+                                                <TextBlock FontFamily="Consolas" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" IsTextSelectionEnabled="True" Text="{x:Bind}" TextWrapping="Wrap" />
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Row 4: Sync Preferences + Live Activity Log -->
                     <Border
                         Padding="16,12"
                         Background="{StaticResource AppSurfaceBrush}"

@@ -42,6 +42,7 @@ namespace Client.Pages
             UpdateThemeToggleVisual(AppServices.Settings.IsDarkMode);
             AppServices.GroupAutoReply.EnsureInitialized();
             AppServices.WeChat4Sync.StartAutoSyncIfConfigured();
+            AppServices.FriendAutoAccept.StartIfConfigured();
             string initialSection = AppSettingsService.NormalizeWorkbenchSection(AppServices.Settings.Current.LastWorkbenchSection);
             SwitchSection(initialSection, persist: false);
         }
@@ -368,6 +369,7 @@ namespace Client.Pages
             try
             {
                 AppServices.GroupAutoReply.ResetRuntimeStateForLogout();
+                AppServices.FriendAutoAccept.StopWatching();
                 AppServices.WeChat4Sync.ResetAccountCachesForLogout();
                 await AppServices.Backend.LogoutAsync();
                 CustomersPage.ClearSessionLocalState();

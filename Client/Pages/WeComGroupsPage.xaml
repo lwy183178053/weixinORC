@@ -18,36 +18,112 @@
             <ColumnDefinition x:Name="RightPaneColumn" Width="346" MinWidth="280" />
         </Grid.ColumnDefinitions>
 
-        <!-- Column 0: Enterprise-Grouped WeCom Groups Sidebar -->
+        <!-- Column 0: Enterprise-Grouped Imported WeCom Groups Sidebar -->
         <Border Grid.Column="0" Background="{StaticResource AppSurfaceAltBrush}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="56" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <!-- Search -->
+                <!-- Search + Multi-Select + Unified "+" Import Button -->
                 <Border
                     Grid.Row="0"
                     Padding="10,0"
                     Background="{StaticResource AppSurfaceBrush}"
                     BorderBrush="{StaticResource AppBorderBrush}"
                     BorderThickness="0,0,0,1">
-                    <TextBox
-                        x:Name="SearchBox"
-                        Height="32"
-                        Padding="8,5"
-                        VerticalAlignment="Center"
-                        FontSize="12"
-                        PlaceholderText="搜索企微群名/企业/成员..."
-                        Style="{StaticResource SoftTextBoxStyle}"
-                        TextChanged="SearchBox_TextChanged" />
+                    <Grid ColumnSpacing="5" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox
+                            x:Name="SearchBox"
+                            Height="32"
+                            Padding="8,5"
+                            FontSize="12"
+                            PlaceholderText="搜索已导入企微群..."
+                            Style="{StaticResource SoftTextBoxStyle}"
+                            TextChanged="SearchBox_TextChanged" />
+                        <Button
+                            x:Name="MultiSelectGroupsButton"
+                            Grid.Column="1"
+                            Width="30"
+                            Height="30"
+                            Padding="0"
+                            Click="MultiSelectGroupsButton_Click"
+                            CornerRadius="6"
+                            Style="{StaticResource SecondaryOutlineButtonStyle}"
+                            ToolTipService.ToolTip="多选批量移除群聊">
+                            <FontIcon x:Name="MultiSelectGroupsIcon" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Glyph="&#xE762;" />
+                        </Button>
+                        <Button
+                            x:Name="AddWeComGroupButton"
+                            Grid.Column="2"
+                            Width="30"
+                            Height="30"
+                            Padding="0"
+                            Click="AddWeComGroupButton_Click"
+                            CornerRadius="6"
+                            Style="{StaticResource PrimaryVioletButtonStyle}"
+                            ToolTipService.ToolTip="从企业微信选择群聊导入">
+                            <FontIcon FontSize="13" Foreground="#FFFFFF" Glyph="&#xE710;" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <!-- Compact Batch Remove Bar (Visible in Multi-Select Mode) -->
+                <Border
+                    x:Name="GroupMultiSelectBar"
+                    Grid.Row="1"
+                    Padding="8,5"
+                    Background="{StaticResource BrandSoftBgBrush}"
+                    BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                    BorderThickness="0,0,0,1"
+                    Visibility="Collapsed">
+                    <Grid ColumnSpacing="4">
+                        <TextBlock
+                            x:Name="SelectedGroupsCountText"
+                            VerticalAlignment="Center"
+                            FontSize="11.5"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource BrandHighlightTextBrush}"
+                            Text="已选 0" />
+                        <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="4">
+                            <Button
+                                Height="24"
+                                Padding="7,0"
+                                Click="SelectAllGroupsButton_Click"
+                                Content="全选"
+                                FontSize="11"
+                                Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                            <Button
+                                x:Name="RemoveSelectedGroupsButton"
+                                Height="24"
+                                Padding="7,0"
+                                Click="RemoveSelectedGroupsButton_Click"
+                                Content="移除"
+                                FontSize="11"
+                                IsEnabled="False"
+                                Style="{StaticResource DangerOutlineButtonStyle}" />
+                            <Button
+                                Height="24"
+                                Padding="7,0"
+                                Click="ExitMultiSelectButton_Click"
+                                Content="取消"
+                                FontSize="11"
+                                Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                        </StackPanel>
+                    </Grid>
                 </Border>
 
                 <!-- Enterprise Summary Strip -->
                 <Border
-                    Grid.Row="1"
+                    Grid.Row="2"
                     Padding="10,6"
                     Background="{StaticResource AppSurfaceBrush}"
                     BorderBrush="{StaticResource AppBorderSubtleBrush}"
@@ -57,12 +133,12 @@
                         VerticalAlignment="Center"
                         FontSize="11.5"
                         Foreground="{StaticResource TextMutedBrush}"
-                        Text="正在扫描本机企业微信群聊..."
+                        Text="点击右上角「+」按企业导入监控群聊"
                         TextTrimming="CharacterEllipsis" />
                 </Border>
 
                 <!-- Enterprise-Grouped Collapsible Group List -->
-                <Grid Grid.Row="2">
+                <Grid Grid.Row="3">
                     <ListView
                         x:Name="GroupsListView"
                         Padding="6,4"
@@ -119,27 +195,49 @@
                                         BorderThickness="1"
                                         CornerRadius="7"
                                         Visibility="{x:Bind ItemRowVisibility}">
+                                        <Border.ContextFlyout>
+                                            <MenuFlyout>
+                                                <MenuFlyoutItem Click="MultiSelectRowMenuItem_Click" Text="多选批量管理">
+                                                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE762;" /></MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutSeparator />
+                                                <MenuFlyoutItem Click="RemoveGroupRowMenuItem_Click" Foreground="{StaticResource DangerTextBrush}" Text="从监控列表移除">
+                                                    <MenuFlyoutItem.Icon><FontIcon Foreground="{StaticResource DangerTextBrush}" Glyph="&#xE74D;" /></MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                            </MenuFlyout>
+                                        </Border.ContextFlyout>
                                         <Grid ColumnSpacing="8">
                                             <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="34" />
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
 
-                                            <Border
+                                            <CheckBox
                                                 Grid.Column="0"
+                                                MinWidth="0"
+                                                MinHeight="0"
+                                                Padding="0"
+                                                VerticalAlignment="Center"
+                                                Click="GroupRowCheckBox_Click"
+                                                IsChecked="{x:Bind IsChecked, Mode=TwoWay}"
+                                                Visibility="{x:Bind ItemCheckVisibility, Mode=OneWay}" />
+
+                                            <Border
+                                                Grid.Column="1"
                                                 Width="34"
                                                 Height="34"
-                                                Background="{StaticResource BrandSoftBgBrush}"
-                                                BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                                                Background="{StaticResource InfoBgBrush}"
+                                                BorderBrush="{StaticResource InfoBorderBrush}"
                                                 BorderThickness="1"
                                                 CornerRadius="7">
                                                 <Grid>
-                                                    <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind AvatarInitial}" Visibility="{x:Bind AvatarInitialVisibility, Mode=OneWay}" />
+                                                    <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="{StaticResource InfoTextBrush}" Text="{x:Bind AvatarInitial}" Visibility="{x:Bind AvatarInitialVisibility, Mode=OneWay}" />
                                                     <Image Source="{x:Bind AvatarImage, Mode=OneWay}" Stretch="UniformToFill" Visibility="{x:Bind AvatarImageVisibility, Mode=OneWay}" />
                                                 </Grid>
                                             </Border>
 
-                                            <Grid Grid.Column="1" VerticalAlignment="Center" RowSpacing="2">
+                                            <Grid Grid.Column="2" VerticalAlignment="Center" RowSpacing="2">
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="Auto" />
                                                     <RowDefinition Height="Auto" />
@@ -171,10 +269,10 @@
                         </ListView.ItemTemplate>
                     </ListView>
 
-                    <StackPanel x:Name="EmptySidebarHint" Padding="20" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" Visibility="Collapsed">
-                        <FontIcon HorizontalAlignment="Center" FontSize="26" Foreground="{StaticResource TextMutedBrush}" Glyph="&#xE902;" />
-                        <TextBlock x:Name="EmptySidebarText" HorizontalAlignment="Center" FontSize="12.5" Foreground="{StaticResource TextSecondaryBrush}" Text="暂未读取到企业微信群聊" TextAlignment="Center" TextWrapping="Wrap" />
-                        <Button HorizontalAlignment="Center" Height="32" Click="RefreshButton_Click" Content="刷新同步" FontSize="12" Style="{StaticResource PrimaryVioletButtonStyle}" />
+                    <StackPanel x:Name="EmptySidebarHint" Margin="20,44" HorizontalAlignment="Center" VerticalAlignment="Top" Spacing="10" Visibility="Collapsed">
+                        <TextBlock HorizontalAlignment="Center" FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="暂未导入企微群聊" />
+                        <TextBlock x:Name="EmptySidebarText" HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="点击下方或左上角「+」，按企业勾选要管理的企微群导入群成员与聊天记录。" TextAlignment="Center" TextWrapping="Wrap" />
+                        <Button HorizontalAlignment="Center" Height="32" Click="AddWeComGroupButton_Click" Content="从企业微信选择群聊导入" FontSize="12" Style="{StaticResource PrimaryVioletButtonStyle}" />
                     </StackPanel>
                 </Grid>
             </Grid>
@@ -205,12 +303,12 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <TextBlock x:Name="ActiveGroupTitle" FontSize="15.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="请选择左侧企业微信群聊" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Name="ActiveGroupTitle" FontSize="15.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="请选择左侧企微群聊" TextTrimming="CharacterEllipsis" />
                             <Border x:Name="ActiveCorpBadge" Padding="7,2" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8" Visibility="Collapsed">
                                 <TextBlock x:Name="ActiveCorpBadgeText" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" />
                             </Border>
                         </StackPanel>
-                        <TextBlock x:Name="ActiveGroupMeta" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="按企业微信不同企业隔离展示全部群聊记录与群成员" TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="ActiveGroupMeta" FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="点击左上角「+」按企业挑选并导入群聊，导入后按企业分组实时监听" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
 
                     <Button
@@ -223,7 +321,7 @@
                         Click="RefreshButton_Click"
                         FontSize="12"
                         Style="{StaticResource SecondaryOutlineButtonStyle}"
-                        ToolTipService.ToolTip="刷新所有企业微信群聊与群消息">
+                        ToolTipService.ToolTip="刷新已导入企业微信群聊的最新群消息与群成员">
                         <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
                             <FontIcon FontSize="12" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE895;" />
                             <TextBlock Text="刷新同步" />
@@ -236,10 +334,10 @@
             <Grid Grid.Row="1">
                 <StackPanel x:Name="EmptyChatHint" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
                     <Border Width="52" Height="52" HorizontalAlignment="Center" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="14">
-                        <FontIcon FontSize="22" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE902;" />
+                        <FontIcon FontSize="22" Foreground="{StaticResource InfoTextBrush}" Glyph="&#xE902;" />
                     </Border>
                     <TextBlock HorizontalAlignment="Center" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="暂无群聊消息记录" />
-                    <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="从左侧企业分组中选择群聊即可实时查看群消息" />
+                    <TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="从左侧选择已导入的企业群聊即可实时查看群消息" />
                 </StackPanel>
 
                 <ListView x:Name="MessagesListView" Padding="18,14" IsItemClickEnabled="False" SelectionMode="None">

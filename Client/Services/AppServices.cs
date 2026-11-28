@@ -16,6 +16,7 @@ namespace Client.Services
         public static WeComSyncService WeComSync { get; } = new();
         public static LocalConnectorBridgeService LocalBridge { get; } = new();
         public static GroupAutoReplyService GroupAutoReply { get; } = new();
+        public static WeChatFriendAutoAcceptService FriendAutoAccept { get; } = new();
         public static LocalAiWorkspaceStore AiWorkspace { get; } = new();
         public static OcrService Ocr => LazyOcr.Value;
         public static nint MainWindowHandle { get; set; }

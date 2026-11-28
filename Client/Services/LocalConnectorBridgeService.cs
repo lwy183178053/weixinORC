@@ -20,7 +20,23 @@ namespace Client.Services
         private static readonly HttpClient PushHttp = new() { Timeout = TimeSpan.FromSeconds(5) };
         private static readonly HttpClient MediaHttp = new() { Timeout = TimeSpan.FromSeconds(20) };
 
+        public sealed class BridgeTrafficEntry
+        {
+            public DateTimeOffset Time { get; init; } = DateTimeOffset.Now;
+            public string Platform { get; init; } = string.Empty; // 个微 / 企微
+            public string Direction { get; init; } = string.Empty; // IN / PUSH
+            public string Action { get; init; } = string.Empty;
+            public int StatusCode { get; init; }
+            public long ElapsedMs { get; init; }
+            public string Detail { get; init; } = string.Empty;
+
+            public string FormattedLine =>
+                $"[{Time:HH:mm:ss}] [{Platform}] {Direction} {Action} -> {StatusCode} ({ElapsedMs}ms) {Detail}";
+        }
+
         private readonly object _lifecycleLock = new();
+        private readonly object _trafficLock = new();
+        private readonly LinkedList<BridgeTrafficEntry> _recentTraffic = new();
         private readonly SemaphoreSlim _wechatSendGate = new(1, 1);
         private readonly SemaphoreSlim _wecomSendGate = new(1, 1);
 
@@ -51,6 +67,86 @@ namespace Client.Services
         public string StatusSummary { get; private set; } = "本地适配服务：未启动";
 
         public event Action? StateChanged;
+        public event Action<BridgeTrafficEntry>? TrafficLogged;
+
+        public IReadOnlyList<BridgeTrafficEntry> GetRecentTraffic()
+        {
+            lock (_trafficLock)
+            {
+                return _recentTraffic.ToList();
+            }
+        }
+
+        public void ClearTrafficLogs()
+        {
+            lock (_trafficLock) _recentTraffic.Clear();
+        }
+
+        private void RecordTraffic(bool isWeCom, string direction, string action, int statusCode, long elapsedMs, string detail = "")
+        {
+            var entry = new BridgeTrafficEntry
+            {
+                Time = DateTimeOffset.Now,
+                Platform = isWeCom ? "企微:8989" : "个微:8990",
+                Direction = direction,
+                Action = action,
+                StatusCode = statusCode,
+                ElapsedMs = elapsedMs,
+                Detail = detail
+            };
+            lock (_trafficLock)
+            {
+                _recentTraffic.AddFirst(entry);
+                while (_recentTraffic.Count > 120) _recentTraffic.RemoveLast();
+            }
+            TrafficLogged?.Invoke(entry);
+        }
+
+        public async Task<(int StatusCode, string ResponseJson)> RunLocalSelfTestAsync(
+            bool isWeCom,
+            string path,
+            string? postBodyJson = null,
+            CancellationToken ct = default)
+        {
+            var cfg = AppServices.Settings.Current;
+            int port = isWeCom ? cfg.WeComBridgePort : cfg.WeChatBridgePort;
+            string url = $"http://127.0.0.1:{port}{path}";
+            try
+            {
+                using var req = new HttpRequestMessage(postBodyJson is null ? HttpMethod.Get : HttpMethod.Post, url);
+                if (postBodyJson is not null)
+                {
+                    req.Content = new StringContent(postBodyJson, Encoding.UTF8, "application/json");
+                }
+                using var resp = await PushHttp.SendAsync(req, ct);
+                string body = await resp.Content.ReadAsStringAsync(ct);
+                return ((int)resp.StatusCode, PrettyPrintJsonSafe(body));
+            }
+            catch (Exception ex)
+            {
+                return (0, $"{{\"error\": \"{ex.Message.Replace("\"", "'")}\"}}");
+            }
+        }
+
+        private static string PrettyPrintJsonSafe(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+            try
+            {
+                using var doc = JsonDocument.Parse(raw);
+                using var ms = new MemoryStream();
+                using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
+                {
+                    doc.WriteTo(w);
+                }
+                string pretty = Encoding.UTF8.GetString(ms.ToArray());
+                return pretty.Length > 6000 ? pretty[..6000] + "\n... (已截断，完整结果请通过接口获取)" : pretty;
+            }
+            catch
+            {
+                return raw.Length > 4000 ? raw[..4000] + "..." : raw;
+            }
+        }
 
         public void StartIfEnabled()
         {
@@ -210,8 +306,11 @@ namespace Client.Services
 
                 if (method == "GET" && (path == "/health" || path == ""))
                 {
+                    var swH = System.Diagnostics.Stopwatch.StartNew();
                     byte[] body = BuildHealthJson(isWeCom);
                     await WriteResponseAsync(ctx.Response, 200, body);
+                    swH.Stop();
+                    RecordTraffic(isWeCom, "IN", "GET /health", 200, swH.ElapsedMilliseconds);
                     return;
                 }
 
@@ -241,11 +340,14 @@ namespace Client.Services
                     return;
                 }
 
+                var swApi = System.Diagnostics.Stopwatch.StartNew();
                 var (statusCode, responseBytes) = isWeCom
                     ? await HandleWeComApiAsync(apiType, root, ct)
                     : await HandlePersonalWeChatApiAsync(apiType, root, ct);
+                swApi.Stop();
 
                 await WriteResponseAsync(ctx.Response, statusCode, responseBytes);
+                RecordTraffic(isWeCom, "IN", $"POST /api type={apiType}", statusCode, swApi.ElapsedMilliseconds, $"{responseBytes.Length}B");
             }
             catch (JsonException ex)
             {
@@ -1130,7 +1232,7 @@ namespace Client.Services
 
             if (payload is not null)
             {
-                _ = PostPushBestEffortAsync(pushUrl, payload);
+                _ = PostPushBestEffortAsync(pushUrl, payload, isWeCom: true, eventLabel: ev.EventKind);
             }
         }
 
@@ -1157,7 +1259,7 @@ namespace Client.Services
                                 w.WriteEndObject();
                                 w.WriteEndObject();
                             });
-                            _ = PostPushBestEffortAsync(pushUrl, logoutJson);
+                            _ = PostPushBestEffortAsync(pushUrl, logoutJson, isWeCom: false, eventLabel: "logout(999)");
                         }
                         continue;
                     }
@@ -1239,7 +1341,7 @@ namespace Client.Services
                     if (!string.IsNullOrWhiteSpace(pushUrl))
                     {
                         byte[] json = BuildPersonalMessagePushJson(reader.SelfWxid, sessionKey, isGroup, m);
-                        _ = PostPushBestEffortAsync(pushUrl, json);
+                        _ = PostPushBestEffortAsync(pushUrl, json, isWeCom: false, eventLabel: isGroup ? "group_msg" : "direct_msg");
                     }
                 }
             }
@@ -1264,7 +1366,7 @@ namespace Client.Services
                             w.WriteString("new_name", g.GroupName);
                             w.WriteEndObject();
                             w.WriteEndObject();
-                        }));
+                        }), isWeCom: false, eventLabel: "group_name(300)");
                     }
 
                     var joined = curMembers.Except(prev.Members, StringComparer.OrdinalIgnoreCase).ToList();
@@ -1283,7 +1385,7 @@ namespace Client.Services
                             w.WriteEndArray();
                             w.WriteEndObject();
                             w.WriteEndObject();
-                        }));
+                        }), isWeCom: false, eventLabel: "member_join(333)");
                     }
 
                     var left = prev.Members.Except(curMembers, StringComparer.OrdinalIgnoreCase).ToList();
@@ -1302,24 +1404,29 @@ namespace Client.Services
                             w.WriteEndArray();
                             w.WriteEndObject();
                             w.WriteEndObject();
-                        }));
+                        }), isWeCom: false, eventLabel: "member_left(444)");
                     }
                 }
                 _wechatGroupSnapshots[g.Username] = (g.GroupName, curMembers);
             }
         }
 
-        private static async Task PostPushBestEffortAsync(string url, byte[] jsonBytes)
+        private async Task PostPushBestEffortAsync(string url, byte[] jsonBytes, bool isWeCom, string eventLabel)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 using var content = new ByteArrayContent(jsonBytes);
                 content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
                 using var resp = await PushHttp.PostAsync(url, content);
+                sw.Stop();
+                RecordTraffic(isWeCom, "PUSH", $"{eventLabel} -> {url}", (int)resp.StatusCode, sw.ElapsedMilliseconds);
             }
             catch
             {
-                // Connector receiver may not be listening yet; ignore quietly
+                sw.Stop();
+                // Connector receiver may not be listening yet; still log silently in traffic ring for diagnostics
+                RecordTraffic(isWeCom, "PUSH", $"{eventLabel} -> {url}", 0, sw.ElapsedMilliseconds, "接收端未监听");
             }
         }
 

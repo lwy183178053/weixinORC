@@ -55,7 +55,7 @@
                                 FontSize="12.5"
                                 FontWeight="SemiBold"
                                 Foreground="{StaticResource TextPrimaryBrush}"
-                                Text="客户档案" />
+                                Text="微信 · 微信个人" />
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -114,10 +114,10 @@
             </Grid>
         </Border>
 
-        <!-- Row 1: Refined Slim Icon Rail + Active Module -->
+        <!-- Row 1: Refined Slim Icon Rail (3 System Sections: WeChat / WeCom / Connector) + Active Module -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="56" />
+                <ColumnDefinition Width="62" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
@@ -126,73 +126,143 @@
                 Background="{StaticResource AppRailBgBrush}"
                 BorderBrush="{StaticResource AppBorderBrush}"
                 BorderThickness="0,0,1,0">
-                <Grid Padding="0,10,0,10">
+                <Grid Padding="0,8,0,8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <StackPanel Grid.Row="0" HorizontalAlignment="Center" Spacing="5">
-                        <Button
-                            x:Name="RailCustomersButton"
-                            Click="RailNav_Click"
-                            Style="{StaticResource RailButtonStyle}"
-                            Tag="customers"
-                            ToolTipService.ToolTip="客户档案">
-                            <StackPanel HorizontalAlignment="Center" Spacing="2">
-                                <FontIcon x:Name="RailCustomersIcon" FontSize="15" Glyph="&#xE77B;" />
-                                <TextBlock x:Name="RailCustomersLabel" HorizontalAlignment="Center" FontSize="9.5" Text="客户档案" />
-                            </StackPanel>
-                        </Button>
+                    <ScrollViewer
+                        Grid.Row="0"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Hidden">
+                        <StackPanel HorizontalAlignment="Center" Spacing="4">
+                            <!-- Section 1: 微信（个微 + 企微 并列整体） -->
+                            <TextBlock
+                                Margin="0,2,0,1"
+                                HorizontalAlignment="Center"
+                                FontSize="9.5"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource TextMutedBrush}"
+                                Text="微 信" />
 
-                        <Button
-                            x:Name="RailGroupsButton"
-                            Click="RailNav_Click"
-                            Style="{StaticResource RailButtonStyle}"
-                            Tag="groups"
-                            ToolTipService.ToolTip="群组档案">
-                            <StackPanel HorizontalAlignment="Center" Spacing="2">
-                                <FontIcon x:Name="RailGroupsIcon" FontSize="15" Glyph="&#xE716;" />
-                                <TextBlock x:Name="RailGroupsLabel" HorizontalAlignment="Center" FontSize="9.5" Text="群组档案" />
-                            </StackPanel>
-                        </Button>
+                            <Button
+                                x:Name="RailCustomersButton"
+                                Click="RailNav_Click"
+                                Style="{StaticResource RailButtonStyle}"
+                                Tag="customers"
+                                ToolTipService.ToolTip="个人微信 · 客户监控与聊天记录">
+                                <StackPanel HorizontalAlignment="Center" Spacing="2">
+                                    <FontIcon x:Name="RailCustomersIcon" FontSize="14.5" Glyph="&#xE77B;" />
+                                    <TextBlock x:Name="RailCustomersLabel" HorizontalAlignment="Center" FontSize="9.5" Text="微信个人" />
+                                </StackPanel>
+                            </Button>
 
-                        <Button
-                            x:Name="RailAiButton"
-                            Click="RailNav_Click"
-                            Style="{StaticResource RailButtonStyle}"
-                            Tag="ai"
-                            ToolTipService.ToolTip="AI 智能助手">
-                            <StackPanel HorizontalAlignment="Center" Spacing="2">
-                                <FontIcon x:Name="RailAiIcon" FontSize="15" Glyph="&#xE99A;" />
-                                <TextBlock x:Name="RailAiLabel" HorizontalAlignment="Center" FontSize="9.5" Text="AI 助手" />
-                            </StackPanel>
-                        </Button>
+                            <Button
+                                x:Name="RailGroupsButton"
+                                Click="RailNav_Click"
+                                Style="{StaticResource RailButtonStyle}"
+                                Tag="groups"
+                                ToolTipService.ToolTip="个人微信 · 群聊监控与群组档案">
+                                <StackPanel HorizontalAlignment="Center" Spacing="2">
+                                    <FontIcon x:Name="RailGroupsIcon" FontSize="14.5" Glyph="&#xE716;" />
+                                    <TextBlock x:Name="RailGroupsLabel" HorizontalAlignment="Center" FontSize="9.5" Text="微信群聊" />
+                                </StackPanel>
+                            </Button>
 
-                        <Button
-                            x:Name="RailOcrButton"
-                            Click="RailNav_Click"
-                            Style="{StaticResource RailButtonStyle}"
-                            Tag="ocr"
-                            ToolTipService.ToolTip="微信自动监听与连接状态">
-                            <StackPanel HorizontalAlignment="Center" Spacing="2">
-                                <FontIcon x:Name="RailOcrIcon" FontSize="15" Glyph="&#xE895;" />
-                                <TextBlock x:Name="RailOcrLabel" HorizontalAlignment="Center" FontSize="9.5" Text="微信监听" />
-                            </StackPanel>
-                        </Button>
+                            <Button
+                                x:Name="RailWeComContactsButton"
+                                Click="RailNav_Click"
+                                Style="{StaticResource RailButtonStyle}"
+                                Tag="wecom_contacts"
+                                ToolTipService.ToolTip="企业微信 · 按企业分组的个人联系人监控">
+                                <StackPanel HorizontalAlignment="Center" Spacing="2">
+                                    <FontIcon x:Name="RailWeComContactsIcon" FontSize="14.5" Glyph="&#xE731;" />
+                                    <TextBlock x:Name="RailWeComContactsLabel" HorizontalAlignment="Center" FontSize="9.5" Text="企微个人" />
+                                </StackPanel>
+                            </Button>
 
-                        <Button
-                            x:Name="RailAutoReplyButton"
-                            Click="RailNav_Click"
-                            Style="{StaticResource RailButtonStyle}"
-                            Tag="autoreply"
-                            ToolTipService.ToolTip="群 @ AI 自动回复配置、问答示例与诊断日志">
-                            <StackPanel HorizontalAlignment="Center" Spacing="2">
-                                <FontIcon x:Name="RailAutoReplyIcon" FontSize="15" Glyph="&#xE97A;" />
-                                <TextBlock x:Name="RailAutoReplyLabel" HorizontalAlignment="Center" FontSize="9.5" Text="自动回复" />
-                            </StackPanel>
-                        </Button>
-                    </StackPanel>
+                            <Button
+                                x:Name="RailWeComGroupsButton"
+                                Click="RailNav_Click"
+                                Style="{StaticResource RailButtonStyle}"
+                                Tag="wecom_groups"
+                                ToolTipService.ToolTip="企业微信 · 按企业分组的群聊监控">
+                                <StackPanel HorizontalAlignment="Center" Spacing="2">
+                                    <FontIcon x:Name="RailWeComGroupsIcon" FontSize="14.5" Glyph="&#xE902;" />
+                                    <TextBlock x:Name="RailWeComGroupsLabel" HorizontalAlignment="Center" FontSize="9.5" Text="企微群聊" />
+                                </StackPanel>
+                            </Button>
+
+                            <!-- Section 2: 监控与智能（拆出独立区块：双端监听 + AI 助手 + 自动回复） -->
+                            <Border Width="28" Height="1" Margin="0,4,0,2" Background="{StaticResource AppBorderBrush}" />
+                            <TextBlock
+                                Margin="0,0,0,1"
+                                HorizontalAlignment="Center"
+                                FontSize="9.5"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource TextMutedBrush}"
+                                Text="监 控" />
+
+                            <Button
+                                x:Name="RailOcrButton"
+                                Click="RailNav_Click"
+                                Style="{StaticResource RailButtonStyle}"
+                                Tag="ocr"
+                                ToolTipService.ToolTip="个人微信与企业微信并列实时监听总览">
+                                <StackPanel HorizontalAlignment="Center" Spacing="2">
+                                    <FontIcon x:Name="RailOcrIcon" FontSize="14.5" Glyph="&#xE895;" />
+                                    <TextBlock x:Name="RailOcrLabel" HorizontalAlignment="Center" FontSize="9.5" Text="双端监听" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button
+                                x:Name="RailAiButton"
+                                Click="RailNav_Click"
+                                Style="{StaticResource RailButtonStyle}"
+                                Tag="ai"
+                                ToolTipService.ToolTip="AI 智能助手">
+                                <StackPanel HorizontalAlignment="Center" Spacing="2">
+                                    <FontIcon x:Name="RailAiIcon" FontSize="14.5" Glyph="&#xE99A;" />
+                                    <TextBlock x:Name="RailAiLabel" HorizontalAlignment="Center" FontSize="9.5" Text="AI 助手" />
+                                </StackPanel>
+                            </Button>
+
+                            <Button
+                                x:Name="RailAutoReplyButton"
+                                Click="RailNav_Click"
+                                Style="{StaticResource RailButtonStyle}"
+                                Tag="autoreply"
+                                ToolTipService.ToolTip="群 @ AI 自动回复配置与日志">
+                                <StackPanel HorizontalAlignment="Center" Spacing="2">
+                                    <FontIcon x:Name="RailAutoReplyIcon" FontSize="14.5" Glyph="&#xE97A;" />
+                                    <TextBlock x:Name="RailAutoReplyLabel" HorizontalAlignment="Center" FontSize="9.5" Text="自动回复" />
+                                </StackPanel>
+                            </Button>
+
+                            <!-- Section 3: 甲方接口服务（8990 个微 / 8989 企微） -->
+                            <Border Width="28" Height="1" Margin="0,4,0,2" Background="{StaticResource AppBorderBrush}" />
+                            <TextBlock
+                                Margin="0,0,0,1"
+                                HorizontalAlignment="Center"
+                                FontSize="9.5"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource TextMutedBrush}"
+                                Text="接 口" />
+
+                            <Button
+                                x:Name="RailBridgeButton"
+                                Click="RailNav_Click"
+                                Style="{StaticResource RailButtonStyle}"
+                                Tag="bridge"
+                                ToolTipService.ToolTip="甲方双端口接口服务（8990 个人微信 / 8989 企业微信）">
+                                <StackPanel HorizontalAlignment="Center" Spacing="2">
+                                    <FontIcon x:Name="RailBridgeIcon" FontSize="14.5" Glyph="&#xE968;" />
+                                    <TextBlock x:Name="RailBridgeLabel" HorizontalAlignment="Center" FontSize="9.5" Text="接口服务" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </ScrollViewer>
 
                     <!-- Bottom Utility Cluster: Logout -> Theme Toggle -> Settings -->
                     <StackPanel Grid.Row="1" HorizontalAlignment="Center" Spacing="4">
@@ -319,7 +389,7 @@
                     VerticalAlignment="Center"
                     FontSize="11.5"
                     Foreground="{StaticResource TextMutedBrush}"
-                    Text="在客户或群组页点「+」导入好友/群聊，系统自动监听新消息变化" />
+                    Text="个微与企微双端协同 · 实时只读监听消息变化" />
             </Grid>
         </Border>
     </Grid>

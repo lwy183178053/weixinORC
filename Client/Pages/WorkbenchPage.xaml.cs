@@ -27,7 +27,7 @@ namespace Client.Pages
             InitializeComponent();
             Current = this;
             WorkspaceFrame.ContentTransitions = [];
-            WorkspaceFrame.CacheSize = 5;
+            WorkspaceFrame.CacheSize = 8;
             Loaded += WorkbenchPage_Loaded;
             Unloaded += WorkbenchPage_Unloaded;
         }
@@ -259,11 +259,14 @@ namespace Client.Pages
 
             (Type pageType, string title) = normalized switch
             {
-                "customers" => (typeof(CustomersPage), "客户档案"),
-                "groups" => (typeof(GroupsPage), "群组档案"),
-                "ai" => (typeof(AiAssistantPage), "AI 助手"),
-                "autoreply" => (typeof(AutoReplyPage), "自动回复"),
-                _ => (typeof(WeChatSyncPage), "微信监听")
+                "customers" => (typeof(CustomersPage), "微信 · 微信个人"),
+                "groups" => (typeof(GroupsPage), "微信 · 微信群聊"),
+                "wecom_contacts" => (typeof(WeComContactsPage), "微信 · 企微个人"),
+                "wecom_groups" => (typeof(WeComGroupsPage), "微信 · 企微群聊"),
+                "ai" => (typeof(AiAssistantPage), "监控 · AI 助手"),
+                "autoreply" => (typeof(AutoReplyPage), "监控 · 自动回复"),
+                "bridge" => (typeof(ConnectorBridgePage), "接口 · 双端口服务 (8990 / 8989)"),
+                _ => (typeof(WeChatSyncPage), "监控 · 双端实时监听")
             };
 
             ActiveTabTitleText.Text = title;
@@ -309,6 +312,9 @@ namespace Client.Pages
             SetRailItemState(RailAiButton, RailAiIcon, RailAiLabel, _activeTag == "ai", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailOcrButton, RailOcrIcon, RailOcrLabel, _activeTag == "ocr", activeBg, activeFg, inactiveBg, inactiveFg);
             SetRailItemState(RailAutoReplyButton, RailAutoReplyIcon, RailAutoReplyLabel, _activeTag == "autoreply", activeBg, activeFg, inactiveBg, inactiveFg);
+            SetRailItemState(RailWeComContactsButton, RailWeComContactsIcon, RailWeComContactsLabel, _activeTag == "wecom_contacts", activeBg, activeFg, inactiveBg, inactiveFg);
+            SetRailItemState(RailWeComGroupsButton, RailWeComGroupsIcon, RailWeComGroupsLabel, _activeTag == "wecom_groups", activeBg, activeFg, inactiveBg, inactiveFg);
+            SetRailItemState(RailBridgeButton, RailBridgeIcon, RailBridgeLabel, _activeTag == "bridge", activeBg, activeFg, inactiveBg, inactiveFg);
         }
 
         private static void SetRailItemState(
@@ -368,7 +374,7 @@ namespace Client.Pages
                 // Evict all cached workspace pages so switching accounts starts with a clean slate.
                 WorkspaceFrame.CacheSize = 0;
                 WorkspaceFrame.Content = null;
-                WorkspaceFrame.CacheSize = 5;
+                WorkspaceFrame.CacheSize = 8;
                 MainWindow.Instance?.ShowLoginView();
             }
             catch (Exception ex)

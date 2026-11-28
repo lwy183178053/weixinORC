@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Client.Models;
 using Client.Services;
 using Client.Services.WeChat4Db;
+using Client.Services.WeComDb;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -13,6 +14,7 @@ namespace Client.Pages
     {
         private readonly ObservableCollection<string> _activityLogs = [];
         private readonly ObservableCollection<WeChatAccountDto> _linkedAccounts = [];
+        private readonly ObservableCollection<string> _wecomCorpLines = [];
         private CancellationTokenSource? _accountAvatarCts;
         private bool _isInitializingUi = true;
         private bool _isBusy;
@@ -23,6 +25,7 @@ namespace Client.Pages
             NavigationCacheMode = Microsoft.UI.Xaml.Navigation.NavigationCacheMode.Required;
             ActivityLogListView.ItemsSource = _activityLogs;
             LinkedAccountsListView.ItemsSource = _linkedAccounts;
+            WeComCorpsListView.ItemsSource = _wecomCorpLines;
             Loaded += WeChatSyncPage_Loaded;
             Unloaded += WeChatSyncPage_Unloaded;
         }
@@ -34,30 +37,35 @@ namespace Client.Pages
             AppServices.WeChat4Sync.ActivityLogged -= OnActivityLogged;
             AppServices.WeChat4Sync.SyncCompleted -= OnSyncCompleted;
             AppServices.WeChat4Sync.AccountsUpdated -= OnAccountsUpdated;
-            AppServices.LocalBridge.StateChanged -= OnLocalBridgeStateChanged;
-            AppServices.WeComSync.StatusChanged -= OnWeComStatusChanged;
+            AppServices.WeComSync.StatusChanged -= OnWeComUpdated;
+            AppServices.WeComSync.AccountsUpdated -= OnWeComAccountsUpdated;
 
             AppServices.Settings.ThemeChanged += OnThemeChanged;
             AppServices.WeChat4Sync.AutoSyncStatusChanged += OnAutoSyncStatusChanged;
             AppServices.WeChat4Sync.ActivityLogged += OnActivityLogged;
             AppServices.WeChat4Sync.SyncCompleted += OnSyncCompleted;
             AppServices.WeChat4Sync.AccountsUpdated += OnAccountsUpdated;
-            AppServices.LocalBridge.StateChanged += OnLocalBridgeStateChanged;
-            AppServices.WeComSync.StatusChanged += OnWeComStatusChanged;
+            AppServices.WeComSync.StatusChanged += OnWeComUpdated;
+            AppServices.WeComSync.AccountsUpdated += OnWeComAccountsUpdated;
 
             _isInitializingUi = true;
             var cfg = AppServices.Settings.Current;
             AutoWatchToggle.IsOn = cfg.WeChatAutoSyncEnabled;
-            LocalBridgeToggle.IsOn = cfg.LocalBridgeEnabled;
+            WeComWatchToggle.IsOn = AppServices.WeComSync.IsWatcherRunning;
             OptImagesCheck.IsChecked = cfg.WeChatSyncIncludeImages;
             OptAvatarsCheck.IsChecked = cfg.WeChatSyncIncludeAvatars;
             _isInitializingUi = false;
 
-            RefreshLocalBridgeUi();
-
             LoadExistingLogs();
             SyncLinkedAccountsCollection();
-            await RefreshStatusAsync();
+            await RefreshAllUiAsync();
+
+            if (AppServices.WeComSync.LoadedAccounts.Count == 0)
+            {
+                await AppServices.WeComSync.EnsureAllAccountsReadyAsync(forceRefresh: false);
+                RefreshWeComCard();
+                UpdateOverallHeader();
+            }
         }
 
         private void WeChatSyncPage_Unloaded(object sender, RoutedEventArgs e)
@@ -67,8 +75,8 @@ namespace Client.Pages
             AppServices.WeChat4Sync.ActivityLogged -= OnActivityLogged;
             AppServices.WeChat4Sync.SyncCompleted -= OnSyncCompleted;
             AppServices.WeChat4Sync.AccountsUpdated -= OnAccountsUpdated;
-            AppServices.LocalBridge.StateChanged -= OnLocalBridgeStateChanged;
-            AppServices.WeComSync.StatusChanged -= OnWeComStatusChanged;
+            AppServices.WeComSync.StatusChanged -= OnWeComUpdated;
+            AppServices.WeComSync.AccountsUpdated -= OnWeComAccountsUpdated;
             _accountAvatarCts?.Cancel();
             _accountAvatarCts?.Dispose();
             _accountAvatarCts = null;
@@ -79,7 +87,9 @@ namespace Client.Pages
             DispatcherQueue.TryEnqueue(() =>
             {
                 foreach (var acc in _linkedAccounts) acc.NotifyVisualsChanged();
-                RefreshAccountAndKpiUi();
+                RefreshWeChatCard();
+                RefreshWeComCard();
+                UpdateOverallHeader();
             });
         }
 
@@ -88,9 +98,22 @@ namespace Client.Pages
             DispatcherQueue.TryEnqueue(() =>
             {
                 SyncLinkedAccountsCollection();
-                RefreshAccountAndKpiUi();
+                RefreshWeChatCard();
+                UpdateOverallHeader();
             });
         }
+
+        private void OnWeComUpdated(string _) => DispatcherQueue.TryEnqueue(() =>
+        {
+            RefreshWeComCard();
+            UpdateOverallHeader();
+        });
+
+        private void OnWeComAccountsUpdated() => DispatcherQueue.TryEnqueue(() =>
+        {
+            RefreshWeComCard();
+            UpdateOverallHeader();
+        });
 
         private void LoadExistingLogs()
         {
@@ -101,7 +124,7 @@ namespace Client.Pages
             }
             if (_activityLogs.Count == 0)
             {
-                _activityLogs.Add("等待微信消息变化中... 导入客户或群聊后，有新消息时会自动同步。");
+                _activityLogs.Add("等待个人微信与企业微信消息变化中...");
             }
         }
 
@@ -110,7 +133,8 @@ namespace Client.Pages
             DispatcherQueue.TryEnqueue(() =>
             {
                 WatchStatusSummaryText.Text = status;
-                UpdateKpiCards();
+                RefreshWeChatCard();
+                UpdateOverallHeader();
             });
         }
 
@@ -118,7 +142,7 @@ namespace Client.Pages
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                if (_activityLogs.Count == 1 && _activityLogs[0].StartsWith("等待微信消息变化", StringComparison.Ordinal))
+                if (_activityLogs.Count == 1 && _activityLogs[0].StartsWith("等待个人微信", StringComparison.Ordinal))
                 {
                     _activityLogs.Clear();
                 }
@@ -132,27 +156,42 @@ namespace Client.Pages
             DispatcherQueue.TryEnqueue(() =>
             {
                 SyncLinkedAccountsCollection();
-                RefreshAccountAndKpiUi();
+                RefreshWeChatCard();
+                UpdateOverallHeader();
             });
         }
 
-        private async Task RefreshStatusAsync()
+        private async Task RefreshAllUiAsync()
         {
             await AppServices.WeChat4Sync.RefreshMonitoredCountsAsync();
             SyncLinkedAccountsCollection();
-            RefreshAccountAndKpiUi();
+            RefreshWeChatCard();
+            RefreshWeComCard();
+            UpdateOverallHeader();
         }
 
-        private void RefreshAccountAndKpiUi()
+        private void UpdateOverallHeader()
         {
-            bool wechatRunning = WeChat4Paths.FindWeixinProcesses().Count > 0;
-            string? fallbackLocalWxid = AppServices.WeChat4Sync.ActiveAccount?.Wxid;
-            if (string.IsNullOrWhiteSpace(fallbackLocalWxid))
+            bool wxRunning = WeChat4Paths.FindWeixinProcesses().Count > 0;
+            bool wcRunning = WeComPaths.FindWXWorkProcesses().Count > 0 || AppServices.WeComSync.LoadedAccounts.Count > 0;
+
+            if (wxRunning && wcRunning)
             {
-                fallbackLocalWxid = WeChat4Paths.ListAccountDirs(AppServices.Settings.Current.WeChatSyncAccountDir).FirstOrDefault()?.Wxid;
+                StatusDot.Fill = (Brush)Application.Current.Resources["SuccessTextBrush"];
+                StatusBadgeText.Text = "双端在线监听中";
             }
-            UpdateCurrentAccountCard(wechatRunning, fallbackLocalWxid ?? string.Empty);
-            UpdateKpiCards(wechatRunning, fallbackLocalWxid ?? string.Empty);
+            else if (wxRunning || wcRunning)
+            {
+                StatusDot.Fill = (Brush)Application.Current.Resources["BrandPrimaryBrush"];
+                StatusBadgeText.Text = wxRunning ? "个微在线 · 企微待机" : "企微在线 · 个微待机";
+            }
+            else
+            {
+                StatusDot.Fill = (Brush)Application.Current.Resources["TextMutedBrush"];
+                StatusBadgeText.Text = "等待微信 / 企微登录";
+            }
+
+            RelaunchAdminButton.Visibility = AppServices.WeChat4Sync.LastSyncNeedsAdmin ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void SyncLinkedAccountsCollection()
@@ -175,7 +214,7 @@ namespace Client.Pages
                 _linkedAccounts.Add(item);
             }
 
-            LinkedAccountsCountText.Text = $"{_linkedAccounts.Count} 个账号";
+            LinkedAccountsCountText.Text = _linkedAccounts.Count.ToString();
             bool hasAccounts = _linkedAccounts.Count > 0;
             LinkedAccountsListView.Visibility = hasAccounts ? Visibility.Visible : Visibility.Collapsed;
             EmptyAccountsHint.Visibility = hasAccounts ? Visibility.Collapsed : Visibility.Visible;
@@ -244,203 +283,127 @@ namespace Client.Pages
             }
         }
 
-        private void UpdateCurrentAccountCard(bool? wechatRunningOverride = null, string? fallbackLocalWxidOverride = null)
+        private void RefreshWeChatCard()
         {
             var sync = AppServices.WeChat4Sync;
-            bool wechatRunning = wechatRunningOverride ?? WeChat4Paths.FindWeixinProcesses().Count > 0;
+            bool wechatRunning = WeChat4Paths.FindWeixinProcesses().Count > 0;
             var current = ResolveDisplayedCurrentAccount();
             var selfLocal = sync.ActiveReader?.SelfContact;
+
+            KpiMonitoredText.Text = $"{sync.MonitoredCustomersCount} 客户 · {sync.MonitoredGroupsCount} 群";
+            WatchStatusSummaryText.Text = sync.WatchStatusText;
+            KpiLastSyncText.Text = sync.LastSyncAt.HasValue ? sync.LastSyncAt.Value.ToString("HH:mm:ss") : "等待新消息";
 
             if (current is not null)
             {
                 CurrentAccountNameText.Text = current.DisplayName;
                 ApplyCurrentAccountAvatar(current.AvatarImage, current.AvatarInitial);
 
-                var idParts = new List<string>(3);
+                var idParts = new List<string>(2);
                 if (!string.IsNullOrWhiteSpace(current.Alias)) idParts.Add($"微信号：{current.Alias}");
-                if (!string.IsNullOrWhiteSpace(current.WechatId) &&
-                    !current.WechatId.Equals(current.Alias, StringComparison.OrdinalIgnoreCase))
+                if (!string.IsNullOrWhiteSpace(current.WechatId) && !current.WechatId.Equals(current.Alias, StringComparison.OrdinalIgnoreCase))
                 {
                     idParts.Add($"ID：{current.WechatId}");
                 }
-                if (!string.IsNullOrWhiteSpace(current.Region)) idParts.Add($"地区：{current.Region}");
-                CurrentAccountIdText.Text = idParts.Count > 0
-                    ? string.Join(" · ", idParts)
-                    : current.CountsSummary;
-
-                if (!string.IsNullOrWhiteSpace(current.Signature))
-                {
-                    CurrentAccountBioText.Text = $"个性签名：{current.Signature}";
-                    CurrentAccountBioText.Visibility = Visibility.Visible;
-                }
-                else
-                {
-                    CurrentAccountBioText.Text = current.CountsSummary;
-                    CurrentAccountBioText.Visibility = Visibility.Visible;
-                }
+                CurrentAccountIdText.Text = idParts.Count > 0 ? string.Join(" · ", idParts) : current.CountsSummary;
+                CurrentAccountBioText.Text = !string.IsNullOrWhiteSpace(current.Signature) ? current.Signature : string.Empty;
+                CurrentAccountBioText.Visibility = string.IsNullOrWhiteSpace(current.Signature) ? Visibility.Collapsed : Visibility.Visible;
 
                 bool showOnline = wechatRunning && current.IsOnline;
                 CurrentAccountStatusDot.Fill = (Brush)Application.Current.Resources[showOnline ? "SuccessTextBrush" : "TextMutedBrush"];
                 CurrentAccountStatusBadge.Background = (Brush)Application.Current.Resources[showOnline ? "SuccessBgBrush" : "AppInputBgBrush"];
                 CurrentAccountStatusText.Foreground = (Brush)Application.Current.Resources[showOnline ? "SuccessTextBrush" : "TextSecondaryBrush"];
-                CurrentAccountStatusText.Text = showOnline
-                    ? "当前在线"
-                    : (wechatRunning ? "历史账号 · 点击右侧刷新" : "电脑微信未运行");
+                CurrentAccountStatusText.Text = showOnline ? "在线" : (wechatRunning ? "运行中" : "未运行");
                 return;
             }
 
             if (selfLocal is not null)
             {
-                string display = selfLocal.DisplayName;
-                CurrentAccountNameText.Text = display;
-                ApplyCurrentAccountAvatar(null, display.Length > 0 ? display[..1].ToUpperInvariant() : "微");
-
-                var parts = new List<string>(3);
-                if (!string.IsNullOrWhiteSpace(selfLocal.Alias)) parts.Add($"微信号：{selfLocal.Alias}");
-                if (!string.IsNullOrWhiteSpace(selfLocal.Username)) parts.Add($"ID：{selfLocal.Username}");
-                if (!string.IsNullOrWhiteSpace(selfLocal.Region)) parts.Add($"地区：{selfLocal.Region}");
-                CurrentAccountIdText.Text = parts.Count > 0 ? string.Join(" · ", parts) : "已读取本地微信资料";
-
-                CurrentAccountBioText.Text = !string.IsNullOrWhiteSpace(selfLocal.Signature) ? $"个性签名：{selfLocal.Signature}" : string.Empty;
-                CurrentAccountBioText.Visibility = string.IsNullOrWhiteSpace(selfLocal.Signature) ? Visibility.Collapsed : Visibility.Visible;
-
-                CurrentAccountStatusDot.Fill = (Brush)Application.Current.Resources[wechatRunning ? "SuccessTextBrush" : "TextMutedBrush"];
-                CurrentAccountStatusBadge.Background = (Brush)Application.Current.Resources[wechatRunning ? "SuccessBgBrush" : "AppInputBgBrush"];
-                CurrentAccountStatusText.Foreground = (Brush)Application.Current.Resources[wechatRunning ? "SuccessTextBrush" : "TextSecondaryBrush"];
-                CurrentAccountStatusText.Text = wechatRunning ? "当前在线" : "未运行";
-                return;
-            }
-
-            string localWxid = !string.IsNullOrWhiteSpace(fallbackLocalWxidOverride)
-                ? fallbackLocalWxidOverride
-                : sync.ActiveAccount?.Wxid
-                    ?? WeChat4Paths.ListAccountDirs(AppServices.Settings.Current.WeChatSyncAccountDir).FirstOrDefault()?.Wxid
-                    ?? string.Empty;
-
-            if (!string.IsNullOrWhiteSpace(localWxid))
-            {
-                CurrentAccountNameText.Text = localWxid;
-                ApplyCurrentAccountAvatar(null, "微");
-                CurrentAccountIdText.Text = "已发现本机微信数据目录，点击右侧「识别当前微信」即可获取头像与昵称资料";
+                CurrentAccountNameText.Text = selfLocal.DisplayName;
+                ApplyCurrentAccountAvatar(null, selfLocal.DisplayName.Length > 0 ? selfLocal.DisplayName[..1].ToUpperInvariant() : "微");
+                CurrentAccountIdText.Text = !string.IsNullOrWhiteSpace(selfLocal.Alias) ? $"微信号：{selfLocal.Alias}" : selfLocal.Username;
                 CurrentAccountBioText.Visibility = Visibility.Collapsed;
-                CurrentAccountStatusDot.Fill = (Brush)Application.Current.Resources[wechatRunning ? "SuccessTextBrush" : "TextMutedBrush"];
-                CurrentAccountStatusBadge.Background = (Brush)Application.Current.Resources[wechatRunning ? "SuccessBgBrush" : "AppInputBgBrush"];
-                CurrentAccountStatusText.Foreground = (Brush)Application.Current.Resources[wechatRunning ? "SuccessTextBrush" : "TextSecondaryBrush"];
-                CurrentAccountStatusText.Text = wechatRunning ? "待识别资料" : "微信未运行";
-                return;
+            }
+            else
+            {
+                string localWxid = sync.ActiveAccount?.Wxid ?? WeChat4Paths.ListAccountDirs(AppServices.Settings.Current.WeChatSyncAccountDir).FirstOrDefault()?.Wxid ?? string.Empty;
+                CurrentAccountNameText.Text = string.IsNullOrWhiteSpace(localWxid) ? "等待识别个人微信" : localWxid;
+                ApplyCurrentAccountAvatar(null, "微");
+                CurrentAccountIdText.Text = wechatRunning ? "已检测到电脑微信，点击右上角「刷新同步双端」识别资料" : "请先在电脑上登录个人微信";
+                CurrentAccountBioText.Visibility = Visibility.Collapsed;
             }
 
-            CurrentAccountNameText.Text = "等待识别当前登录微信";
-            ApplyCurrentAccountAvatar(null, "微");
-            CurrentAccountIdText.Text = "登录电脑微信后将自动识别头像、昵称与微信号，也可点击右侧按钮立即识别";
-            CurrentAccountBioText.Visibility = Visibility.Collapsed;
-            CurrentAccountStatusDot.Fill = (Brush)Application.Current.Resources["TextMutedBrush"];
-            CurrentAccountStatusBadge.Background = (Brush)Application.Current.Resources["AppInputBgBrush"];
-            CurrentAccountStatusText.Foreground = (Brush)Application.Current.Resources["TextSecondaryBrush"];
-            CurrentAccountStatusText.Text = wechatRunning ? "待识别" : "未运行";
+            CurrentAccountStatusDot.Fill = (Brush)Application.Current.Resources[wechatRunning ? "SuccessTextBrush" : "TextMutedBrush"];
+            CurrentAccountStatusBadge.Background = (Brush)Application.Current.Resources[wechatRunning ? "SuccessBgBrush" : "AppInputBgBrush"];
+            CurrentAccountStatusText.Foreground = (Brush)Application.Current.Resources[wechatRunning ? "SuccessTextBrush" : "TextSecondaryBrush"];
+            CurrentAccountStatusText.Text = wechatRunning ? "运行中" : "未运行";
         }
 
-        private void UpdateKpiCards(bool? wechatRunningOverride = null, string? fallbackLocalWxidOverride = null)
+        private void RefreshWeComCard()
         {
-            var sync = AppServices.WeChat4Sync;
-            bool wechatRunning = wechatRunningOverride ?? WeChat4Paths.FindWeixinProcesses().Count > 0;
-            var currentAcc = ResolveDisplayedCurrentAccount();
-            string accountLabel = currentAcc is not null
-                ? $"{currentAcc.DisplayName} ({currentAcc.DisplayAccountId})"
-                : !string.IsNullOrWhiteSpace(fallbackLocalWxidOverride)
-                    ? fallbackLocalWxidOverride
-                    : sync.ActiveAccount?.Wxid
-                        ?? WeChat4Paths.ListAccountDirs(AppServices.Settings.Current.WeChatSyncAccountDir).FirstOrDefault()?.Wxid
-                        ?? string.Empty;
+            var wecom = AppServices.WeComSync;
+            bool running = WeComPaths.FindWXWorkProcesses().Count > 0;
+            var accounts = wecom.LoadedAccounts;
 
-            if (wechatRunning)
+            _isInitializingUi = true;
+            WeComWatchToggle.IsOn = wecom.IsWatcherRunning;
+            _isInitializingUi = false;
+
+            WeComStatusDot.Fill = (Brush)Application.Current.Resources[running ? "SuccessTextBrush" : (accounts.Count > 0 ? "BrandPrimaryBrush" : "TextMutedBrush")];
+            WeComStatusBadge.Background = (Brush)Application.Current.Resources[running ? "SuccessBgBrush" : (accounts.Count > 0 ? "BrandSoftBgBrush" : "AppInputBgBrush")];
+            WeComStatusBadgeText.Foreground = (Brush)Application.Current.Resources[running ? "SuccessTextBrush" : (accounts.Count > 0 ? "BrandPrimaryBrush" : "TextSecondaryBrush")];
+            WeComStatusBadgeText.Text = running ? "在线" : (accounts.Count > 0 ? "离线缓存" : "未运行");
+
+            int totalUsers = accounts.Sum(a => a.Reader.Users.Count);
+            int totalGroups = accounts.Sum(a => a.Reader.Groups.Count);
+            WeComKpiCorpsText.Text = $"{accounts.Count} 家企业";
+            WeComKpiTotalsText.Text = $"{totalUsers} 联系人 · {totalGroups} 群";
+            WeComWatchSummaryText.Text = wecom.StatusText;
+
+            if (accounts.Count > 0)
             {
-                KpiWeChatText.Text = "微信已运行";
-                KpiWeChatSubText.Text = !string.IsNullOrWhiteSpace(accountLabel)
-                    ? $"当前账号：{accountLabel}"
-                    : "已检测到运行中的电脑微信";
-                StatusDot.Fill = (Brush)Application.Current.Resources["SuccessTextBrush"];
-                StatusBadgeText.Text = sync.IsFileWatcherRunning ? "自动监听中" : "已连接微信";
+                var primary = accounts[0];
+                WeComPrimaryNameText.Text = primary.CorpName;
+                WeComAvatarInitialText.Text = primary.CorpName.Length > 0 ? primary.CorpName[..1].ToUpperInvariant() : "企";
+                WeComPrimarySubText.Text = $"{primary.SelfUser.DisplayName} · 账号 {primary.AccountId}";
+                WeComCorpsSummaryText.Text = accounts.Count > 1
+                    ? $"全部企业：{string.Join(" / ", accounts.Select(a => a.CorpName))}"
+                    : "已加载当前企业全部联系人与群聊";
             }
             else
             {
-                KpiWeChatText.Text = "未运行";
-                KpiWeChatSubText.Text = "请先在电脑上登录微信";
-                StatusDot.Fill = (Brush)Application.Current.Resources["TextMutedBrush"];
-                StatusBadgeText.Text = "等待微信登录";
+                WeComPrimaryNameText.Text = "等待识别企业微信";
+                WeComAvatarInitialText.Text = "企";
+                WeComPrimarySubText.Text = running ? "已检测到企业微信，点击右上角「刷新同步双端」加载" : "请先在电脑上登录企业微信";
+                WeComCorpsSummaryText.Text = string.Empty;
             }
 
-            KpiMonitoredText.Text = $"{sync.MonitoredCustomersCount} 客户 · {sync.MonitoredGroupsCount} 群";
-            WatchStatusSummaryText.Text = sync.WatchStatusText;
-
-            if (sync.LastSyncAt.HasValue)
+            _wecomCorpLines.Clear();
+            foreach (var a in accounts)
             {
-                KpiLastSyncText.Text = sync.LastSyncAt.Value.ToString("HH:mm:ss");
-                if (sync.LastReport is { } r)
-                {
-                    int newMsgs = r.CustomerMessagesInserted + r.GroupMessagesInserted;
-                    KpiLastSyncSubText.Text = newMsgs > 0
-                        ? $"最近同步新增 {newMsgs} 条消息"
-                        : "已核对最新记录，暂无新消息";
-                }
+                string tag = a.IsPrimary ? "[主活跃] " : "";
+                _wecomCorpLines.Add($"{tag}{a.CorpName}  ·  {a.SelfUser.DisplayName}（{a.Reader.Users.Count} 联系人 / {a.Reader.Groups.Count} 群）");
             }
-            else
-            {
-                KpiLastSyncText.Text = "等待新消息";
-                KpiLastSyncSubText.Text = "微信收到新消息后将自动同步";
-            }
-
-            RelaunchAdminButton.Visibility = sync.LastSyncNeedsAdmin ? Visibility.Visible : Visibility.Collapsed;
+            WeComCorpsCountText.Text = _wecomCorpLines.Count.ToString();
+            WeComCorpsListView.Visibility = _wecomCorpLines.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            EmptyWeComCorpsHint.Visibility = _wecomCorpLines.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
         }
 
         private void AutoWatchToggle_Toggled(object sender, RoutedEventArgs e)
         {
             if (_isInitializingUi) return;
             AppServices.WeChat4Sync.ConfigureAutoWatch(AutoWatchToggle.IsOn);
-            UpdateKpiCards();
+            RefreshWeChatCard();
+            UpdateOverallHeader();
         }
 
-        private void OnLocalBridgeStateChanged()
-        {
-            DispatcherQueue.TryEnqueue(RefreshLocalBridgeUi);
-        }
-
-        private void OnWeComStatusChanged(string _)
-        {
-            DispatcherQueue.TryEnqueue(RefreshLocalBridgeUi);
-        }
-
-        private void RefreshLocalBridgeUi()
-        {
-            LocalBridgeStatusText.Text = AppServices.LocalBridge.StatusSummary;
-            WeComStatusText.Text = AppServices.WeComSync.StatusText;
-        }
-
-        private void LocalBridgeToggle_Toggled(object sender, RoutedEventArgs e)
+        private void WeComWatchToggle_Toggled(object sender, RoutedEventArgs e)
         {
             if (_isInitializingUi) return;
-            AppServices.LocalBridge.ConfigureEnabled(LocalBridgeToggle.IsOn);
-            RefreshLocalBridgeUi();
-        }
-
-        private async void RefreshWeComButton_Click(object sender, RoutedEventArgs e)
-        {
-            RefreshWeComButton.IsEnabled = false;
-            try
-            {
-                ShowBanner("正在只读识别本机企业微信账号与本地库...", isError: false);
-                var (ok, msg) = await AppServices.WeComSync.EnsureReadyAsync(forceRefresh: true);
-                ShowBanner(ok ? $"✓ {msg}" : msg, isError: !ok);
-                RefreshLocalBridgeUi();
-            }
-            catch (Exception ex)
-            {
-                ShowBanner($"识别企业微信失败：{ex.Message}", isError: true);
-            }
-            finally
-            {
-                RefreshWeComButton.IsEnabled = true;
-            }
+            if (WeComWatchToggle.IsOn) AppServices.WeComSync.StartWatching();
+            else AppServices.WeComSync.StopWatching();
+            RefreshWeComCard();
+            UpdateOverallHeader();
         }
 
         private void OptCheck_Changed(object sender, RoutedEventArgs e)
@@ -451,55 +414,42 @@ namespace Client.Pages
             AppServices.Settings.Save();
         }
 
-        private async void DetectAccountButton_Click(object sender, RoutedEventArgs e)
+        private async void SyncBothButton_Click(object sender, RoutedEventArgs e)
         {
             if (_isBusy) return;
             _isBusy = true;
-            DetectAccountButton.IsEnabled = false;
+            SyncBothButton.IsEnabled = false;
             try
             {
-                ShowBanner("正在识别电脑当前登录的微信账号与资料...", isError: false);
-                AppServices.WeChat4Sync.StartAutoSyncIfConfigured();
-                var (ok, msg, _) = await AppServices.WeChat4Sync.DetectAndSyncCurrentWeChatAccountAsync(forceReload: true);
-                ShowBanner(ok ? $"✓ {msg}" : msg, isError: !ok);
-                await RefreshStatusAsync();
+                ShowBanner("正在同时刷新个人微信与企业微信双端只读数据...", isError: false);
+
+                var wecomTask = AppServices.WeComSync.EnsureAllAccountsReadyAsync(forceRefresh: true);
+                var wxDetectTask = AppServices.WeChat4Sync.DetectAndSyncCurrentWeChatAccountAsync(forceReload: true);
+                await Task.WhenAll(wecomTask, wxDetectTask);
+
+                var (wxSyncOk, wxSyncMsg, _) = await AppServices.WeChat4Sync.SyncImportedTargetsAsync(
+                    syncCustomers: true, syncGroups: true, isBackgroundAuto: false);
+
+                await RefreshAllUiAsync();
+                int corpCnt = AppServices.WeComSync.LoadedAccounts.Count;
+                string summary = $"双端刷新完成：企微已接入 {corpCnt} 家企业；个微{(wxSyncOk ? "同步完成" : wxSyncMsg)}";
+                ShowBanner($"✓ {summary}", isError: false);
             }
             catch (Exception ex)
             {
-                ShowBanner($"识别当前微信失败：{ex.Message}", isError: true);
+                ShowBanner($"双端刷新异常：{ex.Message}", isError: true);
             }
             finally
             {
                 _isBusy = false;
-                DetectAccountButton.IsEnabled = true;
+                SyncBothButton.IsEnabled = true;
             }
         }
 
-        private async void SyncNowButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_isBusy) return;
-            _isBusy = true;
-            SyncNowButton.IsEnabled = false;
-            try
-            {
-                ShowBanner("正在同步当前在线微信已导入的客户与群聊最新消息...", isError: false);
-                var (ok, msg, _) = await AppServices.WeChat4Sync.SyncImportedTargetsAsync(
-                    syncCustomers: true,
-                    syncGroups: true,
-                    isBackgroundAuto: false);
-                ShowBanner(ok ? $"✓ {msg}" : msg, isError: !ok);
-                await RefreshStatusAsync();
-            }
-            catch (Exception ex)
-            {
-                ShowBanner($"同步失败：{ex.Message}", isError: true);
-            }
-            finally
-            {
-                _isBusy = false;
-                SyncNowButton.IsEnabled = true;
-            }
-        }
+        private void OpenWeChatPersonal_Click(object sender, RoutedEventArgs e) => WorkbenchPage.Current?.SwitchSection("customers");
+        private void OpenWeChatGroups_Click(object sender, RoutedEventArgs e) => WorkbenchPage.Current?.SwitchSection("groups");
+        private void OpenWeComPersonal_Click(object sender, RoutedEventArgs e) => WorkbenchPage.Current?.SwitchSection("wecom_contacts");
+        private void OpenWeComGroups_Click(object sender, RoutedEventArgs e) => WorkbenchPage.Current?.SwitchSection("wecom_groups");
 
         private void RelaunchAdminButton_Click(object sender, RoutedEventArgs e)
         {
@@ -516,9 +466,7 @@ namespace Client.Pages
             }
         }
 
-        private static void ShowBanner(string message, bool isError)
-        {
+        private static void ShowBanner(string message, bool isError) =>
             WorkbenchPage.Current?.ShowToast(message, isError);
-        }
     }
 }

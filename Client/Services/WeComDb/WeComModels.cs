@@ -38,6 +38,13 @@ namespace Client.Services.WeComDb
         public int Gender { get; set; } // 0 unknown, 1 male, 2 female
         public bool IsExternal { get; set; }
         public long AddTime { get; set; }
+        public string ConversationId { get; set; } = string.Empty;
+        public long LastMessageTime { get; set; }
+        public string LastMessageSummary { get; set; } = string.Empty;
+        public int MessageCount { get; set; }
+        public string OwnerAccountId { get; set; } = string.Empty;
+        public string OwnerCorpId { get; set; } = string.Empty;
+        public string OwnerCorpName { get; set; } = string.Empty;
 
         public string DisplayName =>
             !string.IsNullOrWhiteSpace(Remark) ? Remark :
@@ -77,6 +84,11 @@ namespace Client.Services.WeComDb
         public bool IsPinned { get; set; }
         public long CreateTime { get; set; }
         public long LastMessageTime { get; set; }
+        public string LastMessageSummary { get; set; } = string.Empty;
+        public int MessageCount { get; set; }
+        public string OwnerAccountId { get; set; } = string.Empty;
+        public string OwnerCorpId { get; set; } = string.Empty;
+        public string OwnerCorpName { get; set; } = string.Empty;
         public List<WeComGroupMember> Members { get; } = [];
 
         public string DisplayName =>
@@ -112,6 +124,33 @@ namespace Client.Services.WeComDb
         public string AesKey { get; init; } = string.Empty;
         public string MediaUrl { get; init; } = string.Empty;
         public string LocalFilePath { get; set; } = string.Empty;
+    }
+
+    public sealed class WeComCorpInfo
+    {
+        public string CorpId { get; init; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string ShortName { get; set; } = string.Empty;
+        public string LogoUrl { get; set; } = string.Empty;
+        public string WwCorpId { get; set; } = string.Empty;
+
+        public string DisplayName =>
+            !string.IsNullOrWhiteSpace(ShortName) ? ShortName :
+            !string.IsNullOrWhiteSpace(Name) ? Name :
+            CorpId;
+    }
+
+    public sealed class WeComAccountSnapshot
+    {
+        public string AccountId { get; init; } = string.Empty;
+        public string AccountPath { get; init; } = string.Empty;
+        public string CorpId { get; init; } = string.Empty;
+        public string CorpName { get; init; } = string.Empty;
+        public string CorpLogoUrl { get; init; } = string.Empty;
+        public WeComUser SelfUser { get; init; } = new();
+        public WeComReader Reader { get; init; } = null!;
+        public bool IsPrimary { get; set; }
+        public DateTimeOffset LastModified { get; init; }
     }
 
     public sealed class WeComEvent

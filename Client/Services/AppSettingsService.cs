@@ -46,7 +46,7 @@ namespace Client.Services
 
         private static readonly HashSet<string> ValidWorkbenchSections = new(StringComparer.OrdinalIgnoreCase)
         {
-            "customers", "groups", "ai", "ocr", "autoreply"
+            "customers", "groups", "ai", "ocr", "autoreply", "wecom_contacts", "wecom_groups", "bridge"
         };
 
         private static readonly HashSet<string> ValidRightTabs = new(StringComparer.OrdinalIgnoreCase)

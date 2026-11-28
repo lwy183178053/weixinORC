@@ -16,12 +16,17 @@ namespace Client.Services.WeComDb
         public string CachePath { get; }
 
         public WeComUser? SelfUser { get; private set; }
+        public string SelfCorpId { get; private set; } = string.Empty;
+        public string SelfCorpName { get; private set; } = string.Empty;
+        public string SelfCorpLogoUrl { get; private set; } = string.Empty;
+        public Dictionary<string, WeComCorpInfo> CorpsById { get; } = new(StringComparer.OrdinalIgnoreCase);
         public List<WeComUser> Users { get; } = [];
         public List<WeComGroup> Groups { get; } = [];
 
         private readonly Dictionary<string, WeComUser> _usersById = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, WeComGroup> _groupsByConvId = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, WeComGroup> _groupsByRoomId = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _singleConvByPeerId = new(StringComparer.OrdinalIgnoreCase);
         private SqliteConnection? _msgConn;
         private bool _disposed;
 
@@ -54,15 +59,237 @@ namespace Client.Services.WeComDb
 
         private void LoadAll()
         {
+            string companyDb = Path.Combine(DecryptedDir, "company.db");
             string userDb = Path.Combine(DecryptedDir, "user.db");
             string sessionDb = Path.Combine(DecryptedDir, "session.db");
             string messageDb = Path.Combine(DecryptedDir, "message.db");
 
+            if (File.Exists(companyDb)) LoadCompanies(companyDb);
             if (File.Exists(userDb)) LoadUsers(userDb);
             if (File.Exists(sessionDb)) LoadGroupsAndSessions(sessionDb);
             if (File.Exists(messageDb))
             {
                 _msgConn = OpenReadOnly(messageDb);
+            }
+
+            ResolveSelfCorpIdentity();
+            AnnotateSessionMessageStats();
+            ApplyOwnerCorpMetadata();
+        }
+
+        private void LoadCompanies(string companyDbPath)
+        {
+            using var conn = OpenReadOnly(companyDbPath);
+            if (conn is null) return;
+            var tables = ListTables(conn);
+
+            if (tables.Contains("external_company_table_v2"))
+            {
+                try
+                {
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "SELECT corpany_id, name, short_name, logo FROM external_company_table_v2";
+                    using var r = cmd.ExecuteReader();
+                    while (r.Read())
+                    {
+                        string cid = ReadSafeString(r, 0);
+                        if (string.IsNullOrWhiteSpace(cid)) continue;
+                        string name = ReadSafeString(r, 1);
+                        string shortName = ReadSafeString(r, 2);
+                        string logo = ReadSafeString(r, 3);
+                        CorpsById[cid] = new WeComCorpInfo
+                        {
+                            CorpId = cid,
+                            Name = name,
+                            ShortName = shortName,
+                            LogoUrl = logo
+                        };
+                    }
+                }
+                catch { }
+            }
+
+            if (tables.Contains("self_corp_list_table"))
+            {
+                try
+                {
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "SELECT corpany_id, self_corp_info FROM self_corp_list_table";
+                    using var r = cmd.ExecuteReader();
+                    while (r.Read())
+                    {
+                        string cid = ReadSafeString(r, 0);
+                        byte[] pb = ReadSafeBytes(r, 1);
+                        if (string.IsNullOrWhiteSpace(cid)) continue;
+
+                        string f3 = string.Empty, f5 = string.Empty, f9 = string.Empty, f60 = string.Empty;
+                        foreach (var f in ReadPbFields(pb))
+                        {
+                            if (f.WireType != 2 || f.Bytes is null) continue;
+                            string s = TryUtf8(f.Bytes);
+                            if (string.IsNullOrWhiteSpace(s)) continue;
+                            switch (f.FieldNumber)
+                            {
+                                case 3: f3 = s; break;
+                                case 5: f5 = s; break;
+                                case 9 when s.StartsWith("http", StringComparison.OrdinalIgnoreCase): f9 = s; break;
+                                case 60: f60 = s; break;
+                            }
+                        }
+
+                        if (!CorpsById.TryGetValue(cid, out var info))
+                        {
+                            info = new WeComCorpInfo { CorpId = cid };
+                            CorpsById[cid] = info;
+                        }
+                        if (string.IsNullOrWhiteSpace(info.ShortName)) info.ShortName = !string.IsNullOrWhiteSpace(f3) ? f3 : f5;
+                        if (string.IsNullOrWhiteSpace(info.Name)) info.Name = !string.IsNullOrWhiteSpace(f5) ? f5 : f3;
+                        if (string.IsNullOrWhiteSpace(info.LogoUrl)) info.LogoUrl = f9;
+                        if (string.IsNullOrWhiteSpace(info.WwCorpId)) info.WwCorpId = f60;
+                    }
+                }
+                catch { }
+            }
+        }
+
+        private void ResolveSelfCorpIdentity()
+        {
+            SelfCorpId = SelfUser?.CorpId ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(SelfCorpId) && CorpsById.TryGetValue(SelfCorpId, out var corp))
+            {
+                SelfCorpName = corp.DisplayName;
+                SelfCorpLogoUrl = corp.LogoUrl;
+            }
+            if (string.IsNullOrWhiteSpace(SelfCorpName))
+            {
+                // Fall back to the dominant corp_id among internal users or account id
+                var topCorp = Users
+                    .Where(u => !u.IsExternal && !string.IsNullOrWhiteSpace(u.CorpId))
+                    .GroupBy(u => u.CorpId)
+                    .OrderByDescending(g => g.Count())
+                    .FirstOrDefault();
+                if (topCorp is not null && CorpsById.TryGetValue(topCorp.Key, out var fallbackCorp))
+                {
+                    SelfCorpId = topCorp.Key;
+                    SelfCorpName = fallbackCorp.DisplayName;
+                    SelfCorpLogoUrl = fallbackCorp.LogoUrl;
+                }
+            }
+            if (string.IsNullOrWhiteSpace(SelfCorpName))
+            {
+                SelfCorpName = $"企业 {AccountId}";
+            }
+        }
+
+        private void AnnotateSessionMessageStats()
+        {
+            if (_msgConn is null) return;
+            try
+            {
+                using var cmd = _msgConn.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT m.conversation_id, stats.cnt, m.send_time, m.content_type, m.content
+                    FROM (
+                        SELECT conversation_id, COUNT(*) AS cnt, MAX(message_id) AS max_mid
+                        FROM message_table
+                        WHERE conversation_id LIKE 'S:%' OR conversation_id LIKE 'R:%'
+                        GROUP BY conversation_id
+                    ) stats
+                    JOIN message_table m ON m.message_id = stats.max_mid";
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                {
+                    string convId = ReadSafeString(r, 0);
+                    int cnt = r.IsDBNull(1) ? 0 : r.GetInt32(1);
+                    long lastTs = r.IsDBNull(2) ? 0 : r.GetInt64(2);
+                    int ct = r.IsDBNull(3) ? 0 : r.GetInt32(3);
+                    byte[] blob = ReadSafeBytes(r, 4);
+
+                    string summary = ct switch
+                    {
+                        0 or 2 => ParseRichTextProtobuf(blob, []),
+                        14 => "[图片]",
+                        15 or 20 => "[文件]",
+                        16 => "[语音]",
+                        22 => "[视频]",
+                        29 => "[动画表情]",
+                        123 => "[图文消息]",
+                        1011 or 1022 or 1073 or 1006 => "[系统通知]",
+                        _ => ExtractReadableStrings(blob)
+                    };
+                    if (summary.Length > 48) summary = summary[..48] + "…";
+
+                    if (convId.StartsWith("R:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (_groupsByConvId.TryGetValue(convId, out var grp))
+                        {
+                            grp.MessageCount = cnt;
+                            if (lastTs > grp.LastMessageTime) grp.LastMessageTime = lastTs;
+                            grp.LastMessageSummary = summary;
+                        }
+                    }
+                    else if (convId.StartsWith("S:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string peerId = ExtractPeerIdFromSingleConv(convId, AccountId);
+                        _singleConvByPeerId[peerId] = convId;
+                        if (_usersById.TryGetValue(peerId, out var user))
+                        {
+                            user.ConversationId = convId;
+                            user.MessageCount = cnt;
+                            if (lastTs > user.LastMessageTime) user.LastMessageTime = lastTs;
+                            user.LastMessageSummary = summary;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            Users.Sort((a, b) =>
+            {
+                int cmp = b.LastMessageTime.CompareTo(a.LastMessageTime);
+                if (cmp != 0) return cmp;
+                cmp = b.MessageCount.CompareTo(a.MessageCount);
+                if (cmp != 0) return cmp;
+                cmp = b.IsExternal.CompareTo(a.IsExternal);
+                if (cmp != 0) return cmp;
+                return string.Compare(a.DisplayName, b.DisplayName, StringComparison.CurrentCultureIgnoreCase);
+            });
+
+            Groups.Sort((a, b) =>
+            {
+                int cmp = b.IsPinned.CompareTo(a.IsPinned);
+                if (cmp != 0) return cmp;
+                cmp = b.LastMessageTime.CompareTo(a.LastMessageTime);
+                if (cmp != 0) return cmp;
+                return b.MessageCount.CompareTo(a.MessageCount);
+            });
+        }
+
+        private void ApplyOwnerCorpMetadata()
+        {
+            foreach (var u in Users)
+            {
+                u.OwnerAccountId = AccountId;
+                u.OwnerCorpId = SelfCorpId;
+                u.OwnerCorpName = SelfCorpName;
+                if (string.IsNullOrWhiteSpace(u.ConversationId) && _singleConvByPeerId.TryGetValue(u.UserId, out var cid))
+                {
+                    u.ConversationId = cid;
+                }
+                if (string.IsNullOrWhiteSpace(u.ExternalCorpName) &&
+                    !string.IsNullOrWhiteSpace(u.CorpId) &&
+                    !string.Equals(u.CorpId, SelfCorpId, StringComparison.OrdinalIgnoreCase) &&
+                    CorpsById.TryGetValue(u.CorpId, out var extCorp))
+                {
+                    u.ExternalCorpName = extCorp.DisplayName;
+                }
+            }
+
+            foreach (var g in Groups)
+            {
+                g.OwnerAccountId = AccountId;
+                g.OwnerCorpId = SelfCorpId;
+                g.OwnerCorpName = SelfCorpName;
             }
         }
 
@@ -251,11 +478,18 @@ namespace Client.Services.WeComDb
                     {
                         // Ensure single-chat peers also appear in Users list even if absent from user_table
                         string peerId = ExtractPeerIdFromSingleConv(convId, AccountId);
-                        if (!string.IsNullOrWhiteSpace(peerId) && !_usersById.ContainsKey(peerId))
+                        if (!string.IsNullOrWhiteSpace(peerId))
                         {
-                            var u = new WeComUser { UserId = peerId, Name = ReadColString(r, cols, "name") };
-                            _usersById[peerId] = u;
-                            Users.Add(u);
+                            _singleConvByPeerId[peerId] = convId;
+                            if (!_usersById.TryGetValue(peerId, out var u))
+                            {
+                                u = new WeComUser { UserId = peerId, Name = ReadColString(r, cols, "name") };
+                                _usersById[peerId] = u;
+                                Users.Add(u);
+                            }
+                            u.ConversationId = convId;
+                            long lmt = ReadColLong(r, cols, "last_message_time");
+                            if (lmt > u.LastMessageTime) u.LastMessageTime = lmt;
                         }
                     }
                 }
@@ -315,6 +549,33 @@ namespace Client.Services.WeComDb
             {
                 return 0;
             }
+        }
+
+        public List<WeComMessage> ReadConversationMessages(string conversationId, int limit = 150)
+        {
+            var list = new List<WeComMessage>();
+            if (_msgConn is null || string.IsNullOrWhiteSpace(conversationId)) return list;
+            try
+            {
+                using var cmd = _msgConn.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT message_id, server_id, sequence, sender_id, conversation_id, content_type, send_time, content, extra_content
+                    FROM message_table
+                    WHERE conversation_id = @cid
+                    ORDER BY message_id DESC
+                    LIMIT @lim";
+                cmd.Parameters.AddWithValue("@cid", conversationId.Trim());
+                cmd.Parameters.AddWithValue("@lim", Math.Clamp(limit, 1, 1000));
+                using var r = cmd.ExecuteReader();
+                while (r.Read())
+                {
+                    var msg = ParseMessageRow(r);
+                    if (msg is not null) list.Add(msg);
+                }
+                list.Reverse();
+            }
+            catch { }
+            return list;
         }
 
         public List<WeComMessage> ReadMessagesAfter(long afterMessageId, int limit = 200)

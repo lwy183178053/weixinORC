@@ -14,7 +14,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Row 0: Clean Minimal Header -->
+        <!-- Row 0: Unified Dual-Monitor Header -->
         <Border
             Grid.Row="0"
             Padding="24,14"
@@ -26,12 +26,12 @@
                     <Ellipse x:Name="StatusDot" Width="10" Height="10" Fill="{StaticResource TextMutedBrush}" />
                     <StackPanel Spacing="2">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="微信自动监听" />
+                            <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="双端实时监听" />
                             <Border Padding="8,2" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="9">
                                 <TextBlock x:Name="StatusBadgeText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="检测中" />
                             </Border>
                         </StackPanel>
-                        <TextBlock FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="自动识别登录的电脑微信账号并监测消息变化，切换微信时自动区分并隔离对应客户与群聊" />
+                        <TextBlock FontSize="12" Foreground="{StaticResource TextMutedBrush}" Text="并列监控个人微信与企业微信运行状态、登录账号及消息变化，无 Hook 纯只读同步" />
                     </StackPanel>
                 </StackPanel>
 
@@ -46,304 +46,422 @@
                         Style="{StaticResource DangerOutlineButtonStyle}"
                         Visibility="Collapsed" />
                     <Button
-                        x:Name="SyncNowButton"
+                        x:Name="SyncBothButton"
                         Height="32"
                         Padding="14,0"
-                        Click="SyncNowButton_Click"
-                        Content="立即同步已导入数据"
+                        Click="SyncBothButton_Click"
                         FontSize="12"
-                        Style="{StaticResource PrimaryVioletButtonStyle}" />
+                        Style="{StaticResource PrimaryVioletButtonStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <FontIcon FontSize="12.5" Foreground="#FFFFFF" Glyph="&#xE895;" />
+                            <TextBlock Text="刷新同步双端" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Row 1: Main Centered Content -->
+        <!-- Row 1: Main Content -->
         <ScrollViewer
             Grid.Row="1"
             HorizontalContentAlignment="Stretch"
             HorizontalScrollBarVisibility="Disabled"
             HorizontalScrollMode="Disabled">
             <Grid Padding="24,18">
-                <StackPanel MaxWidth="900" HorizontalAlignment="Stretch" Spacing="14">
+                <StackPanel MaxWidth="1040" HorizontalAlignment="Stretch" Spacing="14">
 
-                <!-- Card 1: Current Active WeChat Account Identity -->
-                <Border
-                    Padding="20,16"
-                    Background="{StaticResource AppSurfaceBrush}"
-                    BorderBrush="{StaticResource BrandSoftBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="12">
+                    <!-- Row 1: Side-by-Side Equal Weight Cards (Personal WeChat | Enterprise WeCom) -->
                     <Grid ColumnSpacing="14">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="54" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <!-- Self Avatar -->
+                        <!-- LEFT CARD: Personal WeChat 4.x -->
                         <Border
                             Grid.Column="0"
-                            Width="52"
-                            Height="52"
-                            VerticalAlignment="Center"
-                            Background="{StaticResource BrandSoftBgBrush}"
+                            Padding="18,16"
+                            Background="{StaticResource AppSurfaceBrush}"
                             BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                            <StackPanel Spacing="12">
+                                <!-- Card Header -->
+                                <Grid>
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <Border Width="28" Height="28" Background="{StaticResource SuccessBgBrush}" CornerRadius="7">
+                                            <FontIcon FontSize="13.5" Foreground="{StaticResource SuccessTextBrush}" Glyph="&#xE8BD;" />
+                                        </Border>
+                                        <TextBlock FontSize="14.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="个人微信" />
+                                        <Border
+                                            x:Name="CurrentAccountStatusBadge"
+                                            Padding="7,2"
+                                            Background="{StaticResource AppInputBgBrush}"
+                                            CornerRadius="9">
+                                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                                <Ellipse x:Name="CurrentAccountStatusDot" Width="6" Height="6" Fill="{StaticResource TextMutedBrush}" />
+                                                <TextBlock x:Name="CurrentAccountStatusText" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="检测中" />
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+
+                                    <ToggleSwitch
+                                        x:Name="AutoWatchToggle"
+                                        MinWidth="0"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        OffContent="暂停"
+                                        OnContent="监听中"
+                                        Toggled="AutoWatchToggle_Toggled" />
+                                </Grid>
+
+                                <Border Height="1" Background="{StaticResource AppBorderSubtleBrush}" />
+
+                                <!-- Identity Block -->
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="46" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Border
+                                        Grid.Column="0"
+                                        Width="46"
+                                        Height="46"
+                                        Background="{StaticResource BrandSoftBgBrush}"
+                                        BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="10">
+                                        <Grid>
+                                            <TextBlock x:Name="CurrentAccountAvatarText" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="18" FontWeight="Bold" Foreground="{StaticResource BrandPrimaryBrush}" Text="微" />
+                                            <Image x:Name="CurrentAccountAvatarImage" Stretch="UniformToFill" Visibility="Collapsed" />
+                                        </Grid>
+                                    </Border>
+
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock x:Name="CurrentAccountNameText" FontSize="14.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="等待识别个人微信" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock x:Name="CurrentAccountIdText" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" IsTextSelectionEnabled="True" Text="登录电脑微信后自动识别头像与账号资料" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock x:Name="CurrentAccountBioText" FontSize="11" Foreground="{StaticResource TextMutedBrush}" TextTrimming="CharacterEllipsis" Visibility="Collapsed" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Metrics Row -->
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Padding="10,8" Background="{StaticResource AppSurfaceAltBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="8">
+                                        <StackPanel Spacing="2">
+                                            <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="已托管档案" />
+                                            <TextBlock x:Name="KpiMonitoredText" FontSize="13.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="0 客户 · 0 群" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="1" Padding="10,8" Background="{StaticResource AppSurfaceAltBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="8">
+                                        <StackPanel Spacing="2">
+                                            <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="上次同步" />
+                                            <TextBlock x:Name="KpiLastSyncText" FontSize="13.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="等待新消息" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+
+                                <!-- Unified Footer Actions -->
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="WatchStatusSummaryText" Grid.Column="0" VerticalAlignment="Center" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="自动监听待命中" TextTrimming="CharacterEllipsis" />
+                                    <StackPanel Grid.Column="1" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="6">
+                                        <Button Height="28" Padding="10,0" Click="OpenWeChatPersonal_Click" Content="微信个人" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                                        <Button Height="28" Padding="10,0" Click="OpenWeChatGroups_Click" Content="微信群聊" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- RIGHT CARD: Enterprise WeCom 5.x -->
+                        <Border
+                            Grid.Column="1"
+                            Padding="18,16"
+                            Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource BrandSoftBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="12">
+                            <StackPanel Spacing="12">
+                                <!-- Card Header -->
+                                <Grid>
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <Border Width="28" Height="28" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="7">
+                                            <FontIcon FontSize="13.5" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE731;" />
+                                        </Border>
+                                        <TextBlock FontSize="14.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="企业微信" />
+                                        <Border
+                                            x:Name="WeComStatusBadge"
+                                            Padding="7,2"
+                                            Background="{StaticResource AppInputBgBrush}"
+                                            CornerRadius="9">
+                                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                                <Ellipse x:Name="WeComStatusDot" Width="6" Height="6" Fill="{StaticResource TextMutedBrush}" />
+                                                <TextBlock x:Name="WeComStatusBadgeText" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" Text="检测中" />
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+
+                                    <ToggleSwitch
+                                        x:Name="WeComWatchToggle"
+                                        MinWidth="0"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        OffContent="暂停"
+                                        OnContent="监听中"
+                                        Toggled="WeComWatchToggle_Toggled" />
+                                </Grid>
+
+                                <Border Height="1" Background="{StaticResource AppBorderSubtleBrush}" />
+
+                                <!-- Identity Block -->
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="46" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Border
+                                        Grid.Column="0"
+                                        Width="46"
+                                        Height="46"
+                                        Background="{StaticResource InfoBgBrush}"
+                                        BorderBrush="{StaticResource InfoBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="10">
+                                        <TextBlock x:Name="WeComAvatarInitialText" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="18" FontWeight="Bold" Foreground="{StaticResource InfoTextBrush}" Text="企" />
+                                    </Border>
+
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock x:Name="WeComPrimaryNameText" FontSize="14.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="等待识别企业微信" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock x:Name="WeComPrimarySubText" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" IsTextSelectionEnabled="True" Text="自动读取本机企业微信全部企业空间" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock x:Name="WeComCorpsSummaryText" FontSize="11" Foreground="{StaticResource TextMutedBrush}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Metrics Row -->
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Padding="10,8" Background="{StaticResource AppSurfaceAltBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="8">
+                                        <StackPanel Spacing="2">
+                                            <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="已识别企业与账号" />
+                                            <TextBlock x:Name="WeComKpiCorpsText" FontSize="13.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="0 家企业" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="1" Padding="10,8" Background="{StaticResource AppSurfaceAltBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="8">
+                                        <StackPanel Spacing="2">
+                                            <TextBlock FontSize="10.5" Foreground="{StaticResource TextMutedBrush}" Text="合计联系人与群聊" />
+                                            <TextBlock x:Name="WeComKpiTotalsText" FontSize="13.5" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="0 联系人 · 0 群" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+
+                                <!-- Unified Footer Actions -->
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="WeComWatchSummaryText" Grid.Column="0" VerticalAlignment="Center" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="只读监听本地企微数据库" TextTrimming="CharacterEllipsis" />
+                                    <StackPanel Grid.Column="1" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="6">
+                                        <Button Height="28" Padding="10,0" Click="OpenWeComPersonal_Click" Content="企微个人" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                                        <Button Height="28" Padding="10,0" Click="OpenWeComGroups_Click" Content="企微群聊" FontSize="11.5" Style="{StaticResource SecondaryOutlineButtonStyle}" />
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- Row 2: Side-by-Side Account & Enterprise Directories -->
+                    <Grid ColumnSpacing="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Left: Linked Personal WeChat Accounts -->
+                        <Border
+                            Grid.Column="0"
+                            Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
                             BorderThickness="1"
                             CornerRadius="10">
                             <Grid>
-                                <TextBlock
-                                    x:Name="CurrentAccountAvatarText"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    FontSize="20"
-                                    FontWeight="Bold"
-                                    Foreground="{StaticResource BrandPrimaryBrush}"
-                                    Text="微" />
-                                <Image
-                                    x:Name="CurrentAccountAvatarImage"
-                                    Stretch="UniformToFill"
-                                    Visibility="Collapsed" />
-                            </Grid>
-                        </Border>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
 
-                        <!-- Self Identity Details -->
-                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="3">
-                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                <TextBlock
-                                    x:Name="CurrentAccountNameText"
-                                    FontSize="15.5"
-                                    FontWeight="Bold"
-                                    Foreground="{StaticResource TextPrimaryBrush}"
-                                    Text="等待识别当前登录微信"
-                                    TextTrimming="CharacterEllipsis" />
-                                <Border
-                                    x:Name="CurrentAccountStatusBadge"
-                                    Padding="8,2"
-                                    Background="{StaticResource AppInputBgBrush}"
-                                    CornerRadius="9">
-                                    <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
-                                        <Ellipse x:Name="CurrentAccountStatusDot" Width="7" Height="7" Fill="{StaticResource TextMutedBrush}" />
-                                        <TextBlock
-                                            x:Name="CurrentAccountStatusText"
-                                            FontSize="11"
-                                            FontWeight="SemiBold"
-                                            Foreground="{StaticResource TextSecondaryBrush}"
-                                            Text="待识别" />
+                                <Border Grid.Row="0" Padding="14,10" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon FontSize="13" Foreground="{StaticResource SuccessTextBrush}" Glyph="&#xE77B;" />
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="已关联个人微信号" />
+                                        <Border Padding="6,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8">
+                                            <TextBlock x:Name="LinkedAccountsCountText" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="0" />
+                                        </Border>
                                     </StackPanel>
                                 </Border>
-                            </StackPanel>
 
-                            <TextBlock
-                                x:Name="CurrentAccountIdText"
-                                FontSize="12"
-                                Foreground="{StaticResource TextSecondaryBrush}"
-                                IsTextSelectionEnabled="True"
-                                Text="登录电脑微信后将自动识别头像、昵称与微信号，也可点击右侧按钮立即识别"
-                                TextTrimming="CharacterEllipsis" />
+                                <Grid Grid.Row="1">
+                                    <TextBlock
+                                        x:Name="EmptyAccountsHint"
+                                        Margin="14,18"
+                                        HorizontalAlignment="Center"
+                                        FontSize="12"
+                                        Foreground="{StaticResource TextMutedBrush}"
+                                        Text="暂未关联个人微信账号，点击右上角「刷新同步双端」即可自动登记。"
+                                        TextAlignment="Center"
+                                        TextWrapping="Wrap" />
 
-                            <TextBlock
-                                x:Name="CurrentAccountBioText"
-                                FontSize="11.5"
-                                Foreground="{StaticResource TextMutedBrush}"
-                                TextTrimming="CharacterEllipsis"
-                                Visibility="Collapsed" />
-                        </StackPanel>
-
-                        <!-- Action Button -->
-                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                            <Button
-                                x:Name="DetectAccountButton"
-                                Height="32"
-                                Padding="12,0"
-                                Click="DetectAccountButton_Click"
-                                FontSize="12"
-                                Style="{StaticResource SecondaryOutlineButtonStyle}"
-                                ToolTipService.ToolTip="立即读取电脑当前登录微信的头像、昵称与资料并更新关联列表">
-                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                    <FontIcon FontSize="12.5" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE77B;" />
-                                    <TextBlock Text="识别当前微信" />
-                                </StackPanel>
-                            </Button>
-                        </StackPanel>
-                    </Grid>
-                </Border>
-
-                <!-- Card 2: Auto File-Change Watcher Control -->
-                <Border
-                    Padding="20,16"
-                    Background="{StaticResource AppSurfaceBrush}"
-                    BorderBrush="{StaticResource AppBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="12">
-                    <Grid ColumnSpacing="16">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-
-                        <StackPanel Grid.Column="0" Spacing="5" VerticalAlignment="Center">
-                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                <FontIcon FontSize="15" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE895;" />
-                                <TextBlock FontSize="14.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="自动监听微信消息变化" />
-                            </StackPanel>
-                            <TextBlock
-                                x:Name="WatchStatusSummaryText"
-                                FontSize="12.5"
-                                Foreground="{StaticResource TextSecondaryBrush}"
-                                Text="自动监听中..."
-                                TextWrapping="Wrap" />
-                            <TextBlock
-                                FontSize="11.5"
-                                Foreground="{StaticResource TextMutedBrush}"
-                                Text="提示：添加客户请在「客户档案」点左上角「+」，添加群聊请在「群组档案」点左上角「+」；导入后此处会自动持续监听更新。"
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-
-                        <ToggleSwitch
-                            x:Name="AutoWatchToggle"
-                            Grid.Column="1"
-                            MinWidth="0"
-                            VerticalAlignment="Center"
-                            OffContent="已暂停"
-                            OnContent="监听中"
-                            Toggled="AutoWatchToggle_Toggled" />
-                    </Grid>
-                </Border>
-
-                <!-- Card 2B: Local Connector Bridge (8990 WeChat / 8989 WeCom) -->
-                <Border
-                    Padding="20,16"
-                    Background="{StaticResource AppSurfaceBrush}"
-                    BorderBrush="{StaticResource AppBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="12">
-                    <Grid ColumnSpacing="16">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-
-                        <StackPanel Grid.Column="0" Spacing="5" VerticalAlignment="Center">
-                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                <FontIcon FontSize="15" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE968;" />
-                                <TextBlock FontSize="14.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="智美连接器本地适配（无 Hook 方案）" />
-                            </StackPanel>
-                            <TextBlock
-                                x:Name="LocalBridgeStatusText"
-                                FontSize="12.5"
-                                Foreground="{StaticResource TextSecondaryBrush}"
-                                Text="本地适配检测中..."
-                                TextWrapping="Wrap" />
-                            <TextBlock
-                                x:Name="WeComStatusText"
-                                FontSize="11.5"
-                                Foreground="{StaticResource TextMutedBrush}"
-                                Text="企业微信：检测中..."
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                            <Button
-                                x:Name="RefreshWeComButton"
-                                Height="32"
-                                Padding="12,0"
-                                Click="RefreshWeComButton_Click"
-                                Content="识别企业微信"
-                                FontSize="12"
-                                Style="{StaticResource SecondaryOutlineButtonStyle}" />
-                            <ToggleSwitch
-                                x:Name="LocalBridgeToggle"
-                                MinWidth="0"
-                                VerticalAlignment="Center"
-                                OffContent="已关闭"
-                                OnContent="运行中"
-                                Toggled="LocalBridgeToggle_Toggled" />
-                        </StackPanel>
-                    </Grid>
-                </Border>
-
-                <!-- Card 3: 3 Simple Status KPIs -->
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-
-                    <Border Grid.Column="0" Padding="16,13" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
-                        <StackPanel Spacing="3">
-                            <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="电脑微信状态" />
-                            <TextBlock x:Name="KpiWeChatText" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="检测中..." />
-                            <TextBlock x:Name="KpiWeChatSubText" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="自动识别运行中的电脑微信" TextTrimming="CharacterEllipsis" />
-                        </StackPanel>
-                    </Border>
-
-                    <Border Grid.Column="1" Padding="16,13" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
-                        <StackPanel Spacing="3">
-                            <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="已托管客户与群聊" />
-                            <TextBlock x:Name="KpiMonitoredText" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="0 客户 · 0 群" />
-                            <TextBlock FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="仅定向同步当前在线微信的已导入对象" />
-                        </StackPanel>
-                    </Border>
-
-                    <Border Grid.Column="2" Padding="16,13" Background="{StaticResource AppSurfaceBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="1" CornerRadius="10">
-                        <StackPanel Spacing="3">
-                            <TextBlock FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" Text="上次同步时间" />
-                            <TextBlock x:Name="KpiLastSyncText" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Text="尚未同步" />
-                            <TextBlock x:Name="KpiLastSyncSubText" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="检测到新消息后数秒内自动更新" TextTrimming="CharacterEllipsis" />
-                        </StackPanel>
-                    </Border>
-                </Grid>
-
-                <!-- Card 4: Linked WeChat Accounts Under This Employee -->
-                <Border
-                    Background="{StaticResource AppSurfaceBrush}"
-                    BorderBrush="{StaticResource AppBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="10">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-
-                        <Border Grid.Row="0" Padding="16,11" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
-                            <Grid ColumnSpacing="12">
-                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                    <FontIcon FontSize="13.5" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE716;" />
-                                    <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="本员工已关联的微信账号" />
-                                    <Border Padding="7,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8">
-                                        <TextBlock x:Name="LinkedAccountsCountText" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="0 个账号" />
-                                    </Border>
-                                </StackPanel>
-                                <TextBlock
-                                    HorizontalAlignment="Right"
-                                    VerticalAlignment="Center"
-                                    FontSize="11.5"
-                                    Foreground="{StaticResource TextMutedBrush}"
-                                    Text="切换电脑微信后自动归档，不同微信号的客户与群聊独立隔离" />
+                                    <ListView
+                                        x:Name="LinkedAccountsListView"
+                                        MaxHeight="220"
+                                        Padding="10,6"
+                                        SelectionMode="None"
+                                        Visibility="Collapsed">
+                                        <ListView.ItemContainerStyle>
+                                            <Style TargetType="ListViewItem">
+                                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                <Setter Property="Padding" Value="0,3" />
+                                                <Setter Property="MinHeight" Value="0" />
+                                            </Style>
+                                        </ListView.ItemContainerStyle>
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="models:WeChatAccountDto">
+                                                <Border Padding="10,8" Background="{StaticResource AppSurfaceAltBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="8">
+                                                    <Grid ColumnSpacing="10">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="34" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border Grid.Column="0" Width="34" Height="34" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="7">
+                                                            <Grid>
+                                                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="13" FontWeight="Bold" Foreground="{StaticResource BrandPrimaryBrush}" Text="{x:Bind AvatarInitial}" Visibility="{x:Bind AvatarInitialVisibility, Mode=OneWay}" />
+                                                                <Image Source="{x:Bind AvatarImage, Mode=OneWay}" Stretch="UniformToFill" Visibility="{x:Bind AvatarImageVisibility, Mode=OneWay}" />
+                                                            </Grid>
+                                                        </Border>
+                                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                                <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind DisplayName}" TextTrimming="CharacterEllipsis" />
+                                                                <Border Padding="5,1" Background="{x:Bind StatusBadgeBgBrush, Mode=OneWay}" CornerRadius="6">
+                                                                    <TextBlock FontSize="10" FontWeight="SemiBold" Foreground="{x:Bind StatusBadgeFgBrush, Mode=OneWay}" Text="{x:Bind StatusLabel}" />
+                                                                </Border>
+                                                            </StackPanel>
+                                                            <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind CountsSummary}" TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </Grid>
                             </Grid>
                         </Border>
 
-                        <Grid Grid.Row="1">
-                            <TextBlock
-                                x:Name="EmptyAccountsHint"
-                                Margin="16,20"
-                                HorizontalAlignment="Center"
-                                FontSize="12"
-                                Foreground="{StaticResource TextMutedBrush}"
-                                Text="暂未关联微信账号，点击上方「识别当前微信」或导入好友/群聊后将自动登记。"
-                                TextAlignment="Center"
-                                TextWrapping="Wrap" />
+                        <!-- Right: Discovered WeCom Enterprise Spaces -->
+                        <Border
+                            Grid.Column="1"
+                            Background="{StaticResource AppSurfaceBrush}"
+                            BorderBrush="{StaticResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <Border Grid.Row="0" Padding="14,10" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon FontSize="13" Foreground="{StaticResource BrandPrimaryBrush}" Glyph="&#xE731;" />
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="已识别企业微信空间" />
+                                        <Border Padding="6,1" Background="{StaticResource BrandSoftBgBrush}" CornerRadius="8">
+                                            <TextBlock x:Name="WeComCorpsCountText" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource BrandPrimaryBrush}" Text="0" />
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+
+                                <Grid Grid.Row="1">
+                                    <TextBlock
+                                        x:Name="EmptyWeComCorpsHint"
+                                        Margin="14,18"
+                                        HorizontalAlignment="Center"
+                                        FontSize="12"
+                                        Foreground="{StaticResource TextMutedBrush}"
+                                        Text="暂未读取到企业微信空间，确认企业微信已登录后点击右上角「刷新同步双端」。"
+                                        TextAlignment="Center"
+                                        TextWrapping="Wrap" />
+
+                                    <ListView
+                                        x:Name="WeComCorpsListView"
+                                        MaxHeight="220"
+                                        Padding="10,6"
+                                        SelectionMode="None"
+                                        Visibility="Collapsed">
+                                        <ListView.ItemContainerStyle>
+                                            <Style TargetType="ListViewItem">
+                                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                <Setter Property="Padding" Value="0,3" />
+                                                <Setter Property="MinHeight" Value="0" />
+                                            </Style>
+                                        </ListView.ItemContainerStyle>
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate x:DataType="x:String">
+                                                <Border Padding="10,8" Background="{StaticResource AppSurfaceAltBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="8">
+                                                    <TextBlock FontSize="12" Foreground="{StaticResource TextPrimaryBrush}" Text="{x:Bind}" TextWrapping="Wrap" />
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <!-- Row 3: Sync Preferences + Live Activity Log -->
+                    <Border
+                        Padding="16,12"
+                        Background="{StaticResource AppSurfaceBrush}"
+                        BorderBrush="{StaticResource AppBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                        <StackPanel Orientation="Horizontal" Spacing="20" VerticalAlignment="Center">
+                            <CheckBox x:Name="OptImagesCheck" Content="自动同步聊天图片" IsChecked="True" Checked="OptCheck_Changed" Unchecked="OptCheck_Changed" />
+                            <CheckBox x:Name="OptAvatarsCheck" Content="自动同步好友与群头像" IsChecked="True" Checked="OptCheck_Changed" Unchecked="OptCheck_Changed" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border
+                        Background="{StaticResource AppSurfaceBrush}"
+                        BorderBrush="{StaticResource AppBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="10">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Padding="16,10" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
+                                <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="双端实时监听动态" />
+                            </Border>
 
                             <ListView
-                                x:Name="LinkedAccountsListView"
-                                Padding="12,8"
-                                SelectionMode="None"
-                                Visibility="Collapsed">
-                                <ListView.ItemContainerTransitions>
-                                    <TransitionCollection />
-                                </ListView.ItemContainerTransitions>
+                                x:Name="ActivityLogListView"
+                                Grid.Row="1"
+                                MinHeight="160"
+                                MaxHeight="280"
+                                Padding="14,8"
+                                SelectionMode="None">
                                 <ListView.ItemContainerStyle>
                                     <Style TargetType="ListViewItem">
                                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -352,131 +470,13 @@
                                     </Style>
                                 </ListView.ItemContainerStyle>
                                 <ListView.ItemTemplate>
-                                    <DataTemplate x:DataType="models:WeChatAccountDto">
-                                        <Border
-                                            Padding="12,10"
-                                            Background="{StaticResource AppSurfaceAltBrush}"
-                                            BorderBrush="{StaticResource AppBorderSubtleBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="8">
-                                            <Grid ColumnSpacing="12">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="40" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-
-                                                <Border
-                                                    Grid.Column="0"
-                                                    Width="38"
-                                                    Height="38"
-                                                    VerticalAlignment="Center"
-                                                    Background="{StaticResource BrandSoftBgBrush}"
-                                                    BorderBrush="{StaticResource BrandSoftBorderBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="8">
-                                                    <Grid>
-                                                        <TextBlock
-                                                            HorizontalAlignment="Center"
-                                                            VerticalAlignment="Center"
-                                                            FontSize="15"
-                                                            FontWeight="Bold"
-                                                            Foreground="{StaticResource BrandPrimaryBrush}"
-                                                            Text="{x:Bind AvatarInitial}"
-                                                            Visibility="{x:Bind AvatarInitialVisibility, Mode=OneWay}" />
-                                                        <Image
-                                                            Source="{x:Bind AvatarImage, Mode=OneWay}"
-                                                            Stretch="UniformToFill"
-                                                            Visibility="{x:Bind AvatarImageVisibility, Mode=OneWay}" />
-                                                    </Grid>
-                                                </Border>
-
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                                                    <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
-                                                        <TextBlock
-                                                            FontSize="13.5"
-                                                            FontWeight="SemiBold"
-                                                            Foreground="{StaticResource TextPrimaryBrush}"
-                                                            Text="{x:Bind DisplayName}"
-                                                            TextTrimming="CharacterEllipsis" />
-                                                        <Border Padding="6,1" Background="{x:Bind StatusBadgeBgBrush, Mode=OneWay}" CornerRadius="7">
-                                                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                                                <Ellipse Width="6" Height="6" Fill="{x:Bind StatusDotBrush, Mode=OneWay}" />
-                                                                <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{x:Bind StatusBadgeFgBrush, Mode=OneWay}" Text="{x:Bind StatusLabel}" />
-                                                            </StackPanel>
-                                                        </Border>
-                                                    </StackPanel>
-
-                                                    <TextBlock
-                                                        FontSize="11.5"
-                                                        Foreground="{StaticResource TextMutedBrush}"
-                                                        Text="{x:Bind SubtitleLine}"
-                                                        TextTrimming="CharacterEllipsis" />
-
-                                                    <StackPanel Orientation="Horizontal" Spacing="10">
-                                                        <TextBlock FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}" Text="{x:Bind CountsSummary}" />
-                                                        <TextBlock FontSize="11" Foreground="{StaticResource TextMutedBrush}" Text="{x:Bind LastActiveLabel}" />
-                                                    </StackPanel>
-                                                </StackPanel>
-                                            </Grid>
-                                        </Border>
+                                    <DataTemplate x:DataType="x:String">
+                                        <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" IsTextSelectionEnabled="True" Text="{x:Bind}" TextWrapping="Wrap" />
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
                             </ListView>
                         </Grid>
-                    </Grid>
-                </Border>
-
-                <!-- Card 5: Simple Sync Preferences -->
-                <Border
-                    Padding="16,13"
-                    Background="{StaticResource AppSurfaceBrush}"
-                    BorderBrush="{StaticResource AppBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="10">
-                    <StackPanel Orientation="Horizontal" Spacing="20" VerticalAlignment="Center">
-                        <CheckBox x:Name="OptImagesCheck" Content="自动同步聊天图片" IsChecked="True" Checked="OptCheck_Changed" Unchecked="OptCheck_Changed" />
-                        <CheckBox x:Name="OptAvatarsCheck" Content="自动同步好友与群头像" IsChecked="True" Checked="OptCheck_Changed" Unchecked="OptCheck_Changed" />
-                    </StackPanel>
-                </Border>
-
-                <!-- Card 6: Recent Auto-Watch Activity -->
-                <Border
-                    Background="{StaticResource AppSurfaceBrush}"
-                    BorderBrush="{StaticResource AppBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="10">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-
-                        <Border Grid.Row="0" Padding="16,11" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="0,0,0,1">
-                            <TextBlock FontSize="13.5" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}" Text="自动监听动态" />
-                        </Border>
-
-                        <ListView
-                            x:Name="ActivityLogListView"
-                            Grid.Row="1"
-                            MinHeight="200"
-                            MaxHeight="340"
-                            Padding="14,8"
-                            SelectionMode="None">
-                            <ListView.ItemContainerStyle>
-                                <Style TargetType="ListViewItem">
-                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                    <Setter Property="Padding" Value="0,3" />
-                                    <Setter Property="MinHeight" Value="0" />
-                                </Style>
-                            </ListView.ItemContainerStyle>
-                            <ListView.ItemTemplate>
-                                <DataTemplate x:DataType="x:String">
-                                    <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" IsTextSelectionEnabled="True" Text="{x:Bind}" TextWrapping="Wrap" />
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
-                    </Grid>
-                </Border>
+                    </Border>
                 </StackPanel>
             </Grid>
         </ScrollViewer>
